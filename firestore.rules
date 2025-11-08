@@ -163,6 +163,24 @@ service cloud.firestore {
       // Only Cloud Functions can write (via Admin SDK)
       allow write: if false;
     }
+
+    // ========================================
+    // USER-SCOPED EMERGENCY CONTACTS (PER-ACCOUNT)
+    // ========================================
+    match /users/{userId}/emergency_contacts/{contactId} {
+      // Only the owner can read
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+
+      // Owner creates their own record; must set createdBy to their uid
+      allow create: if isAuthenticated()
+                    && request.auth.uid == userId
+                    && request.resource.data.createdBy == request.auth.uid;
+
+      // Only the owner can update/delete their own contact
+      allow update, delete: if isAuthenticated()
+                            && request.auth.uid == userId
+                            && resource.data.createdBy == request.auth.uid;
+    }
     
     // ========================================
     // DEFAULT: DENY ALL OTHER ACCESS
@@ -170,5 +188,6 @@ service cloud.firestore {
     match /{document=**} {
       allow read, write: if false;
     }
+
   }
 }

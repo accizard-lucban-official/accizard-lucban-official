@@ -24,7 +24,7 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import html2canvas from 'html2canvas';
 
 // Use the custom Mapbox access token for AcciZard Lucban
-mapboxgl.accessToken = 'pk.eyJ1IjoiYWNjaXphcmQtbHVjYmFuIiwiYSI6ImNtY3VhOHdxODAwcjcya3BzYTR2M25kcTEifQ.aBi4Zmkezyqa7Pfh519KbQ';
+mapboxgl.accessToken = 'pk.eyJ1IjoiYWNjaXphcmQtbHVjYmFuLW9mZmljaWFsIiwiYSI6ImNtaG93dTA2aDBnMG8ydm9vemd6a29sNzIifQ.j1N_NloJE19I2Mk4X3J2KA';
 
 export function DashboardStats() {
   const { subscribeToPins } = usePins();
@@ -914,7 +914,7 @@ export function DashboardStats() {
     if (mapContainer.current && !map.current) {
       map.current = new mapboxgl.Map({
         container: mapContainer.current,
-        style: 'mapbox://styles/accizard-lucban/cmh0vikyo00c501st1cprgxwc', // Custom AcciZard style (aligned with RiskMapPage)
+        style: 'mapbox://styles/accizard-lucban-official/cmhox8ita005o01sr1psmbgp6', // Custom AcciZard style (aligned with RiskMapPage)
         center: [121.5556, 14.1139], // Lucban, Quezon coordinates (aligned with RiskMapPage)
         zoom: 13,
         attributionControl: false

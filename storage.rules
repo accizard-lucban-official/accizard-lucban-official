@@ -1,146 +1,110 @@
+// Firebase Storage Security Rules
 rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
-    
+
     // ========================================
     // HELPER FUNCTIONS
     // ========================================
-    
-    // Check if user is authenticated
-    function isAuthenticated() {
-      return request.auth != null;
-    }
-    
-    // Check if file size is within limit (25MB)
-    function isValidSize() {
-      return request.resource.size < 25 * 1024 * 1024;
-    }
-    
-    // Check if file is an image
-    function isImage() {
-      return request.resource.contentType.matches('image/.*');
-    }
-    
-    // Check if file is a document
+    function isAuthenticated() { return request.auth != null; }
+    function isValidSize() { return request.resource.size < 25 * 1024 * 1024; } // 25MB
+    function isImage() { return request.resource.contentType.matches('image/.*'); }
     function isDocument() {
       return request.resource.contentType.matches('application/pdf') ||
              request.resource.contentType.matches('application/msword') ||
              request.resource.contentType.matches('application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     }
-    
-    // Check if file is a video
-    function isVideo() {
-      return request.resource.contentType.matches('video/.*');
-    }
-    
-    // Check if file is audio
-    function isAudio() {
-      return request.resource.contentType.matches('audio/.*');
-    }
-    
+    function isVideo() { return request.resource.contentType.matches('video/.*'); }
+    function isAudio() { return request.resource.contentType.matches('audio/.*'); }
+
     // ========================================
     // EXISTING RULES (PRESERVED)
     // ========================================
-    
-    // News file (read-only)
     match /news.json {
       allow read: if true;
       allow write: if false;
     }
-    
-    // Public uploads (logos, covers, etc.)
+
     match /accizard-uploads/{allPaths=**} {
       allow read: if true;
       allow write: if isAuthenticated();
     }
-    
-    // Web app profile pictures (singular: profile-picture) ← CRITICAL!
+
     match /profile-picture/{allPaths=**} {
       allow read: if true;
       allow write: if isAuthenticated();
     }
-    
-    // Mobile app profile pictures (plural: profile_pictures) ← CRITICAL!
+
     match /profile_pictures/{allPaths=**} {
       allow read: if true;
       allow write: if isAuthenticated();
     }
-    
-    // Report images (already working)
+
     match /report_images/{allPaths=**} {
       allow read: if true;
       allow write: if isAuthenticated();
     }
-    
-    // Valid ID images (underscore format for mobile compatibility)
+
     match /valid_ids/{allPaths=**} {
       allow read: if true;
       allow write: if isAuthenticated();
     }
-    
-    // ========================================
-    // CHAT ATTACHMENTS (ENHANCED WITH VALIDATION)
-    // ========================================
-    
-    // Chat attachments - enhanced with file type and size validation
-    // Now supports: images, documents, videos, and audio files
-    // Works with Silent Firebase Auth for admins
+
+    // Chat attachments
     match /chat_attachments/{allPaths=**} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && 
-                      (isImage() || isDocument() || isVideo() || isAudio()) && 
+      allow write: if isAuthenticated() &&
+                      (isImage() || isDocument() || isVideo() || isAudio()) &&
                       isValidSize();
       allow delete: if isAuthenticated();
     }
-    
-    // ========================================
-    // OPTIONAL: ENHANCED RULES WITH VALIDATION
-    // These match additional paths with proper validation
-    // ========================================
-    
-    // Profile pictures with validation (camelCase for web app)
+
+    // Optional enhanced paths
     match /profile-pictures-web/{userId}/{fileName} {
       allow read: if true;
-      allow write: if isAuthenticated() && 
-                      isImage() && 
-                      isValidSize();
+      allow write: if isAuthenticated() && isImage() && isValidSize();
     }
-    
-    // Valid IDs with validation (camelCase)
+
     match /validIds/{userId}/{fileName} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && 
-                      isImage() && 
-                      isValidSize();
+      allow write: if isAuthenticated() && isImage() && isValidSize();
     }
-    
-    // Announcements media
+
     match /announcements/{announcementId}/{fileName} {
       allow read: if true;
-      allow write: if isAuthenticated() && 
-                      (isImage() || isDocument()) && 
-                      isValidSize();
+      allow write: if isAuthenticated() && (isImage() || isDocument()) && isValidSize();
       allow delete: if isAuthenticated();
     }
-    
-    // Report media (alternative path if needed)
+
     match /reports/{reportId}/{fileName} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && 
-                      (isImage() || isDocument()) && 
-                      isValidSize();
+      allow write: if isAuthenticated() && (isImage() || isDocument()) && isValidSize();
+      allow delete: if isAuthenticated();
+    }
+
+    match /documents/{userId}/{documentType}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isDocument() && isValidSize();
+    }
+
+    // ========================================
+    // CUSTOM EMERGENCY CONTACT PHOTOS (ADDED)
+    // Path your app uses: custom_emergency_contacts/{contactId}.jpg
+    // ========================================
+    match /custom_emergency_contacts/{fileName} {
+      allow read: if true; // public read so images always load via download URL
+      allow write: if isAuthenticated() && isImage() && isValidSize();
       allow delete: if isAuthenticated();
     }
     
-    // Documents
-    match /documents/{userId}/{documentType}/{fileName} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && 
-                      isDocument() && 
-                      isValidSize();
-    }
-    
+    match /user_emergency_contacts/{userId}/{fileName} {
+  // Owner-only access
+  allow read: if request.auth != null && request.auth.uid == userId;
+  allow write: if request.auth != null && request.auth.uid == userId && request.resource.contentType.matches('image/.*') && request.resource.size < 25 * 1024 * 1024;
+  allow delete: if request.auth != null && request.auth.uid == userId;
+}
+
     // ========================================
     // DEFAULT: DENY ALL OTHER ACCESS
     // ========================================

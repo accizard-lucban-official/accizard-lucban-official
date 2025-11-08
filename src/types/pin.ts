@@ -35,6 +35,7 @@ export interface Pin {
   type: PinType;
   category: PinCategory;
   title: string;                  // Max 60 characters
+  description?: string;           // Max 120 characters
   
   // Geographic Data
   latitude: number;
@@ -55,6 +56,7 @@ export interface Pin {
 export interface CreatePinData {
   type: PinType;
   title: string;
+  description?: string;
   latitude: number;
   longitude: number;
   locationName: string;
@@ -65,6 +67,7 @@ export interface CreatePinData {
 export interface UpdatePinData {
   type?: PinType;
   title?: string;
+  description?: string;
   latitude?: number;
   longitude?: number;
   locationName?: string;

@@ -1130,8 +1130,11 @@ export function ManageUsersPage() {
                   </Button>
                 </DialogTrigger>
                 <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Add New Admin Account</DialogTitle>
+                  <DialogHeader className="border-b border-gray-200 pb-4">
+                    <DialogTitle className="flex items-center gap-2">
+                      <UserPlus className="h-5 w-5 text-[#FF4F0B]" />
+                      Add New Admin Account
+                    </DialogTitle>
                   </DialogHeader>
                   <div className="space-y-4">
                     <div>
@@ -1519,8 +1522,11 @@ export function ManageUsersPage() {
                                 </Button>
                                   </DialogTrigger>
                                   <DialogContent>
-                                    <DialogHeader>
-                                      <DialogTitle>Edit Admin Account</DialogTitle>
+                                    <DialogHeader className="border-b border-gray-200 pb-4">
+                                      <DialogTitle className="flex items-center gap-2">
+                                        <Edit className="h-5 w-5 text-[#FF4F0B]" />
+                                        Edit Admin Account
+                                      </DialogTitle>
                                     </DialogHeader>
                                     {editingAdmin && (
                                       <div className="space-y-4">
@@ -1835,8 +1841,11 @@ export function ManageUsersPage() {
                           </Button>
                         </DialogTrigger>
                         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-                          <DialogHeader>
-                            <DialogTitle>Add New Resident Account</DialogTitle>
+                          <DialogHeader className="border-b border-gray-200 pb-4">
+                            <DialogTitle className="flex items-center gap-2">
+                              <UserPlus className="h-5 w-5 text-[#FF4F0B]" />
+                              Add New Resident Account
+                            </DialogTitle>
                           </DialogHeader>
                           <div className="space-y-4">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -3041,8 +3050,11 @@ export function ManageUsersPage() {
         {/* Edit Admin Account Modal */}
         <Dialog open={!!editingAdmin} onOpenChange={() => {}}>
           <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Edit Admin Account</DialogTitle>
+            <DialogHeader className="border-b border-gray-200 pb-4">
+              <DialogTitle className="flex items-center gap-2">
+                <Edit className="h-5 w-5 text-[#FF4F0B]" />
+                Edit Admin Account
+              </DialogTitle>
             </DialogHeader>
             {editingAdmin && (
               <div className="space-y-4">
@@ -3118,8 +3130,11 @@ export function ManageUsersPage() {
         {/* Edit Resident Modal */}
         <Dialog open={isEditResidentOpen} onOpenChange={setIsEditResidentOpen}>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Edit Resident Information</DialogTitle>
+            <DialogHeader className="border-b border-gray-200 pb-4">
+              <DialogTitle className="flex items-center gap-2">
+                <Edit className="h-5 w-5 text-[#FF4F0B]" />
+                Edit Resident Information
+              </DialogTitle>
             </DialogHeader>
             {selectedResident && (
               <div className="space-y-4">

@@ -4,7 +4,7 @@
   },
   "storage": [
     {
-      "bucket": "accizard-lucban.appspot.com",
+      "bucket": "accizard-lucban-official-65ba3.firebasestorage.app",
       "rules": "storage.rules"
     }
   ],

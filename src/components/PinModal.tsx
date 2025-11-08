@@ -16,9 +16,10 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { MapPin, X, RotateCcw } from "lucide-react";
+import { MapPin, X, Type, FileText, MapPin as MapPinIcon, Navigation } from "lucide-react";
 import { Pin, PinType } from "@/types/pin";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -58,6 +59,7 @@ export interface PinFormData {
   id?: string;
   type: string;
   title: string;
+  description: string;
   latitude: number | null;
   longitude: number | null;
   locationName: string;
@@ -87,6 +89,7 @@ export function PinModal({
   const [formData, setFormData] = useState<PinFormData>({
     type: "",
     title: "",
+    description: "",
     latitude: null,
     longitude: null,
     locationName: "",
@@ -103,6 +106,7 @@ export function PinModal({
         id: existingPin.id,
         type: existingPin.type,
         title: existingPin.title,
+        description: existingPin.description || "",
         latitude: existingPin.latitude,
         longitude: existingPin.longitude,
         locationName: existingPin.locationName,
@@ -113,6 +117,7 @@ export function PinModal({
       setFormData(prev => ({
         type: prefillData.type || prev.type || "",
         title: prefillData.title || prev.title || "",
+        description: prefillData.description || prev.description || "",
         latitude: prefillData.latitude !== undefined ? prefillData.latitude : prev.latitude,
         longitude: prefillData.longitude !== undefined ? prefillData.longitude : prev.longitude,
         locationName: prefillData.locationName || prev.locationName || "",
@@ -129,6 +134,7 @@ export function PinModal({
       setFormData({
         type: "",
         title: "",
+        description: "",
         latitude: null,
         longitude: null,
         locationName: "",
@@ -154,6 +160,7 @@ export function PinModal({
     setFormData({
       type: "",
       title: "",
+      description: "",
       latitude: null,
       longitude: null,
       locationName: "",
@@ -199,9 +206,9 @@ export function PinModal({
         className={cn(
           "bg-white shadow-2xl transition-transform duration-300 ease-in-out",
           // Desktop: Right side overlay within map container
-          "md:absolute md:right-0 md:top-0 md:h-full md:w-[450px] md:z-50",
+          "md:absolute md:right-0 md:top-0 md:h-full md:w-[420px] lg:w-[450px] md:z-50",
           // Mobile: Bottom sheet (fixed for mobile)
-          "fixed bottom-0 left-0 right-0 max-h-[85vh] rounded-t-2xl z-50",
+          "fixed bottom-0 left-0 right-0 max-h-[90vh] rounded-t-2xl z-50",
           "md:rounded-none"
         )}
         style={{
@@ -211,7 +218,6 @@ export function PinModal({
             right: 0,
             top: 0,
             height: '100%',
-            width: '450px',
             zIndex: 50
           })
         }}
@@ -224,17 +230,17 @@ export function PinModal({
         )}
 
         {/* Header */}
-        <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 z-10">
-          <div className="flex items-center justify-between mb-2">
+        <div className="sticky top-0 bg-white border-b border-gray-200 px-4 sm:px-6 py-3 z-10">
+          <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <MapPin className="h-5 w-5 text-[#FF4F0B]" />
-              <h2 className="text-lg font-semibold">
+              <h2 className="text-lg font-semibold text-gray-900">
                 {mode === "create" ? "Add New Pin" : "Edit Pin"}
               </h2>
             </div>
             <div className="flex items-center gap-2">
               {isFromReport && (
-                <Badge variant="secondary">
+                <Badge variant="secondary" className="text-xs">
                   From Report
                 </Badge>
               )}
@@ -242,31 +248,31 @@ export function PinModal({
                 variant="ghost" 
                 size="icon"
                 onClick={onClose}
-                className="h-8 w-8"
+                className="h-8 w-8 hover:bg-brand-orange hover:text-white group"
               >
                 <X className="h-4 w-4" />
               </Button>
             </div>
           </div>
-          {mode === "create" && !isFromReport && (
-            <p className="text-sm text-gray-600">
-              Location has been set from your map click. Fill out the details below to complete the pin.
-            </p>
-          )}
         </div>
 
         {/* Scrollable Content */}
-        <div className="overflow-y-auto px-6 py-4" style={{ maxHeight: isMobile ? 'calc(85vh - 160px)' : 'calc(100vh - 140px)' }}>
-          <div className="space-y-4">
+        <div className="overflow-y-auto px-4 sm:px-6 pt-3 pb-4" style={{ maxHeight: isMobile ? 'calc(85vh - 140px)' : 'calc(100vh - 120px)' }}>
+          <div className="space-y-5">
           {/* Pin Type */}
-          <div className="space-y-2">
-            <Label htmlFor="pin-type">Pin Type</Label>
+          <div className="space-y-1.5">
+            <Label htmlFor="pin-type" className="text-sm font-medium text-gray-700">
+              Pin Type
+            </Label>
             <Select 
               value={formData.type} 
               onValueChange={(value) => setFormData({ ...formData, type: value })}
               disabled={isFromReport}
             >
-              <SelectTrigger className={cn(isFromReport && "bg-gray-50 cursor-not-allowed")}>
+              <SelectTrigger className={cn(
+                "h-10 border-gray-300 focus:border-black focus:ring-black/20",
+                isFromReport && "bg-gray-50 cursor-not-allowed"
+              )}>
                 <SelectValue placeholder="Select pin type" />
               </SelectTrigger>
               <SelectContent>
@@ -279,7 +285,7 @@ export function PinModal({
                     return (
                       <SelectItem key={type} value={type}>
                         <div className="flex items-center">
-                          <Icon className="h-4 w-4 mr-2" />
+                          <Icon className="h-4 w-4 mr-2 text-gray-500" />
                           {type}
                         </div>
                       </SelectItem>
@@ -296,7 +302,7 @@ export function PinModal({
                     return (
                       <SelectItem key={type} value={type}>
                         <div className="flex items-center">
-                          <Icon className="h-4 w-4 mr-2" />
+                          <Icon className="h-4 w-4 mr-2 text-gray-500" />
                           {type}
                         </div>
                       </SelectItem>
@@ -308,8 +314,10 @@ export function PinModal({
           </div>
 
           {/* Title */}
-          <div className="space-y-2">
-            <Label htmlFor="pin-title">Title</Label>
+          <div className="space-y-1.5">
+            <Label htmlFor="pin-title" className="text-sm font-medium text-gray-700">
+              Title
+            </Label>
             <div className="relative">
               <Input
                 id="pin-title"
@@ -322,103 +330,148 @@ export function PinModal({
                   }
                 }}
                 maxLength={60}
+                className="h-10 border-gray-300 focus:border-black focus:ring-black/20"
               />
-              <div className="text-xs text-gray-500 mt-1 text-right">
-                {formData.title.length}/60 characters
+              <div className="text-xs text-gray-500 mt-0.5 text-right">
+                <span className={formData.title.length === 60 ? "text-orange-600 font-medium" : ""}>
+                  {formData.title.length}/60
+                </span>
               </div>
             </div>
           </div>
 
-          {/* Location Name */}
-          <div className="space-y-2">
-            <Label htmlFor="location-name">Location Name</Label>
-            <Input
-              id="location-name"
-              placeholder="Location will be set automatically"
-              value={formData.locationName}
-              readOnly
-              className="bg-gray-50 cursor-not-allowed"
-            />
+          {/* Description */}
+          <div className="space-y-1.5">
+            <Label htmlFor="pin-description" className="text-sm font-medium text-gray-700">
+              Description
+            </Label>
+            <div className="relative">
+              <Textarea
+                id="pin-description"
+                placeholder="Enter pin description"
+                value={formData.description}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value.length <= 120) {
+                    setFormData({ ...formData, description: value });
+                  }
+                }}
+                maxLength={120}
+                rows={2}
+                className="resize-none border-gray-300 focus:border-black focus:ring-black/20 min-h-[60px]"
+              />
+              <div className="text-xs text-gray-500 mt-0.5 text-right">
+                <span className={formData.description.length === 120 ? "text-orange-600 font-medium" : ""}>
+                  {formData.description.length}/120
+                </span>
+              </div>
+            </div>
           </div>
 
-          {/* Coordinates */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label htmlFor="latitude">Latitude</Label>
+          {/* Location Section */}
+          <div className="space-y-3">
+            {/* Location Name */}
+            <div className="space-y-1.5">
+              <Label htmlFor="location-name" className="text-sm font-medium text-gray-700">
+                Location Name
+              </Label>
               <Input
-                id="latitude"
-                type="number"
-                step="any"
-                placeholder="0.000000"
-                value={formData.latitude || ''}
-                onChange={(e) => setFormData({ ...formData, latitude: parseFloat(e.target.value) || null })}
+                id="location-name"
+                placeholder="Location will be set automatically"
+                value={formData.locationName}
+                readOnly
+                className="bg-gray-50 cursor-not-allowed border-gray-200 h-10"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="longitude">Longitude</Label>
-              <Input
-                id="longitude"
-                type="number"
-                step="any"
-                placeholder="0.000000"
-                value={formData.longitude || ''}
-                onChange={(e) => setFormData({ ...formData, longitude: parseFloat(e.target.value) || null })}
-              />
+
+            {/* Coordinates */}
+            <div className="grid grid-cols-2 gap-2 sm:gap-3 mb-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="latitude" className="text-sm font-medium text-gray-700">
+                  Latitude
+                </Label>
+                <Input
+                  id="latitude"
+                  type="number"
+                  step="any"
+                  placeholder="0.000000"
+                  value={formData.latitude !== null && formData.latitude !== undefined ? formData.latitude.toString() : ''}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setFormData({ ...formData, latitude: val === '' ? null : parseFloat(val) || null });
+                  }}
+                  className="h-10 border-gray-300 focus:border-black focus:ring-black/20"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="longitude" className="text-sm font-medium text-gray-700">
+                  Longitude
+                </Label>
+                <Input
+                  id="longitude"
+                  type="number"
+                  step="any"
+                  placeholder="0.000000"
+                  value={formData.longitude !== null && formData.longitude !== undefined ? formData.longitude.toString() : ''}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setFormData({ ...formData, longitude: val === '' ? null : parseFloat(val) || null });
+                  }}
+                  className="h-10 border-gray-300 focus:border-black focus:ring-black/20"
+                />
+              </div>
             </div>
           </div>
 
           {/* Map Click Helper */}
           {isWaitingForMapClick && (
-            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-              <div className="flex items-center gap-2">
-                <MapPin className="h-4 w-4 text-blue-600" />
-                <p className="text-sm text-blue-800">
-                  Click on the map to set coordinates automatically
-                </p>
+            <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-start gap-2">
+                <MapPin className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-blue-900">
+                    Set Location on Map
+                  </p>
+                  <p className="text-xs text-blue-700 mt-0.5">
+                    Click on the map to set coordinates automatically
+                  </p>
+                </div>
               </div>
             </div>
           )}
 
-            {/* Report ID (if from report) */}
-            {formData.reportId && (
-              <div className="space-y-2">
-                <Label>Linked Report</Label>
-                <div className="p-2 bg-blue-50 border border-blue-200 rounded text-sm text-blue-900">
-                  Report ID: {formData.reportId}
-                </div>
+          {/* Report ID (if from report) */}
+          {formData.reportId && (
+            <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="space-y-0.5">
+                <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">
+                  Linked Report
+                </Label>
+                <p className="text-sm text-blue-800 font-mono">
+                  {formData.reportId}
+                </p>
               </div>
-            )}
+            </div>
+          )}
           </div>
         </div>
 
         {/* Action Buttons - Sticky Footer */}
-        <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4">
-          <div className="flex gap-3">
-            <Button 
-              variant="outline" 
-              size="icon"
-              onClick={handleReset} 
-              className="h-10 w-10"
-              disabled={isSaving}
-              title="Clear form"
-            >
-              <RotateCcw className="h-4 w-4" />
-            </Button>
-            <Button 
-              onClick={handleSave} 
-              className="flex-1 bg-[#FF4F0B] hover:bg-[#FF4F0B]/90"
-              disabled={!isValid() || isSaving}
-            >
-              {isSaving ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
-                  Saving...
-                </>
-              ) : (
-                mode === "create" ? "Add Pin" : "Save Changes"
-              )}
-            </Button>
-          </div>
+        <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 sm:px-6 py-2 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] h-auto">
+          <Button 
+            onClick={handleSave} 
+            className="w-full h-10 bg-[#FF4F0B] hover:bg-[#FF4F0B]/90 text-white font-medium shadow-sm hover:shadow-md transition-all"
+            disabled={!isValid() || isSaving}
+          >
+            {isSaving ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+                Saving...
+              </>
+            ) : (
+              mode === "create" ? "Add Pin" : "Save Changes"
+            )}
+          </Button>
         </div>
       </div>
     </>

@@ -660,8 +660,11 @@ export function AnnouncementsPage() {
                                 <TooltipContent>Edit</TooltipContent>
                               </Tooltip>
                               <DialogContent>
-                                <DialogHeader>
-                                  <DialogTitle>Edit Announcement</DialogTitle>
+                                <DialogHeader className="border-b border-gray-200 pb-4">
+                                  <DialogTitle className="flex items-center gap-2">
+                                    <Edit className="h-5 w-5 text-[#FF4F0B]" />
+                                    Edit Announcement
+                                  </DialogTitle>
                                 </DialogHeader>
                                 {editingAnnouncement && editingAnnouncement.id === announcement.id && (
                                   <div className="space-y-4">
@@ -888,8 +891,11 @@ export function AnnouncementsPage() {
         {/* New Announcement Dialog */}
         <Dialog open={isNewAnnouncementOpen} onOpenChange={setIsNewAnnouncementOpen}>
           <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Create New Announcement</DialogTitle>
+            <DialogHeader className="border-b border-gray-200 pb-4">
+              <DialogTitle className="flex items-center gap-2">
+                <Plus className="h-5 w-5 text-[#FF4F0B]" />
+                Create New Announcement
+              </DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
               <div>

@@ -107,6 +107,10 @@ export function usePins() {
         throw new Error("Title must be 60 characters or less");
       }
 
+      if (pinData.description && pinData.description.length > 120) {
+        throw new Error("Description must be 120 characters or less");
+      }
+
       if (pinData.latitude < -90 || pinData.latitude > 90) {
         throw new Error("Invalid latitude: must be between -90 and 90");
       }
@@ -129,6 +133,7 @@ export function usePins() {
         type: pinData.type,
         category: category,
         title: pinData.title.trim(),
+        description: pinData.description?.trim() || null,
         latitude: pinData.latitude,
         longitude: pinData.longitude,
         locationName: pinData.locationName || 'Unknown Location',
@@ -170,6 +175,10 @@ export function usePins() {
         throw new Error("Title must be 60 characters or less");
       }
 
+      if (updates.description && updates.description.length > 120) {
+        throw new Error("Description must be 120 characters or less");
+      }
+
       if (updates.latitude !== undefined && (updates.latitude < -90 || updates.latitude > 90)) {
         throw new Error("Invalid latitude: must be between -90 and 90");
       }
@@ -198,6 +207,7 @@ export function usePins() {
         updateData.category = getPinCategory(updates.type);
       }
       if (updates.title !== undefined) updateData.title = updates.title.trim();
+      if (updates.description !== undefined) updateData.description = updates.description.trim() || null;
       if (updates.latitude !== undefined) updateData.latitude = updates.latitude;
       if (updates.longitude !== undefined) updateData.longitude = updates.longitude;
       if (updates.locationName !== undefined) updateData.locationName = updates.locationName;
@@ -266,6 +276,7 @@ export function usePins() {
         type: data.type,
         category: data.category,
         title: data.title,
+        description: data.description,
         latitude: data.latitude,
         longitude: data.longitude,
         locationName: data.locationName,

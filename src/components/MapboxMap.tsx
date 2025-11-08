@@ -37,12 +37,165 @@ import MapboxGeocoder from '@mapbox/mapbox-gl-geocoder';
 import '@mapbox/mapbox-gl-geocoder/dist/mapbox-gl-geocoder.css';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Info } from 'lucide-react';
+import { Info, Layers } from 'lucide-react';
 import { ensureOk } from '@/lib/utils';
 import { Pin } from '@/types/pin';
 
 // Use the custom Mapbox access token for AcciZard Lucban
-mapboxgl.accessToken = 'pk.eyJ1IjoiYWNjaXphcmQtbHVjYmFuIiwiYSI6ImNtY3VhOHdxODAwcjcya3BzYTR2M25kcTEifQ.aBi4Zmkezyqa7Pfh519KbQ';
+mapboxgl.accessToken = 'pk.eyJ1IjoiYWNjaXphcmQtbHVjYmFuLW9mZmljaWFsIiwiYSI6ImNtaG93dTA2aDBnMG8ydm9vemd6a29sNzIifQ.j1N_NloJE19I2Mk4X3J2KA';
+
+// Custom Mapbox Control for Legend
+class LegendControl {
+  private _container: HTMLDivElement;
+  private _onClick: () => void;
+
+  constructor(onClick: () => void) {
+    this._onClick = onClick;
+    this._container = document.createElement('div');
+    this._container.className = 'mapboxgl-ctrl mapboxgl-ctrl-group';
+    this._updateButton();
+  }
+
+  private _updateButton() {
+    this._container.innerHTML = '';
+    const button = document.createElement('button');
+    button.className = 'mapboxgl-ctrl-icon';
+    button.type = 'button';
+    button.title = 'Show map legend';
+    button.setAttribute('aria-label', 'Show map legend');
+    button.style.display = 'flex';
+    button.style.alignItems = 'center';
+    button.style.justifyContent = 'center';
+    
+    // Create SVG icon (Info icon)
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', '18');
+    svg.setAttribute('height', '18');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('cx', '12');
+    circle.setAttribute('cy', '12');
+    circle.setAttribute('r', '10');
+    
+    const line1 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line1.setAttribute('x1', '12');
+    line1.setAttribute('y1', '16');
+    line1.setAttribute('x2', '12');
+    line1.setAttribute('y2', '12');
+    
+    const line2 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line2.setAttribute('x1', '12');
+    line2.setAttribute('y1', '8');
+    line2.setAttribute('x2', '12.01');
+    line2.setAttribute('y2', '8');
+    
+    svg.appendChild(circle);
+    svg.appendChild(line1);
+    svg.appendChild(line2);
+    
+    button.appendChild(svg);
+    button.onclick = () => {
+      this._onClick();
+    };
+    
+    this._container.appendChild(button);
+  }
+
+  onAdd(map: mapboxgl.Map) {
+    return this._container;
+  }
+
+  onRemove() {
+    this._container.parentNode?.removeChild(this._container);
+  }
+}
+
+// Custom Mapbox Control for Style Toggle
+class StyleToggleControl {
+  private _container: HTMLDivElement;
+  private _currentStyle: 'streets' | 'satellite';
+  private _onStyleChange: (style: 'streets' | 'satellite') => void;
+
+  constructor(currentStyle: 'streets' | 'satellite', onStyleChange: (style: 'streets' | 'satellite') => void) {
+    this._currentStyle = currentStyle;
+    this._onStyleChange = onStyleChange;
+    this._container = document.createElement('div');
+    this._container.className = 'mapboxgl-ctrl mapboxgl-ctrl-group';
+    this._updateButton();
+  }
+
+  private _updateButton() {
+    this._container.innerHTML = '';
+    const button = document.createElement('button');
+    button.className = 'mapboxgl-ctrl-icon';
+    button.type = 'button';
+    button.title = `Switch to ${this._currentStyle === 'streets' ? 'Satellite' : 'Streets'} view`;
+    button.setAttribute('aria-label', `Switch to ${this._currentStyle === 'streets' ? 'Satellite' : 'Streets'} view`);
+    
+    // Create SVG icon
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', '18');
+    svg.setAttribute('height', '18');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    
+    if (this._currentStyle === 'streets') {
+      // Satellite icon (grid)
+      const path1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path1.setAttribute('d', 'M3 3h18v18H3z');
+      const path2 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path2.setAttribute('d', 'M3 12h18');
+      const path3 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path3.setAttribute('d', 'M12 3v18');
+      svg.appendChild(path1);
+      svg.appendChild(path2);
+      svg.appendChild(path3);
+    } else {
+      // Streets icon (search/map)
+      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('cx', '11');
+      circle.setAttribute('cy', '11');
+      circle.setAttribute('r', '8');
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', 'm21 21-4.35-4.35');
+      svg.appendChild(circle);
+      svg.appendChild(path);
+    }
+    
+    button.appendChild(svg);
+    button.onclick = () => {
+      const newStyle = this._currentStyle === 'streets' ? 'satellite' : 'streets';
+      this._currentStyle = newStyle;
+      this._onStyleChange(newStyle);
+      this._updateButton();
+    };
+    
+    this._container.appendChild(button);
+  }
+
+  onAdd(map: mapboxgl.Map) {
+    return this._container;
+  }
+
+  onRemove() {
+    this._container.parentNode?.removeChild(this._container);
+  }
+
+  updateStyle(newStyle: 'streets' | 'satellite') {
+    this._currentStyle = newStyle;
+    this._updateButton();
+  }
+}
 
 interface Marker {
   id: string;
@@ -58,13 +211,20 @@ interface Marker {
 }
 
 interface MapboxMapProps {
-  onMapClick?: (lngLat: { lng: number; lat: number }) => void;
+  onMapClick?: (lngLat: { lng: number; lat: number }, event?: mapboxgl.MapMouseEvent) => void;
   showHeatmap?: boolean;
   center?: [number, number];
   zoom?: number;
   activeFilters?: {
     accidentTypes?: string[];
     facilityTypes?: string[];
+    layerFilters?: {
+      barangay?: boolean;
+      barangayLabel?: boolean;
+      roadNetwork?: boolean;
+      waterways?: boolean;
+      traffic?: boolean;
+    };
   };
   singleMarker?: Marker;
   pins?: Pin[]; // Array of pins from database to display
@@ -82,6 +242,8 @@ interface MapboxMapProps {
   externalStyle?: 'streets' | 'satellite'; // External style control
   // When true, removes glow/pulse from single marker
   disableSingleMarkerPulse?: boolean;
+  onLegendClick?: () => void; // Callback when legend button is clicked
+  isAddPlacemarkMode?: boolean; // When true, shows marker cursor and allows placing placemarks
 }
 
 // Sample data for markers - currently empty, will be populated from database
@@ -128,7 +290,9 @@ export function MapboxMap({
   hideStyleToggle = false, // Default to false
   onStyleChange, // Optional callback
   externalStyle, // Optional external control
-  disableSingleMarkerPulse = false
+  disableSingleMarkerPulse = false,
+  onLegendClick, // Optional callback for legend button
+  isAddPlacemarkMode = false // Optional add placemark mode
 }: MapboxMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
@@ -136,21 +300,37 @@ export function MapboxMap({
   const [mapError, setMapError] = useState<string | null>(null);
   const markersRef = useRef<mapboxgl.Marker[]>([]);
   const popupRef = useRef<mapboxgl.Popup | null>(null);
+  const hoverPopupRef = useRef<mapboxgl.Popup | null>(null);
+  const tilesetHoverPopupRef = useRef<mapboxgl.Popup | null>(null);
   const geocoderRef = useRef<MapboxGeocoder | null>(null);
   const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
   const [travelTime, setTravelTime] = useState<{duration: number, distance: number} | null>(null);
   const [routeData, setRouteData] = useState<any>(null);
   const [showRoute, setShowRoute] = useState(false);
   const [mapStyle, setMapStyle] = useState<'streets' | 'satellite'>('streets');
+  const styleToggleControlRef = useRef<StyleToggleControl | null>(null);
+  const legendControlRef = useRef<LegendControl | null>(null);
+  const cursorElementRef = useRef<HTMLDivElement | null>(null);
+  const onMapClickRef = useRef(onMapClick);
+  const mapClickHandlerRef = useRef<((e: mapboxgl.MapMouseEvent) => void) | null>(null);
   
   // Use external style if provided, otherwise use internal state
   const currentStyle = externalStyle || mapStyle;
+
+  // Keep onMapClick ref updated
+  useEffect(() => {
+    onMapClickRef.current = onMapClick;
+  }, [onMapClick]);
   
   // Handle style change
   const handleStyleChange = (newStyle: 'streets' | 'satellite') => {
     setMapStyle(newStyle);
     if (onStyleChange) {
       onStyleChange(newStyle);
+    }
+    // Update control button if it exists
+    if (styleToggleControlRef.current) {
+      styleToggleControlRef.current.updateStyle(newStyle);
     }
   };
 
@@ -287,14 +467,6 @@ export function MapboxMap({
       el.style.filter = 'drop-shadow(0 0 8px rgba(255, 79, 11, 0.6))';
     }
     
-    console.log('Created custom marker element:', {
-      type,
-      isSingleMarker,
-      width: el.style.width,
-      height: el.style.height,
-      imageUrl: getMarkerImageUrl(type)
-    });
-    
     return el;
   };
 
@@ -356,6 +528,52 @@ export function MapboxMap({
             </button>
           </div>
         ` : ''}
+      </div>
+    `;
+  };
+
+  // Function to create hover popup content (simpler info-only version)
+  const createHoverPopupContent = (pin: Pin | Marker) => {
+    const description = 'description' in pin ? pin.description : undefined;
+    const locationName = 'locationName' in pin ? pin.locationName : (pin.description || '');
+    const latitude = 'latitude' in pin ? pin.latitude : (pin.coordinates?.[1] || 0);
+    const longitude = 'longitude' in pin ? pin.longitude : (pin.coordinates?.[0] || 0);
+    
+    return `
+      <div class="min-w-[240px] max-w-[320px]">
+        <!-- Header Section -->
+        <div class="px-4 pt-3 pb-2.5 border-b border-gray-200 bg-gray-50/50">
+          <div class="flex items-start justify-between gap-2 mb-2">
+            <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold uppercase tracking-wide" style="background-color: rgba(249, 115, 22, 0.1); color: #f97316; border: 1px solid rgba(249, 115, 22, 0.2);">
+              ${pin.type}
+            </span>
+          </div>
+          <h4 class="text-base font-bold text-gray-900 break-words leading-tight pr-2">${pin.title}</h4>
+        </div>
+        
+        <!-- Content Section -->
+        <div class="px-4 py-3 space-y-3 text-sm">
+          ${description ? `
+            <div class="space-y-1">
+              <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Description</div>
+              <div class="text-gray-700 break-words leading-relaxed">${description}</div>
+            </div>
+          ` : ''}
+          
+          ${locationName ? `
+            <div class="space-y-1 ${description ? 'pt-1 border-t border-gray-100' : ''}">
+              <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Location</div>
+              <div class="text-gray-700 break-words leading-relaxed text-sm">${locationName}</div>
+            </div>
+          ` : ''}
+          
+          <div class="space-y-1 ${(description || locationName) ? 'pt-1 border-t border-gray-100' : ''}">
+            <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Coordinates</div>
+            <div class="text-gray-600 font-mono text-xs break-all leading-relaxed">
+              ${latitude.toFixed(6)}, ${longitude.toFixed(6)}
+            </div>
+          </div>
+        </div>
       </div>
     `;
   };
@@ -597,7 +815,6 @@ export function MapboxMap({
       try {
         const location = await getUserLocation();
         setUserLocation(location);
-        console.log('User location obtained:', location);
       } catch (error) {
         console.error('Error getting user location:', error);
         // Don't set error state, just log it - travel time will be unavailable
@@ -611,23 +828,18 @@ export function MapboxMap({
   useEffect(() => {
     const initializeMap = () => {
       if (!mapContainer.current) {
-        console.log('Map container not ready');
         return;
       }
 
       // Check if Mapbox access token is available
       if (!mapboxgl.accessToken) {
-        console.error('Mapbox access token is not available');
         setMapError('Mapbox access token is not configured');
         return;
       }
 
-      console.log('Initializing map with center:', center, 'zoom:', zoom);
-
       // Set a timeout to handle cases where map doesn't load
       const loadTimeout = setTimeout(() => {
         if (!mapLoaded) {
-          console.error('Map load timeout');
           setMapError('Map failed to load within timeout');
         }
       }, 10000); // 10 second timeout
@@ -640,7 +852,7 @@ export function MapboxMap({
         }
 
         const styleUrl = currentStyle === 'streets' 
-          ? 'mapbox://styles/accizard-lucban/cmh0vikyo00c501st1cprgxwc'
+          ? 'mapbox://styles/accizard-lucban-official/cmhox8ita005o01sr1psmbgp6'
           : 'mapbox://styles/mapbox/satellite-v9';
         
         map.current = new mapboxgl.Map({
@@ -652,10 +864,10 @@ export function MapboxMap({
 
         // Add built-in controls if enabled
         if (showControls) {
-          // Add navigation controls (zoom in/out, rotate, pitch)
-          map.current.addControl(new mapboxgl.NavigationControl(), 'top-right');
+          // Add navigation controls (zoom in/out, rotate, pitch) at bottom-right
+          map.current.addControl(new mapboxgl.NavigationControl(), 'bottom-right');
           
-          // Add geolocate control (current location button)
+          // Add geolocate control (current location button) at bottom-right
           map.current.addControl(
             new mapboxgl.GeolocateControl({
               positionOptions: {
@@ -664,8 +876,14 @@ export function MapboxMap({
               trackUserLocation: true,
               showUserHeading: true
             }),
-            'top-right'
+            'bottom-right'
           );
+        }
+
+        // Add legend control if callback provided
+        if (onLegendClick) {
+          legendControlRef.current = new LegendControl(onLegendClick);
+          map.current.addControl(legendControlRef.current, 'bottom-right');
         }
 
         // Add geocoder if enabled
@@ -735,58 +953,121 @@ export function MapboxMap({
         }
 
         map.current.on('load', () => {
-          console.log('Map loaded successfully');
           clearTimeout(loadTimeout);
           setMapLoaded(true);
           setMapError(null);
+
+          // Hide all layers except lucban-boundary on initial load
+          const allLayers = map.current.getStyle().layers;
+          allLayers.forEach((layer: any) => {
+            try {
+              // Keep lucban-boundary visible, hide everything else
+              if (layer.id !== 'lucban-boundary') {
+                if (map.current && map.current.getLayer(layer.id)) {
+                  map.current.setLayoutProperty(layer.id, 'visibility', 'none');
+                }
+              }
+            } catch (error) {
+              // Some layers might not support visibility property, skip them
+              console.warn(`Could not hide layer ${layer.id}:`, error);
+            }
+          });
+
+          // Add traffic source and layer (similar to dashboard) - only for streets style
+          if (currentStyle === 'streets') {
+            if (!map.current.getSource('mapbox-traffic')) {
+              map.current.addSource('mapbox-traffic', {
+                type: 'vector',
+                url: 'mapbox://mapbox.mapbox-traffic-v1'
+              });
+            }
+
+            // Add traffic layer (hidden by default)
+            if (!map.current.getLayer('traffic')) {
+              map.current.addLayer({
+                id: 'traffic',
+                type: 'line',
+                source: 'mapbox-traffic',
+                'source-layer': 'traffic',
+                paint: {
+                  'line-width': 2,
+                  'line-color': [
+                    'case',
+                    ['==', ['get', 'congestion'], 'low'], '#4ade80',
+                    ['==', ['get', 'congestion'], 'moderate'], '#fbbf24',
+                    ['==', ['get', 'congestion'], 'heavy'], '#f87171',
+                    ['==', ['get', 'congestion'], 'severe'], '#dc2626',
+                    '#94a3b8'
+                  ]
+                },
+                layout: {
+                  'visibility': 'none'
+                }
+              });
+            }
+          }
         });
 
         map.current.on('error', (e) => {
-          console.error('Map error:', e);
+          // Map error handled by error state
           clearTimeout(loadTimeout);
           setMapError('Failed to load map');
         });
 
-        if (onMapClick) {
-          map.current.on('click', async (e) => {
-            // Only center and zoom if directions are enabled
-            if (showDirections) {
-              // Center the map on the clicked location
-              map.current.flyTo({
-                center: [e.lngLat.lng, e.lngLat.lat],
-                zoom: 12, // Zoom in closer to the clicked location
-                essential: true
-              });
+        // Set up click handler
+        const handleMapClick = async (e: mapboxgl.MapMouseEvent) => {
+          // Only center and zoom if directions are enabled
+          if (showDirections) {
+            // Center the map on the clicked location
+            map.current.flyTo({
+              center: [e.lngLat.lng, e.lngLat.lat],
+              zoom: 12, // Zoom in closer to the clicked location
+              essential: true
+            });
 
-              // Display route if user location is available
-              if (userLocation) {
-                try {
-                  const routeData = await calculateTravelTime(
-                    { lat: userLocation.lat, lng: userLocation.lng },
-                    { lat: e.lngLat.lat, lng: e.lngLat.lng }
-                  );
-                  
-                  if (routeData && routeData.routeData) {
-                    setRouteData(routeData.routeData);
-                    setShowRoute(true);
-                    displayRoute(routeData.routeData);
-                  }
-                } catch (error) {
-                  console.error('Error calculating route:', error);
+            // Display route if user location is available
+            if (userLocation) {
+              try {
+                const routeData = await calculateTravelTime(
+                  { lat: userLocation.lat, lng: userLocation.lng },
+                  { lat: e.lngLat.lat, lng: e.lngLat.lng }
+                );
+                
+                if (routeData && routeData.routeData) {
+                  setRouteData(routeData.routeData);
+                  setShowRoute(true);
+                  displayRoute(routeData.routeData);
                 }
+              } catch (error) {
+                console.error('Error calculating route:', error);
               }
             }
-            
-            onMapClick(e.lngLat);
-          });
+          }
+          
+          // Call the callback using ref to get latest version
+          if (onMapClickRef.current) {
+            onMapClickRef.current(e.lngLat, e);
+          }
+        };
+
+        // Store handler in ref for cleanup
+        mapClickHandlerRef.current = handleMapClick;
+
+        if (onMapClick) {
+          map.current.on('click', handleMapClick);
         }
 
         return () => {
           clearTimeout(loadTimeout);
-          if (geocoderRef.current) {
-            geocoderRef.current = null;
-          }
           if (map.current) {
+            // Remove click listener
+            if (mapClickHandlerRef.current) {
+              map.current.off('click', mapClickHandlerRef.current);
+              mapClickHandlerRef.current = null;
+            }
+            if (geocoderRef.current) {
+              geocoderRef.current = null;
+            }
             map.current.remove();
             map.current = null;
           }
@@ -804,6 +1085,24 @@ export function MapboxMap({
     return () => {
       clearTimeout(timer);
       if (map.current) {
+        // Remove legend control before removing map
+        if (legendControlRef.current) {
+          try {
+            map.current.removeControl(legendControlRef.current);
+          } catch (e) {
+            // Control might not be added yet
+          }
+          legendControlRef.current = null;
+        }
+        // Remove style toggle control before removing map
+        if (styleToggleControlRef.current) {
+          try {
+            map.current.removeControl(styleToggleControlRef.current);
+          } catch (e) {
+            // Control might not be added yet
+          }
+          styleToggleControlRef.current = null;
+        }
         map.current.remove();
         map.current = null;
       }
@@ -817,11 +1116,9 @@ export function MapboxMap({
     // Don't auto-center if we're in location selection mode (showOnlyCurrentLocation)
     // This allows the map to stay centered on user-selected locations
     if (showOnlyCurrentLocation) {
-      console.log('Skipping auto-center in location selection mode');
       return;
     }
 
-    console.log('Flying to map center:', center, 'zoom:', zoom);
     // Use flyTo for smooth animation
     map.current.flyTo({
       center: center,
@@ -838,31 +1135,35 @@ export function MapboxMap({
     // Clear existing markers
     markersRef.current.forEach(marker => marker.remove());
     markersRef.current = [];
+    
+    // Clear hover popup if it exists
+    if (hoverPopupRef.current) {
+      hoverPopupRef.current.remove();
+      hoverPopupRef.current = null;
+    }
+    
     if (popupRef.current) {
       popupRef.current.remove();
     }
 
     // Handle single marker (from database)
     if (singleMarker) {
-      console.log('=== MAPBOX MARKER RENDER ===');
-      console.log('Full singleMarker object:', singleMarker);
-      console.log('Coordinates array:', singleMarker.coordinates);
-      console.log('Individual lat/lng:', { lat: singleMarker.latitude, lng: singleMarker.longitude });
+      console.log("=== RENDERING SINGLE MARKER ===");
+      console.log("Single marker data:", singleMarker);
+      console.log("Coordinates:", singleMarker.coordinates);
       
       // Validate coordinates
       const [lng, lat] = singleMarker.coordinates;
-      console.log('Destructured from array - lng:', lng, 'lat:', lat);
-      
+      console.log("Parsed coordinates - lng:", lng, "lat:", lat);
       if (isNaN(lng) || isNaN(lat) || lng < -180 || lng > 180 || lat < -90 || lat > 90) {
-        console.error('❌ Invalid marker coordinates - aborting marker creation');
-        console.error('Invalid values:', { lng, lat, marker: singleMarker });
+        console.error("Invalid coordinates - lng:", lng, "lat:", lat);
         return;
       }
       
-      console.log('✅ Coordinates valid, creating custom marker...');
-      
+      console.log("Coordinates valid, creating marker element...");
       // Create custom marker element
       const el = createMarkerElement(singleMarker.type, true, !disableSingleMarkerPulse);
+      console.log("Marker element created, adding to map...");
       
       // Create Mapbox marker with custom element
       const markerInstance = new mapboxgl.Marker({
@@ -872,9 +1173,11 @@ export function MapboxMap({
       .setLngLat(singleMarker.coordinates)
       .addTo(map.current);
       
+      console.log("Marker added to map at:", singleMarker.coordinates);
+      console.log("Marker instance:", markerInstance);
+      console.log("Map current:", map.current);
       markersRef.current.push(markerInstance);
       
-      console.log('✅ Custom marker added at:', singleMarker.coordinates);
       
       // Add click event to show popup
       el.addEventListener('click', async () => {
@@ -896,26 +1199,9 @@ export function MapboxMap({
         popupRef.current = popup;
       });
       
-      // Debug marker wrapper
-      setTimeout(() => {
-        const allMarkers = document.querySelectorAll('.mapboxgl-marker');
-        console.log('Total markers on map:', allMarkers.length);
-        allMarkers.forEach((marker, index) => {
-          const computedStyle = window.getComputedStyle(marker);
-          console.log(`Marker ${index}:`, {
-            element: marker,
-            classes: marker.className,
-            transform: computedStyle.transform,
-            position: computedStyle.position,
-            width: computedStyle.width,
-            height: computedStyle.height
-          });
-        });
-      }, 100);
 
       // Add current location marker if available and not showing only current location
       if (userLocation && !showOnlyCurrentLocation) {
-        console.log('Adding current location marker at:', userLocation);
         
         const currentLocationEl = document.createElement('div');
         currentLocationEl.className = 'current-location-marker';
@@ -944,10 +1230,10 @@ export function MapboxMap({
         clickedLocationEl.className = 'clicked-location-marker';
         clickedLocationEl.style.width = '28px';
         clickedLocationEl.style.height = '28px';
-        clickedLocationEl.style.backgroundColor = '#FF4F0B';
+        clickedLocationEl.style.backgroundColor = '#f97316'; // brand-orange
         clickedLocationEl.style.borderRadius = '50%';
         clickedLocationEl.style.border = '3px solid white';
-        clickedLocationEl.style.boxShadow = '0 0 12px rgba(255, 79, 11, 0.6)';
+        clickedLocationEl.style.boxShadow = '0 0 12px rgba(249, 115, 22, 0.6)'; // brand-orange with opacity
         clickedLocationEl.style.cursor = 'pointer';
         clickedLocationEl.title = 'Selected location';
 
@@ -1036,7 +1322,6 @@ export function MapboxMap({
 
     // Render pins from database
     if (pins && pins.length > 0) {
-      console.log('Rendering database pins:', pins.length);
       
       pins.forEach(pin => {
         // Create marker element
@@ -1050,8 +1335,42 @@ export function MapboxMap({
         .setLngLat([pin.longitude, pin.latitude])
         .addTo(map.current!);
 
+        // Add hover event to show info popup
+        el.addEventListener('mouseenter', () => {
+          // Remove any existing hover popup
+          if (hoverPopupRef.current) {
+            hoverPopupRef.current.remove();
+          }
+
+          // Create hover popup
+          hoverPopupRef.current = new mapboxgl.Popup({ 
+            offset: 25,
+            closeButton: false,
+            closeOnClick: false,
+            className: 'custom-popup hover-popup',
+            maxWidth: '320px'
+          })
+          .setLngLat([pin.longitude, pin.latitude])
+          .setHTML(createHoverPopupContent(pin))
+          .addTo(map.current!);
+        });
+
+        // Remove hover popup on mouse leave
+        el.addEventListener('mouseleave', () => {
+          if (hoverPopupRef.current) {
+            hoverPopupRef.current.remove();
+            hoverPopupRef.current = null;
+          }
+        });
+
         // Add click event to show popup
         el.addEventListener('click', async () => {
+          // Remove hover popup when clicking
+          if (hoverPopupRef.current) {
+            hoverPopupRef.current.remove();
+            hoverPopupRef.current = null;
+          }
+          
           if (popupRef.current) {
             popupRef.current.remove();
           }
@@ -1061,7 +1380,7 @@ export function MapboxMap({
             id: pin.id,
             type: pin.type,
             title: pin.title,
-            description: pin.locationName,
+            description: pin.description || pin.locationName,
             reportId: pin.reportId,
             coordinates: [pin.longitude, pin.latitude],
             locationName: pin.locationName,
@@ -1105,8 +1424,42 @@ export function MapboxMap({
         .setLngLat(marker.coordinates)
         .addTo(map.current!);
 
+      // Add hover event to show info popup
+      el.addEventListener('mouseenter', () => {
+        // Remove any existing hover popup
+        if (hoverPopupRef.current) {
+          hoverPopupRef.current.remove();
+        }
+
+        // Create hover popup
+        hoverPopupRef.current = new mapboxgl.Popup({ 
+          offset: [0, -10],
+          closeButton: false,
+          closeOnClick: false,
+          className: 'custom-popup hover-popup',
+          maxWidth: '320px'
+        })
+        .setLngLat(marker.coordinates)
+        .setHTML(createHoverPopupContent(marker))
+        .addTo(map.current!);
+      });
+
+      // Remove hover popup on mouse leave
+      el.addEventListener('mouseleave', () => {
+        if (hoverPopupRef.current) {
+          hoverPopupRef.current.remove();
+          hoverPopupRef.current = null;
+        }
+      });
+
       // Add click event to marker
       el.addEventListener('click', async () => {
+        // Remove hover popup when clicking
+        if (hoverPopupRef.current) {
+          hoverPopupRef.current.remove();
+          hoverPopupRef.current = null;
+        }
+        
         if (popupRef.current) {
           popupRef.current.remove();
         }
@@ -1229,7 +1582,6 @@ export function MapboxMap({
           }
         });
 
-        console.log('Heatmap layer added with', features.length, 'points');
       }
     } else {
       // Remove heatmap layer and source when toggled off
@@ -1239,39 +1591,366 @@ export function MapboxMap({
       if (map.current.getSource('heatmap')) {
         map.current.removeSource('heatmap');
       }
-      console.log('Heatmap layer removed');
     }
   }, [showHeatmap, mapLoaded, pins]);
 
+  // Toggle Mapbox layers based on layerFilters
+  useEffect(() => {
+    if (!map.current || !mapLoaded || !activeFilters?.layerFilters) return;
+
+    const layerFilters = activeFilters.layerFilters;
+
+    // Helper function to toggle layer visibility
+    const toggleLayer = (layerId: string, visible: boolean) => {
+      try {
+        if (map.current && map.current.getLayer(layerId)) {
+          map.current.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
+        }
+      } catch (error) {
+        console.warn(`Could not toggle layer ${layerId}:`, error);
+      }
+    };
+
+    // Toggle barangay boundaries (lucban-brgys) and fill (lucban-fill)
+    // Note: lucban-boundary stays visible (not controlled by these toggles)
+    const barangayVisible = layerFilters.barangay ?? false;
+    toggleLayer('lucban-brgys', barangayVisible);
+    toggleLayer('lucban-fill', barangayVisible); // Toggle fill layer together with boundaries
+
+    // Toggle barangay labels (lucban-brgy-names)
+    toggleLayer('lucban-brgy-names', layerFilters.barangayLabel ?? false);
+
+    // Toggle waterways (waterway)
+    toggleLayer('waterway', layerFilters.waterways ?? false);
+
+    // Toggle road network - try common layer names
+    // Note: The actual layer name may vary, common names: 'road', 'roads', 'road-network', 'highway'
+    const roadLayerNames = ['road', 'roads', 'road-network', 'highway', 'road-label'];
+    roadLayerNames.forEach(layerName => {
+      try {
+        if (map.current && map.current.getLayer(layerName)) {
+          toggleLayer(layerName, layerFilters.roadNetwork ?? false);
+        }
+      } catch (error) {
+        // Layer doesn't exist, continue
+      }
+    });
+
+    // Toggle traffic layer (we create it as 'traffic')
+    toggleLayer('traffic', layerFilters.traffic ?? false);
+  }, [mapLoaded, activeFilters?.layerFilters]);
+
+  // Toggle facility layers based on facility filters
+  useEffect(() => {
+    if (!map.current || !mapLoaded || !activeFilters?.facilityTypes) return;
+
+    const facilityTypes = activeFilters.facilityTypes;
+
+    // Helper function to toggle layer visibility
+    const toggleLayer = (layerId: string, visible: boolean) => {
+      try {
+        if (map.current && map.current.getLayer(layerId)) {
+          map.current.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
+        }
+      } catch (error) {
+        console.warn(`Could not toggle layer ${layerId}:`, error);
+      }
+    };
+
+    // Toggle health-facilities layer
+    const healthFacilitiesVisible = facilityTypes.includes('Health Facilities');
+    toggleLayer('health-facilities', healthFacilitiesVisible);
+
+    // Toggle evacuation-centers layer
+    const evacuationCentersVisible = facilityTypes.includes('Evacuation Centers');
+    toggleLayer('evacuation-centers', evacuationCentersVisible);
+  }, [mapLoaded, activeFilters?.facilityTypes]);
+
+  // Update style toggle control when external style changes
+  useEffect(() => {
+    if (styleToggleControlRef.current && externalStyle) {
+      styleToggleControlRef.current.updateStyle(externalStyle);
+    }
+  }, [externalStyle]);
+
+  // Function to create hover popup content for tileset features
+  const createTilesetHoverPopupContent = (feature: mapboxgl.MapboxGeoJSONFeature, layerType: string) => {
+    const props = feature.properties || {};
+    const geometry = feature.geometry;
+    
+    // Extract coordinates from geometry
+    let coordinates: [number, number] | null = null;
+    if (geometry.type === 'Point' && geometry.coordinates) {
+      coordinates = geometry.coordinates as [number, number];
+    }
+    
+    // Common properties that might be in tilesets
+    const name = props.name || props.Name || props.NAME || props.facility_name || props.facilityName || 'Unknown';
+    const type = props.type || props.Type || props.TYPE || layerType;
+    const address = props.address || props.Address || props.ADDRESS || props.location || props.Location;
+    const description = props.description || props.Description || props.details || props.Details;
+    const capacity = props.capacity || props.Capacity || props.max_capacity;
+    const contact = props.contact || props.Contact || props.phone || props.Phone;
+    const barangay = props.barangay || props.Barangay || props.BARANGAY || props.bgy;
+    
+    // Build content sections
+    const hasPrimaryInfo = description || address || barangay;
+    const hasSecondaryInfo = capacity || contact;
+    const hasCoordinates = coordinates;
+    
+    return `
+      <div class="min-w-[240px] max-w-[320px]">
+        <!-- Header Section -->
+        <div class="px-4 pt-3 pb-2.5 border-b border-gray-200 bg-gray-50/50">
+          <div class="flex items-start justify-between gap-2 mb-2">
+            <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold uppercase tracking-wide" style="background-color: rgba(249, 115, 22, 0.1); color: #f97316; border: 1px solid rgba(249, 115, 22, 0.2);">
+              ${type}
+            </span>
+          </div>
+          <h4 class="text-base font-bold text-gray-900 break-words leading-tight pr-2">${name}</h4>
+        </div>
+        
+        <!-- Content Section -->
+        <div class="px-4 py-3 space-y-3 text-sm">
+          ${description ? `
+            <div class="space-y-1">
+              <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Description</div>
+              <div class="text-gray-700 break-words leading-relaxed">${description}</div>
+            </div>
+          ` : ''}
+          
+          ${address ? `
+            <div class="space-y-1 ${description ? 'pt-1 border-t border-gray-100' : ''}">
+              <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Address</div>
+              <div class="text-gray-700 break-words leading-relaxed text-sm">${address}</div>
+            </div>
+          ` : ''}
+          
+          ${barangay ? `
+            <div class="space-y-1 ${(description || address) ? 'pt-1 border-t border-gray-100' : ''}">
+              <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Barangay</div>
+              <div class="text-gray-700 break-words leading-relaxed text-sm">${barangay}</div>
+            </div>
+          ` : ''}
+          
+          ${(capacity || contact) ? `
+            <div class="pt-2 border-t border-gray-200 space-y-2.5">
+              ${capacity ? `
+                <div class="space-y-1">
+                  <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Capacity</div>
+                  <div class="text-gray-700 text-sm font-medium">${capacity}</div>
+                </div>
+              ` : ''}
+              
+              ${contact ? `
+                <div class="space-y-1 ${capacity ? 'pt-1 border-t border-gray-100' : ''}">
+                  <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Contact</div>
+                  <div class="text-gray-700 break-words leading-relaxed text-sm">${contact}</div>
+                </div>
+              ` : ''}
+            </div>
+          ` : ''}
+          
+          ${coordinates ? `
+            <div class="space-y-1 ${hasPrimaryInfo || hasSecondaryInfo ? 'pt-2 border-t border-gray-200' : ''}">
+              <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Coordinates</div>
+              <div class="text-gray-600 font-mono text-xs break-all leading-relaxed">
+                ${coordinates[1].toFixed(6)}, ${coordinates[0].toFixed(6)}
+              </div>
+            </div>
+          ` : ''}
+          
+          ${Object.keys(props).length > 0 && !name && !address && !description && !barangay && !capacity && !contact ? `
+            <div class="pt-2 border-t border-gray-200 space-y-1.5">
+              <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Additional Information</div>
+              ${Object.entries(props).slice(0, 5).map(([key, value]) => 
+                `<div class="space-y-0.5">
+                  <span class="text-xs font-medium text-gray-600">${key}:</span>
+                  <span class="text-xs text-gray-700 ml-1">${value}</span>
+                </div>`
+              ).join('')}
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  };
+
+  // Handle hover for tileset layers (health-facilities and evacuation-centers)
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return;
+
+    const handleMouseMove = (e: mapboxgl.MapMouseEvent) => {
+      if (!map.current) return;
+
+      // Query features at the mouse position for tileset layers
+      const layers = ['health-facilities', 'evacuation-centers'];
+      const features = map.current.queryRenderedFeatures(e.point, {
+        layers: layers
+      });
+
+      // Change cursor style
+      const canvas = map.current.getCanvasContainer();
+      if (canvas) {
+        if (features.length > 0) {
+          canvas.style.cursor = 'pointer';
+        } else {
+          canvas.style.cursor = '';
+        }
+      }
+
+      // Remove existing tileset hover popup
+      if (tilesetHoverPopupRef.current) {
+        tilesetHoverPopupRef.current.remove();
+        tilesetHoverPopupRef.current = null;
+      }
+
+      // If we found a feature, show hover popup
+      if (features.length > 0) {
+        const feature = features[0];
+        const layerId = feature.layer?.id || '';
+        
+        // Determine layer type
+        let layerType = 'Facility';
+        if (layerId.includes('health')) {
+          layerType = 'Health Facility';
+        } else if (layerId.includes('evacuation')) {
+          layerType = 'Evacuation Center';
+        }
+
+        // Get coordinates from feature
+        let coordinates: [number, number] | null = null;
+        if (feature.geometry.type === 'Point' && feature.geometry.coordinates) {
+          coordinates = feature.geometry.coordinates as [number, number];
+        } else if (e.lngLat) {
+          coordinates = [e.lngLat.lng, e.lngLat.lat];
+        }
+
+        if (coordinates) {
+          tilesetHoverPopupRef.current = new mapboxgl.Popup({
+            offset: 25,
+            closeButton: false,
+            closeOnClick: false,
+            className: 'custom-popup hover-popup',
+            maxWidth: '320px'
+          })
+          .setLngLat(coordinates)
+          .setHTML(createTilesetHoverPopupContent(feature, layerType))
+          .addTo(map.current);
+        }
+      }
+    };
+
+    const handleMouseLeave = () => {
+      // Reset cursor
+      if (map.current) {
+        const canvas = map.current.getCanvasContainer();
+        if (canvas) {
+          canvas.style.cursor = '';
+        }
+      }
+      
+      if (tilesetHoverPopupRef.current) {
+        tilesetHoverPopupRef.current.remove();
+        tilesetHoverPopupRef.current = null;
+      }
+    };
+
+    // Add event listeners
+    map.current.on('mousemove', handleMouseMove);
+    map.current.on('mouseleave', handleMouseLeave);
+
+    return () => {
+      if (map.current) {
+        map.current.off('mousemove', handleMouseMove);
+        map.current.off('mouseleave', handleMouseLeave);
+      }
+      if (tilesetHoverPopupRef.current) {
+        tilesetHoverPopupRef.current.remove();
+        tilesetHoverPopupRef.current = null;
+      }
+    };
+  }, [mapLoaded]);
+
+  // Handle cursor change for add placemark mode with custom cursor element
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return;
+
+    const canvas = map.current.getCanvasContainer();
+    if (!canvas) return;
+
+    if (isAddPlacemarkMode) {
+      // Create custom cursor element
+      const cursorEl = document.createElement('div');
+      cursorEl.className = 'custom-placemark-cursor';
+      cursorEl.style.cssText = `
+        position: absolute;
+        width: 32px;
+        height: 40px;
+        pointer-events: none !important;
+        z-index: 10000;
+        transform: translate(-16px, -40px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        user-select: none;
+      `;
+      cursorEl.innerHTML = `<img src="/markers/default.svg" alt="cursor" style="width: 32px; height: 40px; object-fit: contain; pointer-events: none;" />`;
+      canvas.appendChild(cursorEl);
+      cursorElementRef.current = cursorEl;
+
+      // Hide default cursor
+      canvas.style.cursor = 'none';
+
+      // Track mouse movement
+      const handleMouseMove = (e: MouseEvent) => {
+        if (cursorEl && canvas) {
+          const rect = canvas.getBoundingClientRect();
+          cursorEl.style.left = `${e.clientX - rect.left}px`;
+          cursorEl.style.top = `${e.clientY - rect.top}px`;
+        }
+      };
+
+      // Also handle mouse leave to hide cursor when outside map
+      const handleMouseLeave = () => {
+        if (cursorEl) {
+          cursorEl.style.display = 'none';
+        }
+      };
+
+      const handleMouseEnter = () => {
+        if (cursorEl) {
+          cursorEl.style.display = 'flex';
+        }
+      };
+
+      canvas.addEventListener('mouseenter', handleMouseEnter);
+      canvas.addEventListener('mouseleave', handleMouseLeave);
+
+      canvas.addEventListener('mousemove', handleMouseMove);
+
+      return () => {
+        canvas.removeEventListener('mousemove', handleMouseMove);
+        canvas.removeEventListener('mouseenter', handleMouseEnter);
+        canvas.removeEventListener('mouseleave', handleMouseLeave);
+        if (cursorEl && cursorEl.parentNode) {
+          cursorEl.parentNode.removeChild(cursorEl);
+        }
+        canvas.style.cursor = '';
+        cursorElementRef.current = null;
+      };
+    } else {
+      // Remove cursor element if it exists
+      if (cursorElementRef.current && cursorElementRef.current.parentNode) {
+        cursorElementRef.current.parentNode.removeChild(cursorElementRef.current);
+        cursorElementRef.current = null;
+      }
+      canvas.style.cursor = '';
+    }
+  }, [isAddPlacemarkMode, mapLoaded]);
 
   return (
     <div className="w-full h-full relative">
-      {/* Map Toolbar - Style Toggle */}
-      {!hideStyleToggle && (
-        <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
-          <button
-            onClick={() => handleStyleChange(currentStyle === 'streets' ? 'satellite' : 'streets')}
-            className="bg-white hover:bg-gray-50 text-gray-700 px-3 py-2 rounded-md shadow-md border border-gray-300 text-sm font-medium transition-colors flex items-center gap-2"
-            title={`Switch to ${currentStyle === 'streets' ? 'Satellite' : 'Streets'} view`}
-          >
-            {currentStyle === 'streets' ? (
-              <>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h18v18H3zM3 12h18M12 3v18" />
-                </svg>
-                <span className="hidden sm:inline">Satellite</span>
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 9a3 3 0 106 0" />
-                </svg>
-                <span className="hidden sm:inline">Streets</span>
-              </>
-            )}
-          </button>
-        </div>
-      )}
       
       <style>
         {`

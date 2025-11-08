@@ -8,10 +8,12 @@ import { Label } from "@/components/ui/label";
 import { Toggle } from "@/components/ui/toggle";
 import { Switch } from "@/components/ui/switch";
 import { Calendar } from "@/components/ui/calendar";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel, SelectSeparator } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Plus, MapPin, Layers, CalendarIcon, Search, Building2, Ambulance, Waves, Mountain, Building, CircleAlert, Users, ShieldAlert, Activity, Flame, Car, Siren, Home, Navigation, RotateCcw, HelpCircle, Info, ZoomIn, ZoomOut, LocateFixed, X, Filter } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Plus, MapPin, Layers, CalendarIcon, Search, Building2, Ambulance, Waves, Mountain, Building, CircleAlert, Users, ShieldAlert, Activity, Flame, Car, Siren, Home, Navigation, RotateCcw, HelpCircle, Info, ZoomIn, ZoomOut, LocateFixed, X, Filter, Download, FileText, Globe } from "lucide-react";
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear } from "date-fns";
 import { cn, ensureOk } from "@/lib/utils";
 import { Layout } from "./Layout";
@@ -22,6 +24,7 @@ import { usePins } from "@/hooks/usePins";
 import { Pin, PinType } from "@/types/pin";
 import { toast } from "@/components/ui/sonner";
 import { PinModal, PinFormData } from "./PinModal";
+import { CompactPinForm } from "./CompactPinForm";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 
@@ -66,7 +69,7 @@ export function RiskMapPage() {
   const [searchSuggestions, setSearchSuggestions] = useState<any[]>([]);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [mapCenter, setMapCenter] = useState<[number, number]>([121.5556, 14.1139]);
-  const [mapZoom, setMapZoom] = useState(13);
+  const [mapZoom, setMapZoom] = useState(11);
   const [isFromReport, setIsFromReport] = useState(false); // Track if data came from a report
   const [pins, setPins] = useState<Pin[]>([]); // Store pins from database
   
@@ -75,7 +78,9 @@ export function RiskMapPage() {
   const [pinModalMode, setPinModalMode] = useState<"create" | "edit">("create");
   const [editingPin, setEditingPin] = useState<Pin | undefined>(undefined);
   const [pinModalPrefill, setPinModalPrefill] = useState<Partial<PinFormData> | undefined>(undefined);
+  const [isLegendDialogOpen, setIsLegendDialogOpen] = useState(false);
   const [tempClickedLocation, setTempClickedLocation] = useState<{ lat: number; lng: number; locationName: string } | null>(null);
+  const [compactFormPosition, setCompactFormPosition] = useState<{ x: number; y: number } | null>(null);
   
   // Delete Confirmation State
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -84,6 +89,9 @@ export function RiskMapPage() {
   // Filters Panel State
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [mapLayerStyle, setMapLayerStyle] = useState<'streets' | 'satellite'>('streets');
+  
+  // Add Placemark Mode State
+  const [isAddPlacemarkMode, setIsAddPlacemarkMode] = useState(false);
 
   const [accidentFilters, setAccidentFilters] = useState({
     roadCrash: false,
@@ -105,6 +113,14 @@ export function RiskMapPage() {
     policeStations: false,
     fireStations: false,
     governmentOffices: false
+  });
+
+  const [layerFilters, setLayerFilters] = useState({
+    barangay: false, // Hidden by default (lucban-boundary stays visible)
+    barangayLabel: false, // Hidden by default
+    roadNetwork: false, // Hidden by default
+    waterways: false, // Hidden by default
+    traffic: false // Hidden by default
   });
 
 
@@ -228,6 +244,7 @@ export function RiskMapPage() {
         reportId: report.id || ""
       });
       setIsPinModalOpen(true);
+      setIsFiltersOpen(false); // Close filter panel when pin modal opens
       
       // Clear the location state to prevent it from persisting on refresh
       navigate("/risk-map", { replace: true, state: {} });
@@ -243,16 +260,23 @@ export function RiskMapPage() {
       return;
     }
     
-    // If checking, count total active filters
-    const totalActive = Object.values(accidentFilters).filter(Boolean).length + 
-                        Object.values(facilityFilters).filter(Boolean).length;
+    // If checking, uncheck all other accident filters (only one at a time)
+    const newFilters = {
+      roadCrash: false,
+      fire: false,
+      medicalEmergency: false,
+      flooding: false,
+      volcanicActivity: false,
+      landslide: false,
+      earthquake: false,
+      civilDisturbance: false,
+      armedConflict: false,
+      infectiousDisease: false,
+      others: false,
+      [key]: true
+    };
     
-    if (totalActive >= 10) {
-      toast.error('Maximum 10 filter types can be selected at once');
-      return;
-    }
-    
-    setAccidentFilters(prev => ({ ...prev, [key]: true }));
+    setAccidentFilters(newFilters);
   };
 
   const handleFacilityFilterChange = (key: keyof typeof facilityFilters) => {
@@ -358,6 +382,152 @@ export function RiskMapPage() {
     setFacilityFilters(newFilters);
   };
 
+  // Export functions
+  const exportToCSV = () => {
+    if (pins.length === 0) {
+      toast.error('No pins to export');
+      return;
+    }
+
+    // CSV header
+    const headers = ['ID', 'Type', 'Title', 'Latitude', 'Longitude', 'Location Name', 'Category', 'Report ID', 'Created At', 'Created By'];
+    const rows = pins.map(pin => [
+      pin.id,
+      pin.type,
+      pin.title,
+      pin.latitude.toString(),
+      pin.longitude.toString(),
+      pin.locationName,
+      pin.category,
+      pin.reportId || '',
+      pin.createdAt instanceof Date ? pin.createdAt.toISOString() : pin.createdAt,
+      pin.createdByName || ''
+    ]);
+
+    // Create CSV content
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+
+    // Create blob and download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `accizard-pins-${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    toast.success(`Exported ${pins.length} pins to CSV`);
+  };
+
+  const exportToKML = () => {
+    if (pins.length === 0) {
+      toast.error('No pins to export');
+      return;
+    }
+
+    // KML structure
+    const placemarks = pins.map(pin => {
+      const description = [
+        `<b>Type:</b> ${pin.type}`,
+        `<b>Title:</b> ${pin.title}`,
+        `<b>Location:</b> ${pin.locationName}`,
+        `<b>Category:</b> ${pin.category}`,
+        pin.reportId ? `<b>Report ID:</b> ${pin.reportId}` : '',
+        `<b>Created:</b> ${pin.createdAt instanceof Date ? pin.createdAt.toISOString() : pin.createdAt}`,
+        `<b>Created By:</b> ${pin.createdByName || ''}`
+      ].filter(Boolean).join('<br/>');
+
+      return `    <Placemark>
+      <name><![CDATA[${pin.title}]]></name>
+      <description><![CDATA[${description}]]></description>
+      <Point>
+        <coordinates>${pin.longitude},${pin.latitude},0</coordinates>
+      </Point>
+    </Placemark>`;
+    }).join('\n');
+
+    const kmlContent = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>AcciZard Map Pins</name>
+    <description>Exported pins from AcciZard Risk Map</description>
+${placemarks}
+  </Document>
+</kml>`;
+
+    // Create blob and download
+    const blob = new Blob([kmlContent], { type: 'application/vnd.google-earth.kml+xml;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `accizard-pins-${new Date().toISOString().split('T')[0]}.kml`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    toast.success(`Exported ${pins.length} pins to KML`);
+  };
+
+  const exportToGeoJSON = () => {
+    if (pins.length === 0) {
+      toast.error('No pins to export');
+      return;
+    }
+
+    // GeoJSON structure
+    const features = pins.map(pin => ({
+      type: 'Feature',
+      geometry: {
+        type: 'Point',
+        coordinates: [pin.longitude, pin.latitude]
+      },
+      properties: {
+        id: pin.id,
+        type: pin.type,
+        title: pin.title,
+        locationName: pin.locationName,
+        category: pin.category,
+        reportId: pin.reportId || null,
+        createdAt: pin.createdAt instanceof Date ? pin.createdAt.toISOString() : pin.createdAt,
+        createdBy: pin.createdByName || '',
+        createdById: pin.createdBy || ''
+      }
+    }));
+
+    const geoJSON = {
+      type: 'FeatureCollection',
+      metadata: {
+        name: 'AcciZard Map Pins',
+        description: 'Exported pins from AcciZard Risk Map',
+        exportedAt: new Date().toISOString(),
+        count: pins.length
+      },
+      features: features
+    };
+
+    // Create blob and download
+    const blob = new Blob([JSON.stringify(geoJSON, null, 2)], { type: 'application/geo+json;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `accizard-pins-${new Date().toISOString().split('T')[0]}.geojson`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    toast.success(`Exported ${pins.length} pins to GeoJSON`);
+  };
+
   // New Modal-based Pin Management Handlers
   const handleEditPin = (pin: Pin) => {
     console.log("Edit pin:", pin);
@@ -372,6 +542,7 @@ export function RiskMapPage() {
       reportId: pin.reportId
     });
     setIsPinModalOpen(true);
+    setIsFiltersOpen(false); // Close filter panel when pin modal opens
   };
 
   const handleDeletePinClick = (pinId: string) => {
@@ -406,6 +577,7 @@ export function RiskMapPage() {
         const pinId = await createPin({
           type: pinData.type as PinType,
           title: pinData.title,
+          description: pinData.description || undefined,
           latitude: pinData.latitude,
           longitude: pinData.longitude,
           locationName: pinData.locationName || 'Unknown Location',
@@ -419,6 +591,7 @@ export function RiskMapPage() {
         await updatePin(editingPin.id, {
           type: pinData.type as PinType,
           title: pinData.title,
+          description: pinData.description || undefined,
           latitude: pinData.latitude!,
           longitude: pinData.longitude!,
           locationName: pinData.locationName
@@ -431,6 +604,7 @@ export function RiskMapPage() {
       setIsPinModalOpen(false);
       setPinModalPrefill(undefined);
       setEditingPin(undefined);
+      setTempClickedLocation(null); // Clear temporary marker after pin is saved
     } catch (error: any) {
       console.error("Error saving pin:", error);
       toast.error(error.message || "Failed to save pin");
@@ -477,7 +651,8 @@ export function RiskMapPage() {
 
     return {
       accidentTypes: activeAccidentTypes,
-      facilityTypes: activeFacilityTypes
+      facilityTypes: activeFacilityTypes,
+      layerFilters: layerFilters
     };
   };
 
@@ -502,36 +677,6 @@ export function RiskMapPage() {
     return activeTypes;
   };
 
-  // Map reference for controlling zoom and location
-  const mapRef = useRef<{ zoomIn: () => void; zoomOut: () => void; locateUser: () => void } | null>(null);
-
-  // Handler functions for map controls
-  const handleZoomIn = () => {
-    setMapZoom(prev => Math.min(prev + 1, 20));
-  };
-
-  const handleZoomOut = () => {
-    setMapZoom(prev => Math.max(prev - 1, 1));
-  };
-
-  const handleLocateUser = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const { latitude, longitude } = position.coords;
-          setMapCenter([longitude, latitude]);
-          setMapZoom(15);
-          toast.success("Location found!");
-        },
-        (error) => {
-          console.error('Error getting location:', error);
-          toast.error("Could not get your location");
-        }
-      );
-    } else {
-      toast.error("Geolocation is not supported by this browser");
-    }
-  };
 
   // Subscribe to pins from database with real-time updates
   useEffect(() => {
@@ -555,16 +700,12 @@ export function RiskMapPage() {
       filters.dateTo = date.to;
     }
 
-    console.log('Subscribing to pins with filters:', filters);
-
     const unsubscribe = subscribeToPins(
       filters,
       (fetchedPins) => {
-        console.log('Pins updated from database:', fetchedPins.length);
         setPins(fetchedPins);
       },
       (error) => {
-        console.error('Error fetching pins:', error);
         // Only show error toast if it's a real error, not just "no pins found"
         if (error.message && !error.message.includes('permission-denied')) {
           toast.error('Failed to fetch pins from database');
@@ -573,7 +714,6 @@ export function RiskMapPage() {
     );
 
     return () => {
-      console.log('Unsubscribing from pins');
       unsubscribe();
     };
   }, [accidentFilters, facilityFilters, date, searchQuery, subscribeToPins]);
@@ -616,7 +756,7 @@ export function RiskMapPage() {
                           {searchSuggestions.map((suggestion, index) => (
                             <button
                               key={index}
-                              className="w-full text-left px-4 py-3 hover:bg-gray-100 border-b border-gray-100 last:border-b-0 transition-colors"
+                              className="w-full text-left px-4 py-3 hover:bg-gray-100 transition-colors"
                               onClick={() => handleSelectSearchResult(suggestion)}
                             >
                               <div className="flex items-start gap-2">
@@ -638,6 +778,36 @@ export function RiskMapPage() {
                   </Popover>
                 </div>
 
+                {/* Add Placemark Button */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className={cn(
+                        "h-9 px-3",
+                        isAddPlacemarkMode && "bg-brand-orange text-white hover:bg-brand-orange/90"
+                      )}
+                      onClick={() => {
+                        if (isAddPlacemarkMode) {
+                          // Toggle off if already active
+                          setIsAddPlacemarkMode(false);
+                        } else {
+                          setIsAddPlacemarkMode(true);
+                          setIsFiltersOpen(false);
+                          setIsPinModalOpen(false);
+                        }
+                      }}
+                    >
+                      <MapPin className="h-4 w-4 mr-2" />
+                      Add Placemark
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Add a new placemark on the map</p>
+                  </TooltipContent>
+                </Tooltip>
+
                 {/* Filters Button */}
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -645,7 +815,11 @@ export function RiskMapPage() {
                       variant="outline"
                       size="sm"
                       className="h-9 px-3"
-                      onClick={() => setIsFiltersOpen(true)}
+                      onClick={() => {
+                        setIsFiltersOpen(true);
+                        setIsPinModalOpen(false); // Close pin modal when filter panel opens
+                        setIsAddPlacemarkMode(false); // Exit add placemark mode
+                      }}
                     >
                       <Filter className="h-4 w-4 mr-2" />
                       Filters
@@ -656,25 +830,8 @@ export function RiskMapPage() {
                   </TooltipContent>
                 </Tooltip>
                 
-                {/* Map Legend Button */}
-                <Dialog>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <DialogTrigger asChild>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-9 px-3"
-                        >
-                          <Info className="h-4 w-4 mr-2" />
-                          Legend
-                        </Button>
-                      </DialogTrigger>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Show map legend</p>
-                    </TooltipContent>
-                  </Tooltip>
+                {/* Map Legend Dialog */}
+                <Dialog open={isLegendDialogOpen} onOpenChange={setIsLegendDialogOpen}>
               <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle className="text-lg font-bold">Map Legend</DialogTitle>
@@ -682,7 +839,7 @@ export function RiskMapPage() {
                 <div className="py-4">
                   {/* Accident/Hazard Types Section */}
                   <div className="mb-6">
-                    <h4 className="text-sm font-semibold text-gray-700 mb-3 pb-2 border-b">Accident/Hazard Types</h4>
+                    <h4 className="text-sm font-semibold text-gray-700 mb-3 pb-2">Accident/Hazard Types</h4>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       <div className="flex items-center gap-3">
                         <img src="/markers/road-crash.svg" alt="Road Crash" className="w-10 h-10 flex-shrink-0" />
@@ -733,7 +890,7 @@ export function RiskMapPage() {
 
                   {/* Emergency Facilities Section */}
                   <div>
-                    <h4 className="text-sm font-semibold text-gray-700 mb-3 pb-2 border-b">Emergency Facilities</h4>
+                    <h4 className="text-sm font-semibold text-gray-700 mb-3 pb-2">Emergency Facilities</h4>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       <div className="flex items-center gap-3">
                         <img src="/markers/evacuation-center.svg" alt="Evacuation Centers" className="w-10 h-10 flex-shrink-0" />
@@ -761,118 +918,53 @@ export function RiskMapPage() {
                   </DialogContent>
                 </Dialog>
 
-                {/* Map Layer Button */}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-9 px-3"
-                      onClick={() => setMapLayerStyle(mapLayerStyle === 'streets' ? 'satellite' : 'streets')}
-                    >
-                      <Layers className="h-4 w-4 mr-2" />
-                      {mapLayerStyle === 'streets' ? 'Satellite' : 'Streets'}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Switch to {mapLayerStyle === 'streets' ? 'Satellite' : 'Streets'} view</p>
-                  </TooltipContent>
-                </Tooltip>
-
-                {/* Heatmap Toggle */}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className={cn(
-                        "h-9 px-3",
-                        showHeatmap && "bg-primary text-primary-foreground"
-                      )}
-                      onClick={() => setShowHeatmap(!showHeatmap)}
-                    >
-                      <Flame className="h-4 w-4 mr-2" />
-                      Heatmap
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Toggle heatmap display</p>
-                  </TooltipContent>
-                </Tooltip>
-
-                {/* Zoom and Location Controls */}
-                <div className="flex items-center border-l border-gray-200 pl-3 gap-1">
+                {/* Export Button */}
+                <DropdownMenu>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-9 w-9 p-0"
-                        onClick={handleZoomIn}
-                      >
-                        <ZoomIn className="h-4 w-4" />
-                      </Button>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-9 px-3"
+                        >
+                          <Download className="h-4 w-4 mr-2" />
+                          Export
+                        </Button>
+                      </DropdownMenuTrigger>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p>Zoom in</p>
+                      <p>Export pins to CSV, KML, or GeoJSON</p>
                     </TooltipContent>
                   </Tooltip>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={exportToCSV} className="cursor-pointer">
+                      <FileText className="h-4 w-4 mr-2" />
+                      Export as CSV
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={exportToKML} className="cursor-pointer">
+                      <Globe className="h-4 w-4 mr-2" />
+                      Export as KML
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={exportToGeoJSON} className="cursor-pointer">
+                      <MapPin className="h-4 w-4 mr-2" />
+                      Export as GeoJSON
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
 
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-9 w-9 p-0"
-                        onClick={handleZoomOut}
-                      >
-                        <ZoomOut className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Zoom out</p>
-                    </TooltipContent>
-                  </Tooltip>
-
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-9 w-9 p-0"
-                        onClick={handleLocateUser}
-                      >
-                        <LocateFixed className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Show my location</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
               </div>
               
               <MapboxMap 
-              onMapClick={async (lngLat) => {
-                console.log("=== MAP CLICK EVENT ===");
-                console.log("Clicked coordinates:", lngLat);
-                
-                // Reverse geocode to get location name
-                const locationName = await reverseGeocode(lngLat.lat.toString(), lngLat.lng.toString());
-                
-                // If modal is already open (create mode), just update coordinates
-                if (isPinModalOpen && pinModalMode === "create") {
-                  console.log("Modal is open - updating prefill");
-                  setPinModalPrefill(prev => ({
-                    ...prev,
-                    latitude: lngLat.lat,
-                    longitude: lngLat.lng,
-                    locationName: locationName
-                  }));
-                  toast.success("Location updated!");
-                } else {
-                  // Modal not open - open it with the clicked location
-                  console.log("Opening modal with clicked location");
+              showControls={true}
+              onLegendClick={() => setIsLegendDialogOpen(true)}
+              onMapClick={async (lngLat, event?) => {
+                // If in add placemark mode, place the marker and open the compact form
+                if (isAddPlacemarkMode) {
+                  const locationName = await reverseGeocode(lngLat.lat.toString(), lngLat.lng.toString());
+                  console.log("=== PLACING PLACEMARK ===");
+                  console.log("Coordinates:", { lat: lngLat.lat, lng: lngLat.lng });
+                  console.log("Location name:", locationName);
                   setPinModalMode("create");
                   setPinModalPrefill({
                     type: "",
@@ -882,46 +974,107 @@ export function RiskMapPage() {
                     locationName: locationName,
                     reportId: undefined
                   });
-                  setIsPinModalOpen(true);
-                  toast.success("Location selected! Fill in pin details.");
+                  // Set clicked location to show marker immediately
+                  setTempClickedLocation({
+                    lat: lngLat.lat,
+                    lng: lngLat.lng,
+                    locationName: locationName
+                  });
+                  
+                  // Calculate position for compact form (near the clicked point)
+                  if (event && event.point) {
+                    // Get the map container to calculate absolute position
+                    const mapContainer = event.target.getContainer();
+                    if (mapContainer) {
+                      const rect = mapContainer.getBoundingClientRect();
+                      setCompactFormPosition({
+                        x: rect.left + event.point.x,
+                        y: rect.top + event.point.y
+                      });
+                    } else {
+                      setCompactFormPosition(null);
+                    }
+                  } else {
+                    // Fallback: position in top-right
+                    setCompactFormPosition(null);
+                  }
+                  
+                  setIsAddPlacemarkMode(false); // Exit add placemark mode
+                  setIsFiltersOpen(false);
+                  toast.success("Placemark placed! Fill in pin details.");
+                  return;
+                }
+                
+                // Reverse geocode to get location name
+                const locationName = await reverseGeocode(lngLat.lat.toString(), lngLat.lng.toString());
+                
+                // If modal is already open (create mode), just update coordinates
+                if (isPinModalOpen && pinModalMode === "create") {
+                  setPinModalPrefill(prev => ({
+                    ...prev,
+                    latitude: lngLat.lat,
+                    longitude: lngLat.lng,
+                    locationName: locationName
+                  }));
+                  // Update clicked location marker
+                  setTempClickedLocation({
+                    lat: lngLat.lat,
+                    lng: lngLat.lng,
+                    locationName: locationName
+                  });
+                  toast.success("Location updated!");
                 }
               }}
+              isAddPlacemarkMode={isAddPlacemarkMode}
               showHeatmap={showHeatmap}
-              showDirections={true}
+              showDirections={false}
               pins={pins}
               center={mapCenter}
               zoom={mapZoom}
               activeFilters={getActiveFilters()}
-              singleMarker={
-                // Show temporary marker when modal is open with coordinates
-                isPinModalOpen && pinModalPrefill?.latitude && pinModalPrefill?.longitude
-                  ? {
-                      id: 'temp-marker',
-                      type: pinModalPrefill.type || 'Default',
-                      title: pinModalPrefill.title || pinModalPrefill.locationName || 'New Pin Location',
-                      description: pinModalPrefill.locationName || 'Click to set location',
-                      reportId: pinModalPrefill.reportId,
-                      coordinates: [pinModalPrefill.longitude, pinModalPrefill.latitude] as [number, number],
-                      locationName: pinModalPrefill.locationName,
-                      latitude: pinModalPrefill.latitude,
-                      longitude: pinModalPrefill.longitude
-                    }
-                  : undefined
-              }
+              clickedLocation={tempClickedLocation ? {
+                lat: tempClickedLocation.lat,
+                lng: tempClickedLocation.lng,
+                address: tempClickedLocation.locationName
+              } : null}
               canEdit={true}
               onEditPin={handleEditPin}
               onDeletePin={handleDeletePinClick}
-              hideStyleToggle={true}
+              hideStyleToggle={false}
               externalStyle={mapLayerStyle}
+              onStyleChange={(style) => setMapLayerStyle(style)}
                       />
             
-            {/* Pin Modal for Create/Edit - positioned within map container */}
+            {/* Compact Pin Form - appears on map when placing placemark */}
+            {pinModalMode === "create" && pinModalPrefill && (
+              <CompactPinForm
+                isOpen={!!pinModalPrefill}
+                onClose={() => {
+                  setPinModalPrefill(undefined);
+                  setTempClickedLocation(null);
+                  setCompactFormPosition(null);
+                  setIsAddPlacemarkMode(false);
+                }}
+                onSave={async (pinData) => {
+                  await handleSavePin(pinData);
+                  setPinModalPrefill(undefined);
+                  setTempClickedLocation(null);
+                  setCompactFormPosition(null);
+                }}
+                prefillData={pinModalPrefill}
+                position={compactFormPosition || undefined}
+              />
+            )}
+
+            {/* Pin Modal for Edit - positioned within map container */}
             <PinModal
-              isOpen={isPinModalOpen}
+              isOpen={isPinModalOpen && pinModalMode === "edit"}
               onClose={() => {
                 setIsPinModalOpen(false);
                 setPinModalPrefill(undefined);
                 setEditingPin(undefined);
+                setTempClickedLocation(null);
+                setIsAddPlacemarkMode(false);
               }}
               onSave={handleSavePin}
               mode={pinModalMode}
@@ -933,8 +1086,8 @@ export function RiskMapPage() {
             {isFiltersOpen && (
               <div
                 className={cn(
-                  "bg-white shadow-2xl transition-transform duration-300 ease-in-out",
-                  "absolute left-0 top-0 h-full w-[450px] z-50 flex flex-col"
+                  "bg-white transition-transform duration-300 ease-in-out",
+                  "absolute left-0 top-0 h-full w-[450px] z-50 flex flex-col overflow-hidden"
                 )}
               >
                 <style>{`
@@ -955,7 +1108,7 @@ export function RiskMapPage() {
                 `}</style>
                 {/* Header */}
                 <div className="flex-shrink-0 bg-white border-b border-gray-200 px-6 py-4">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Filter className="h-5 w-5 text-[#FF4F0B]" />
                       <h2 className="text-lg font-semibold">Map Filters</h2>
@@ -973,117 +1126,232 @@ export function RiskMapPage() {
 
                 {/* Scrollable Content */}
                 <div 
-                  className="flex-1 overflow-y-auto px-6 py-4 filters-scrollable" 
+                  className="flex-1 overflow-y-auto px-6 py-5 filters-scrollable bg-gray-50/30" 
                   style={{ 
                     scrollbarWidth: 'thin',
                     scrollbarColor: '#cbd5e1 #f1f5f9'
                   }}
                 >
-                  <div className="space-y-6">
+                  <Accordion type="multiple" defaultValue={["timeline", "layers", "accidents", "facilities"]} className="space-y-3">
                     {/* Timeline */}
-                    <div className="space-y-3">
-                      <Label className="text-sm font-medium">Timeline</Label>
-                      <div className="flex flex-col space-y-2">
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <Button
-                              variant="outline"
-                              className={cn(
-                                "w-full justify-start text-left font-normal",
-                                !date?.from && "text-muted-foreground"
-                              )}
-                            >
-                              <CalendarIcon className="mr-2 h-4 w-4" />
-                              {date?.from ? (
-                                date.to ? (
-                                  <>
-                                    {format(date.from, "LLL dd, y")} -{" "}
-                                    {format(date.to, "LLL dd, y")}
-                                  </>
-                                ) : (
-                                  format(date.from, "LLL dd, y")
-                                )
-                              ) : (
-                                <span>Pick a date range</span>
-                              )}
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-auto p-0" align="start">
-                            <Calendar
-                              initialFocus
-                              mode="range"
-                              defaultMonth={date?.from}
-                              selected={date}
-                              onSelect={setDate}
-                              numberOfMonths={2}
-                            />
-                          </PopoverContent>
-                        </Popover>
-                        <Select onValueChange={(value) => handleQuickDateFilter(value as 'week' | 'month' | 'year')}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Quick filters" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="week">This Week</SelectItem>
-                            <SelectItem value="month">This Month</SelectItem>
-                            <SelectItem value="year">This Year</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
+                    <AccordionItem value="timeline" className="mb-0 border-b-0 bg-white rounded-xl overflow-hidden">
+                      <AccordionTrigger className="py-4 px-5 text-sm font-semibold hover:no-underline bg-gradient-to-r from-orange-50 to-orange-100/50 text-orange-700 hover:from-orange-100 hover:to-orange-200/50 transition-all">
+                        <div className="flex items-center gap-3">
+                          <CalendarIcon className="h-4 w-4 text-brand-orange" />
+                          <span className="text-sm text-brand-orange">Timeline</span>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent className="pt-4 pb-5 px-5">
+                        <div className="flex flex-col space-y-3">
+                          <div>
+                            <label className="text-xs font-semibold text-gray-700 mb-2 block">Date Range</label>
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <Button
+                                  variant="outline"
+                                  className={cn(
+                                    "w-full justify-start text-left font-normal h-10 border-gray-300 hover:border-gray-300 hover:bg-gray-100",
+                                    !date?.from && "text-muted-foreground"
+                                  )}
+                                >
+                                  <CalendarIcon className="mr-2 h-4 w-4" />
+                                  {date?.from ? (
+                                    date.to ? (
+                                      <>
+                                        {format(date.from, "LLL dd, y")} -{" "}
+                                        {format(date.to, "LLL dd, y")}
+                                      </>
+                                    ) : (
+                                      format(date.from, "LLL dd, y")
+                                    )
+                                  ) : (
+                                    <span>Pick a date range</span>
+                                  )}
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-auto p-0" align="start">
+                                <Calendar
+                                  initialFocus
+                                  mode="range"
+                                  defaultMonth={date?.from}
+                                  selected={date}
+                                  onSelect={setDate}
+                                  numberOfMonths={2}
+                                />
+                              </PopoverContent>
+                            </Popover>
+                          </div>
+                          <div>
+                            <label className="text-xs font-semibold text-gray-700 mb-2 block">Quick Filters</label>
+                            <Select onValueChange={(value) => handleQuickDateFilter(value as 'week' | 'month' | 'year')}>
+                              <SelectTrigger className="h-10 border-gray-300 hover:border-gray-300 hover:bg-gray-100">
+                                <SelectValue placeholder="Select quick filter" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="week">This Week</SelectItem>
+                                <SelectItem value="month">This Month</SelectItem>
+                                <SelectItem value="year">This Year</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+
+                    {/* Map Layers */}
+                    <AccordionItem value="layers" className="mb-0 border-b-0 bg-white rounded-xl overflow-hidden">
+                      <AccordionTrigger className="py-4 px-5 text-sm font-semibold hover:no-underline bg-gradient-to-r from-orange-50 to-orange-100/50 text-orange-700 hover:from-orange-100 hover:to-orange-200/50 transition-all">
+                        <div className="flex items-center gap-3">
+                          <Layers className="h-4 w-4 text-brand-orange" />
+                          <span className="text-sm text-brand-orange">Map Layers</span>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent className="pt-4 pb-5 px-5">
+                        <div className="flex flex-wrap gap-2.5">
+                          <button
+                            onClick={() => setLayerFilters(prev => {
+                              const newBarangayValue = !prev.barangay;
+                              return {
+                                ...prev, 
+                                barangay: newBarangayValue,
+                                barangayLabel: newBarangayValue // Toggle labels together with boundaries
+                              };
+                            })}
+                            className={cn(
+                              "flex items-center gap-2 px-4 py-2.5 text-xs font-medium rounded-lg transition-all border-2 group",
+                              layerFilters.barangay 
+                                ? "bg-gradient-to-r from-brand-orange to-orange-500 text-white border-brand-orange" 
+                                : "bg-white text-gray-700 border-gray-200 hover:border-orange-300 hover:bg-orange-50 hover:text-brand-orange"
+                            )}
+                          >
+                            <Layers className={cn("h-4 w-4 transition-colors", layerFilters.barangay ? "text-white" : "text-gray-600 group-hover:text-brand-orange")} />
+                            Barangay Boundaries
+                          </button>
+                          <button
+                            onClick={() => setLayerFilters(prev => ({ ...prev, roadNetwork: !prev.roadNetwork }))}
+                            className={cn(
+                              "flex items-center gap-2 px-4 py-2.5 text-xs font-medium rounded-lg transition-all border-2 group",
+                              layerFilters.roadNetwork 
+                                ? "bg-gradient-to-r from-brand-orange to-orange-500 text-white border-brand-orange" 
+                                : "bg-white text-gray-700 border-gray-200 hover:border-orange-300 hover:bg-orange-50 hover:text-brand-orange"
+                            )}
+                          >
+                            <Navigation className={cn("h-4 w-4 transition-colors", layerFilters.roadNetwork ? "text-white" : "text-gray-600 group-hover:text-brand-orange")} />
+                            Road Network
+                          </button>
+                          <button
+                            onClick={() => setLayerFilters(prev => ({ ...prev, waterways: !prev.waterways }))}
+                            className={cn(
+                              "flex items-center gap-2 px-4 py-2.5 text-xs font-medium rounded-lg transition-all border-2 group",
+                              layerFilters.waterways 
+                                ? "bg-gradient-to-r from-brand-orange to-orange-500 text-white border-brand-orange" 
+                                : "bg-white text-gray-700 border-gray-200 hover:border-orange-300 hover:bg-orange-50 hover:text-brand-orange"
+                            )}
+                          >
+                            <Waves className={cn("h-4 w-4 transition-colors", layerFilters.waterways ? "text-white" : "text-gray-600 group-hover:text-brand-orange")} />
+                            Waterways
+                          </button>
+                          <button
+                            onClick={() => setLayerFilters(prev => ({ ...prev, traffic: !prev.traffic }))}
+                            className={cn(
+                              "flex items-center gap-2 px-4 py-2.5 text-xs font-medium rounded-lg transition-all border-2 group",
+                              layerFilters.traffic 
+                                ? "bg-gradient-to-r from-brand-orange to-orange-500 text-white border-brand-orange" 
+                                : "bg-white text-gray-700 border-gray-200 hover:border-orange-300 hover:bg-orange-50 hover:text-brand-orange"
+                            )}
+                          >
+                            <Car className={cn("h-4 w-4 transition-colors", layerFilters.traffic ? "text-white" : "text-gray-600 group-hover:text-brand-orange")} />
+                            Traffic
+                          </button>
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
 
                     {/* Accident/Hazard Types */}
-                    <div className="space-y-3">
-                      <Label className="text-sm font-medium">Accident/Hazard Types</Label>
-                      <div className="flex flex-wrap gap-2">
-                        {Object.entries(accidentFilters).map(([key, checked]) => {
-                          const displayName = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
-                          const Icon = pinTypeIcons[displayName] || MapPin;
-                          return (
-                            <button
-                              key={key}
-                              onClick={() => handleAccidentFilterChange(key as keyof typeof accidentFilters)}
-                              className={cn(
-                                "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded transition-colors border",
-                                checked 
-                                  ? "bg-primary text-primary-foreground border-primary shadow-sm" 
-                                  : "bg-background text-foreground border-border hover:bg-accent hover:text-accent-foreground"
-                              )}
-                            >
-                              <Icon className="h-3 w-3" />
-                              {displayName}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
+                    <AccordionItem value="accidents" className="mb-0 border-b-0 bg-white rounded-xl overflow-hidden">
+                      <AccordionTrigger className="py-4 px-5 text-sm font-semibold hover:no-underline bg-gradient-to-r from-orange-50 to-orange-100/50 text-orange-700 hover:from-orange-100 hover:to-orange-200/50 transition-all">
+                        <div className="flex items-center gap-3">
+                          <CircleAlert className="h-4 w-4 text-brand-orange" />
+                          <span className="text-sm text-brand-orange">Accident/Hazard Types</span>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent className="pt-4 pb-5 px-5">
+                      
+                        {/* Heatmap Toggle */}
+                        <div className="mb-5 pb-4 border-b border-gray-200">
+                          <label className="flex items-center justify-between cursor-pointer group p-3 rounded-lg hover:bg-gray-50 transition-colors">
+                            <div className="flex items-center gap-3">
+                              <div className="p-2 bg-orange-100 rounded-lg group-hover:bg-orange-200 transition-colors">
+                                <Flame className="h-4 w-4 text-orange-600" />
+                              </div>
+                              <div>
+                                <span className="text-m font-semibold text-gray-900 block">Heatmap</span>
+                                
+                              </div>
+                            </div>
+                            <Switch
+                              checked={showHeatmap}
+                              onCheckedChange={setShowHeatmap}
+                            />
+                          </label>
+                        </div>
+                        <div className="flex flex-wrap gap-2.5">
+                          {Object.entries(accidentFilters).map(([key, checked]) => {
+                            const displayName = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+                            const Icon = pinTypeIcons[displayName] || MapPin;
+                            return (
+                              <button
+                                key={key}
+                                onClick={() => handleAccidentFilterChange(key as keyof typeof accidentFilters)}
+                                className={cn(
+                                  "flex items-center gap-2 px-4 py-2.5 text-xs font-medium rounded-lg transition-all border-2 group",
+                                  checked 
+                                    ? "bg-gradient-to-r from-brand-orange to-orange-500 text-white border-brand-orange" 
+                                    : "bg-white text-gray-700 border-gray-200 hover:border-orange-300 hover:bg-orange-50 hover:text-brand-orange"
+                                )}
+                              >
+                                <Icon className={cn("h-4 w-4 transition-colors", checked ? "text-white" : "text-gray-600 group-hover:text-brand-orange")} />
+                                {displayName}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
 
                     {/* Emergency Support Facilities */}
-                    <div className="space-y-3">
-                      <Label className="text-sm font-medium">Emergency Support Facilities</Label>
-                      <div className="flex flex-wrap gap-2">
-                        {Object.entries(facilityFilters).map(([key, checked]) => {
-                          const displayName = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
-                          const Icon = facilityIcons[key] || MapPin;
-                          return (
-                            <button
-                              key={key}
-                              onClick={() => handleFacilityFilterChange(key as keyof typeof facilityFilters)}
-                              className={cn(
-                                "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded transition-colors border",
-                                checked 
-                                  ? "bg-primary text-primary-foreground border-primary shadow-sm" 
-                                  : "bg-background text-foreground border-border hover:bg-accent hover:text-accent-foreground"
-                              )}
-                            >
-                              <Icon className="h-3 w-3" />
-                              {displayName}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
+                    <AccordionItem value="facilities" className="mb-0 border-b-0 bg-white rounded-xl overflow-hidden">
+                      <AccordionTrigger className="py-4 px-5 text-sm font-semibold hover:no-underline bg-gradient-to-r from-orange-50 to-orange-100/50 text-orange-700 hover:from-orange-100 hover:to-orange-200/50 transition-all">
+                        <div className="flex items-center gap-3">
+                          <Building2 className="h-4 w-4 text-brand-orange" />
+                          <span className="text-sm text-brand-orange">Emergency Support Facilities</span>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent className="pt-4 pb-5 px-5">
+                        <div className="flex flex-wrap gap-2.5">
+                          {Object.entries(facilityFilters).map(([key, checked]) => {
+                            const displayName = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+                            const Icon = facilityIcons[key] || MapPin;
+                            return (
+                              <button
+                                key={key}
+                                onClick={() => handleFacilityFilterChange(key as keyof typeof facilityFilters)}
+                                className={cn(
+                                  "flex items-center gap-2 px-4 py-2.5 text-xs font-medium rounded-lg transition-all border-2 group",
+                                  checked 
+                                    ? "bg-gradient-to-r from-brand-orange to-orange-500 text-white border-brand-orange" 
+                                    : "bg-white text-gray-700 border-gray-200 hover:border-orange-300 hover:bg-orange-50 hover:text-brand-orange"
+                                )}
+                              >
+                                <Icon className={cn("h-4 w-4 transition-colors", checked ? "text-white" : "text-gray-600 group-hover:text-brand-orange")} />
+                                {displayName}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  </Accordion>
                 </div>
               </div>
             )}

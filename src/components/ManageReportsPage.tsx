@@ -3845,8 +3845,11 @@ export function ManageReportsPage() {
         {/* Add Report Modal */}
         <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
           <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Add New Report</DialogTitle>
+            <DialogHeader className="border-b border-gray-200 pb-4">
+              <DialogTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5 text-[#FF4F0B]" />
+                Add New Report
+              </DialogTitle>
               <DialogDescription>
                 Create a new emergency report with all required details.
               </DialogDescription>

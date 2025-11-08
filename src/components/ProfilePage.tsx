@@ -567,8 +567,11 @@ export function ProfilePage() {
                     </Button>
                   </DialogTrigger>
                   <DialogContent className="sm:max-w-md">
-                    <DialogHeader>
-                      <DialogTitle>{editingNote ? 'Edit Note' : 'Add New Note'}</DialogTitle>
+                    <DialogHeader className="border-b border-gray-200 pb-4">
+                      <DialogTitle className="flex items-center gap-2">
+                        <StickyNote className="h-5 w-5 text-[#FF4F0B]" />
+                        {editingNote ? 'Edit Note' : 'Add New Note'}
+                      </DialogTitle>
                     </DialogHeader>
                     <div className="space-y-4">
                       <div className="space-y-2">
