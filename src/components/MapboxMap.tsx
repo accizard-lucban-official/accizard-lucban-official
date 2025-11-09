@@ -37,9 +37,9 @@ import MapboxGeocoder from '@mapbox/mapbox-gl-geocoder';
 import '@mapbox/mapbox-gl-geocoder/dist/mapbox-gl-geocoder.css';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Info, Layers } from 'lucide-react';
+import { Info, Layers, Car, Flame, Ambulance, Waves, Mountain, CircleAlert, Users, ShieldAlert, Activity, Building, Building2 } from 'lucide-react';
 import { ensureOk } from '@/lib/utils';
-import { Pin } from '@/types/pin';
+import { Pin, getPinCategory } from '@/types/pin';
 
 // Use the custom Mapbox access token for AcciZard Lucban
 mapboxgl.accessToken = 'pk.eyJ1IjoiYWNjaXphcmQtbHVjYmFuLW9mZmljaWFsIiwiYSI6ImNtaG93dTA2aDBnMG8ydm9vemd6a29sNzIifQ.j1N_NloJE19I2Mk4X3J2KA';
@@ -211,7 +211,7 @@ interface Marker {
 }
 
 interface MapboxMapProps {
-  onMapClick?: (lngLat: { lng: number; lat: number }, event?: mapboxgl.MapMouseEvent) => void;
+  onMapClick?: (lngLat: { lng: number; lat: number }) => void;
   showHeatmap?: boolean;
   center?: [number, number];
   zoom?: number;
@@ -472,36 +472,46 @@ export function MapboxMap({
 
   // Function to create popup content
   const createPopupContent = (marker: Marker, showActions: boolean = false) => {
+    const isFacility = getPinCategory(marker.type as any) === 'facility';
+    const showRID = !isFacility;
+    
     return `
-      <div class="p-3 min-w-[220px] max-w-[300px] overflow-hidden">
-        <h3 class="font-bold text-lg mb-2 text-gray-800 break-words leading-tight">${marker.title}</h3>
-        
-        <div class="space-y-2 text-sm overflow-hidden">
-          <div class="flex items-center gap-2 mb-1">
-            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
+      <div class="p-3 min-w-[220px] max-w-[300px] overflow-hidden" style="font-family: 'DM Sans', sans-serif;">
+        <!-- Top bar: Type on left for facilities, RID on left + Type on right for accidents -->
+        <div class="flex items-center ${isFacility ? 'justify-start' : 'justify-between'} mb-2 pb-2 border-b border-gray-200">
+          ${isFacility ? `
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800" style="font-family: 'DM Sans', sans-serif;">
               ${marker.type}
             </span>
-          </div>
-          
+          ` : `
+            <div class="flex items-center gap-2">
+              ${marker.reportId ? `
+                <span class="text-xs font-semibold text-gray-600" style="font-family: 'DM Sans', sans-serif;">RID</span>
+                <span class="text-xs text-gray-900" style="font-family: 'DM Sans', sans-serif;">${marker.reportId}</span>
+              ` : '<span class="text-xs text-gray-400" style="font-family: \'DM Sans\', sans-serif;">No RID</span>'}
+            </div>
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800" style="font-family: 'DM Sans', sans-serif;">
+              ${marker.type}
+            </span>
+          `}
+        </div>
+        
+        <h3 class="font-bold text-lg mb-1.5 text-gray-800 break-words" style="font-family: 'DM Sans', sans-serif; line-height: 1.2;">${marker.title}</h3>
+        
+        <div class="space-y-1.5 text-sm overflow-hidden">
           ${marker.locationName ? `
             <div class="flex items-start gap-2">
-              <span class="font-medium text-gray-700 flex-shrink-0 mt-0.5">Location:</span>
-              <span class="text-gray-600 break-words leading-relaxed">${marker.locationName}</span>
+              <span class="font-medium text-gray-700 flex-shrink-0" style="font-family: 'DM Sans', sans-serif; line-height: 1.3;">Location:</span>
+              <span class="text-gray-600 break-words" style="font-family: 'DM Sans', sans-serif; line-height: 1.3;">${marker.locationName}</span>
             </div>
           ` : ''}
           
           ${marker.latitude !== undefined && marker.longitude !== undefined ? `
             <div class="flex items-start gap-2">
-              <span class="font-medium text-gray-700 flex-shrink-0 mt-0.5">Coordinates:</span>
-              <span class="text-gray-600 font-mono text-xs break-all">
+              <span class="font-medium text-gray-700 flex-shrink-0" style="font-family: 'DM Sans', sans-serif; line-height: 1.3;">Coordinates:</span>
+              <span class="text-gray-600 text-xs break-all" style="font-family: 'DM Sans', sans-serif; line-height: 1.3;">
                 ${marker.latitude.toFixed(6)}, ${marker.longitude.toFixed(6)}
               </span>
-            </div>
-          ` : ''}
-          
-          ${marker.reportId ? `
-            <div class="mt-2 pt-2 border-t border-gray-200">
-              <span class="text-xs text-gray-500">Linked to Report #${marker.reportId}</span>
             </div>
           ` : ''}
         </div>
@@ -532,47 +542,100 @@ export function MapboxMap({
     `;
   };
 
+  // Function to get pin type icon SVG paths - matches PinModal icons
+  const getPinTypeIconSVG = (type: string): string[] => {
+    // Map pin types to lucide-react icon SVG paths (matching PinModal)
+    // Returns array of path strings for icons with multiple paths
+    const iconPaths: Record<string, string[]> = {
+      // Accident/Hazard Types
+      "Road Crash": ["M5 17m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0", "M5 17H3v-4", "M19 17m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0", "M19 17h2v-4", "M3 13h18", "M7 13V5", "m10 8V9"],
+      "Fire": ["M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z", "M9.879 16.121A3 3 0 1012.015 11L11 14H9c0 .768.293 1.536.879 2.121z"],
+      "Medical Emergency": ["M19 14l1.45-2.9A2 2 0 0018.86 9H5.14a2 2 0 00-1.59 2.1L5 14m14 0H5m14 0v4a2 2 0 01-2 2H7a2 2 0 01-2-2v-4", "M10 2v4", "M14 2v4"],
+      "Flooding": ["M12 2.69l5.66 5.66a8 8 0 11-11.31 0z"],
+      "Volcanic Activity": ["M5 12h14", "M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2", "M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2", "m-2-4h.01", "M17 16h.01"],
+      "Landslide": ["M5 12h14", "M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2", "M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2", "m-2-4h.01", "M17 16h.01"],
+      "Earthquake": ["M12 9v2m0 4h.01", "m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"],
+      "Civil Disturbance": ["M17 20h5v-2a3 3 0 00-5.356-1.857", "M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857", "M7 20H2v-2a3 3 0 015.356-1.857", "M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0", "M15 7a3 3 0 11-6 0 3 3 0 016 0z", "m6 3a2 2 0 11-4 0 2 2 0 014 0z", "M7 10a2 2 0 11-4 0 2 2 0 014 0z"],
+      "Armed Conflict": ["M9 12l2 2 4-4", "m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"],
+      "Infectious Disease": ["M13 10V3L4 14h7v7l9-11h-7z"],
+      // Emergency Facilities
+      "Evacuation Centers": ["M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5", "M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"],
+      "Health Facilities": ["M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5", "M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"],
+      "Police Stations": ["M9 12l2 2 4-4", "m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"],
+      "Fire Stations": ["M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.986-7C14 5 16.09 5.777 17.656 7.343A7.975 7.975 0 0120 13a7.975 7.975 0 01-2.343 5.657z", "M9.879 16.121A3 3 0 1012.015 11L11 14H9c0 .768.293 1.536.879 2.121z"],
+      "Government Offices": ["M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5", "M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"],
+      "Others": ["M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01", "M21 12a9 9 0 11-18 0 9 9 0 0118 0z"]
+    };
+    
+    return iconPaths[type] || iconPaths["Others"] || [""];
+  };
+
   // Function to create hover popup content (simpler info-only version)
   const createHoverPopupContent = (pin: Pin | Marker) => {
-    const description = 'description' in pin ? pin.description : undefined;
+    // Extract description - handle both Pin and Marker types
+    let description: string | undefined;
+    if ('description' in pin && pin.description) {
+      description = pin.description.trim();
+      // Filter out empty strings after trimming
+      if (description === '') {
+        description = undefined;
+      }
+    }
+    
     const locationName = 'locationName' in pin ? pin.locationName : (pin.description || '');
     const latitude = 'latitude' in pin ? pin.latitude : (pin.coordinates?.[1] || 0);
     const longitude = 'longitude' in pin ? pin.longitude : (pin.coordinates?.[0] || 0);
+    const reportId = 'reportId' in pin ? pin.reportId : undefined;
+    const isFacility = getPinCategory(pin.type as any) === 'facility';
+    const showRID = !isFacility;
     
     return `
-      <div class="min-w-[240px] max-w-[320px]">
-        <!-- Header Section -->
-        <div class="px-4 pt-3 pb-2.5 border-b border-gray-200 bg-gray-50/50">
-          <div class="flex items-start justify-between gap-2 mb-2">
-            <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold uppercase tracking-wide" style="background-color: rgba(249, 115, 22, 0.1); color: #f97316; border: 1px solid rgba(249, 115, 22, 0.2);">
-              ${pin.type}
-            </span>
+      <div style="min-width: 240px; max-width: 300px; font-family: 'DM Sans', sans-serif;">
+        <!-- Header -->
+        <div style="padding: 12px 12px 10px; background: linear-gradient(135deg, rgba(249, 115, 22, 0.08) 0%, rgba(249, 115, 22, 0.03) 100%); border-bottom: 1px solid rgba(229, 231, 235, 0.8);">
+          <!-- Top bar: Type on left for facilities, RID on left + Type on right for accidents -->
+          <div style="display: flex; align-items: center; ${isFacility ? 'justify-content: flex-start;' : 'justify-content: space-between;'} margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid rgba(229, 231, 235, 0.5);">
+            ${isFacility ? `
+              <span style="display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; background-color: rgba(249, 115, 22, 0.12); color: #f97316; border: 1px solid rgba(249, 115, 22, 0.25); font-family: 'DM Sans', sans-serif;">
+                ${pin.type}
+              </span>
+            ` : `
+              <div style="display: flex; align-items: center; gap: 6px;">
+                ${reportId ? `
+                  <span style="font-size: 11px; font-weight: 600; color: #6b7280; font-family: 'DM Sans', sans-serif;">RID</span>
+                  <span style="font-size: 11px; color: #1f2937; font-family: 'DM Sans', sans-serif;">${reportId}</span>
+                ` : '<span style="font-size: 11px; color: #9ca3af; font-family: \'DM Sans\', sans-serif;">No RID</span>'}
+              </div>
+              <span style="display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; background-color: rgba(249, 115, 22, 0.12); color: #f97316; border: 1px solid rgba(249, 115, 22, 0.25); font-family: 'DM Sans', sans-serif;">
+                ${pin.type}
+              </span>
+            `}
           </div>
-          <h4 class="text-base font-bold text-gray-900 break-words leading-tight pr-2">${pin.title}</h4>
+          <h3 style="font-size: 18px; font-weight: 700; color: #111827; margin: 0; line-height: 1.2; word-break: break-word; font-family: 'DM Sans', sans-serif;">${pin.title}</h3>
         </div>
         
-        <!-- Content Section -->
-        <div class="px-4 py-3 space-y-3 text-sm">
-          ${description ? `
-            <div class="space-y-1">
-              <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Description</div>
-              <div class="text-gray-700 break-words leading-relaxed">${description}</div>
-            </div>
-          ` : ''}
-          
-          ${locationName ? `
-            <div class="space-y-1 ${description ? 'pt-1 border-t border-gray-100' : ''}">
-              <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Location</div>
-              <div class="text-gray-700 break-words leading-relaxed text-sm">${locationName}</div>
-            </div>
-          ` : ''}
-          
-          <div class="space-y-1 ${(description || locationName) ? 'pt-1 border-t border-gray-100' : ''}">
-            <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Coordinates</div>
-            <div class="text-gray-600 font-mono text-xs break-all leading-relaxed">
-              ${latitude.toFixed(6)}, ${longitude.toFixed(6)}
+        <!-- Content -->
+        <div style="padding: 12px;">
+          <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: ${description ? '10px' : '0'};">
+            <svg style="width: 18px; height: 18px; color: #6b7280; margin-top: 2px; flex-shrink: 0;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
+            </svg>
+            <div style="flex: 1; min-width: 0;">
+              ${locationName ? `
+                <div style="font-size: 12px; font-weight: 500; color: #1f2937; margin-bottom: 4px; line-height: 1.3; word-break: break-word; font-family: 'DM Sans', sans-serif;">${locationName}</div>
+              ` : ''}
+              <div style="font-size: 11px; color: #6b7280; font-family: 'DM Sans', sans-serif; word-break: break-all; line-height: 1.3;">
+                ${latitude.toFixed(6)}, ${longitude.toFixed(6)}
+              </div>
             </div>
           </div>
+          
+          ${description ? `
+            <div style="padding-top: ${(locationName || latitude || longitude) ? '10px' : '0'}; ${(locationName || latitude || longitude) ? 'border-top: 1px solid #e5e7eb;' : ''}">
+              <div style="font-size: 14px; color: #374151; line-height: 1.3; word-break: break-word; font-family: 'DM Sans', sans-serif;">${description}</div>
+            </div>
+          ` : ''}
         </div>
       </div>
     `;
@@ -761,10 +824,31 @@ export function MapboxMap({
       }
     }
 
+    const isFacility = getPinCategory(marker.type as any) === 'facility';
+    const showRID = !isFacility;
+    
     return `
-      <div class="w-[200px]">
+      <div class="w-[200px]" style="font-family: 'DM Sans', sans-serif;">
         <div class="bg-gray-50 px-3 py-2 border-b border-gray-200">
-          <h4 class="text-xs font-semibold text-gray-700 uppercase tracking-wide">Report Details</h4>
+          <!-- Top bar: Type on left for facilities, RID on left + Type on right for accidents -->
+          <div class="flex items-center ${isFacility ? 'justify-start' : 'justify-between'} mb-2 pb-2 border-b border-gray-300">
+            ${isFacility ? `
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800" style="font-family: 'DM Sans', sans-serif;">
+                ${marker.type}
+              </span>
+            ` : `
+              <div class="flex items-center gap-2">
+                ${marker.reportId ? `
+                  <span class="text-xs font-semibold text-gray-600" style="font-family: 'DM Sans', sans-serif;">RID</span>
+                  <span class="text-xs text-gray-900" style="font-family: 'DM Sans', sans-serif;">${marker.reportId}</span>
+                ` : '<span class="text-xs text-gray-400" style="font-family: \'DM Sans\', sans-serif;">No RID</span>'}
+              </div>
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800" style="font-family: 'DM Sans', sans-serif;">
+                ${marker.type}
+              </span>
+            `}
+          </div>
+          <h4 class="text-xs font-semibold text-gray-700 uppercase tracking-wide" style="font-family: 'DM Sans', sans-serif; line-height: 1.2;">Report Details</h4>
         </div>
         <div class="p-3">
           <div class="flex items-start gap-2 mb-2">
@@ -773,8 +857,8 @@ export function MapboxMap({
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
             </svg>
             <div class="min-w-0 flex-1">
-              <span class="text-sm font-medium text-gray-900 break-words leading-tight block">${locationName}</span>
-              <span class="text-xs text-gray-500 font-mono block mt-1">${marker.latitude?.toFixed(6)}, ${marker.longitude?.toFixed(6)}</span>
+              <span class="text-sm font-medium text-gray-900 break-words block" style="font-family: 'DM Sans', sans-serif; line-height: 1.2;">${locationName}</span>
+              <span class="text-xs text-gray-500 block mt-0.5" style="font-family: 'DM Sans', sans-serif; line-height: 1.2;">${marker.latitude?.toFixed(6)}, ${marker.longitude?.toFixed(6)}</span>
             </div>
           </div>
           
@@ -1046,7 +1130,7 @@ export function MapboxMap({
           
           // Call the callback using ref to get latest version
           if (onMapClickRef.current) {
-            onMapClickRef.current(e.lngLat, e);
+            onMapClickRef.current(e.lngLat);
           }
         };
 
@@ -1146,6 +1230,11 @@ export function MapboxMap({
       popupRef.current.remove();
     }
 
+    // Don't render pins when heatmap is active
+    if (showHeatmap) {
+      return;
+    }
+
     // Handle single marker (from database)
     if (singleMarker) {
       console.log("=== RENDERING SINGLE MARKER ===");
@@ -1188,7 +1277,7 @@ export function MapboxMap({
         const popup = new mapboxgl.Popup({
           offset: 25,
           closeButton: false,
-          closeOnClick: true,
+          closeOnClick: false,
           className: 'custom-popup',
           maxWidth: '200px'
         })
@@ -1250,7 +1339,7 @@ export function MapboxMap({
         const clickedPopup = new mapboxgl.Popup({
           offset: 25,
           closeButton: false,
-          closeOnClick: true,
+          closeOnClick: false,
           className: 'custom-popup',
           maxWidth: '200px'
         })
@@ -1363,8 +1452,8 @@ export function MapboxMap({
           }
         });
 
-        // Add click event to show popup
-        el.addEventListener('click', async () => {
+        // Add click event to open edit form
+        el.addEventListener('click', () => {
           // Remove hover popup when clicking
           if (hoverPopupRef.current) {
             hoverPopupRef.current.remove();
@@ -1375,29 +1464,34 @@ export function MapboxMap({
             popupRef.current.remove();
           }
 
-          // Convert Pin to Marker format for popup
-          const markerData: Marker = {
-            id: pin.id,
-            type: pin.type,
-            title: pin.title,
-            description: pin.description || pin.locationName,
-            reportId: pin.reportId,
-            coordinates: [pin.longitude, pin.latitude],
-            locationName: pin.locationName,
-            latitude: pin.latitude,
-            longitude: pin.longitude
-          };
+          // Call onEditPin if available and canEdit is true
+          if (onEditPin && canEdit) {
+            onEditPin(pin);
+          } else if (!canEdit) {
+            // If can't edit, show popup instead
+            const markerData: Marker = {
+              id: pin.id,
+              type: pin.type,
+              title: pin.title,
+              description: pin.description || pin.locationName,
+              reportId: pin.reportId,
+              coordinates: [pin.longitude, pin.latitude],
+              locationName: pin.locationName,
+              latitude: pin.latitude,
+              longitude: pin.longitude
+            };
 
-          popupRef.current = new mapboxgl.Popup({ 
-            offset: 25,
-            closeButton: false,
-            closeOnClick: true,
-            className: 'custom-popup',
-            maxWidth: '240px'
-          })
-          .setLngLat([pin.longitude, pin.latitude])
-          .setHTML(showDirections ? await createPopupContentWithTravelTime(markerData) : createPopupContent(markerData, true))
-          .addTo(map.current!);
+            popupRef.current = new mapboxgl.Popup({ 
+              offset: 25,
+              closeButton: false,
+              closeOnClick: false,
+              className: 'custom-popup',
+              maxWidth: '240px'
+            })
+            .setLngLat([pin.longitude, pin.latitude])
+            .setHTML(createPopupContent(markerData, false))
+            .addTo(map.current!);
+          }
         });
 
         markersRef.current.push(markerInstance);
@@ -1467,7 +1561,7 @@ export function MapboxMap({
         popupRef.current = new mapboxgl.Popup({ 
           offset: [0, -10],
           closeButton: false,
-          closeOnClick: true,
+          closeOnClick: false,
           className: 'custom-popup',
           maxWidth: '200px'
         })
@@ -1478,7 +1572,7 @@ export function MapboxMap({
 
       markersRef.current.push(markerInstance);
     });
-  }, [mapLoaded, activeFilters, singleMarker, pins, userLocation, showOnlyCurrentLocation, clickedLocation]);
+  }, [mapLoaded, activeFilters, singleMarker, pins, userLocation, showOnlyCurrentLocation, clickedLocation, onEditPin, canEdit, showDirections, showHeatmap]);
 
   // Handle route display
   useEffect(() => {
@@ -1699,76 +1793,68 @@ export function MapboxMap({
     const hasCoordinates = coordinates;
     
     return `
-      <div class="min-w-[240px] max-w-[320px]">
-        <!-- Header Section -->
-        <div class="px-4 pt-3 pb-2.5 border-b border-gray-200 bg-gray-50/50">
-          <div class="flex items-start justify-between gap-2 mb-2">
-            <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold uppercase tracking-wide" style="background-color: rgba(249, 115, 22, 0.1); color: #f97316; border: 1px solid rgba(249, 115, 22, 0.2);">
+      <div style="min-width: 240px; max-width: 300px; font-family: 'DM Sans', sans-serif;">
+        <!-- Header -->
+        <div style="padding: 16px 16px 12px; background: linear-gradient(135deg, rgba(249, 115, 22, 0.08) 0%, rgba(249, 115, 22, 0.03) 100%); border-bottom: 1px solid rgba(229, 231, 235, 0.8);">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+            <svg style="width: 16px; height: 16px; color: #f97316; flex-shrink: 0;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              ${getPinTypeIconSVG(type).map(path => 
+                `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${path}"></path>`
+              ).join('')}
+            </svg>
+            <span style="display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; background-color: rgba(249, 115, 22, 0.12); color: #f97316; border: 1px solid rgba(249, 115, 22, 0.25);">
               ${type}
             </span>
           </div>
-          <h4 class="text-base font-bold text-gray-900 break-words leading-tight pr-2">${name}</h4>
+          <h3 style="font-size: 18px; font-weight: 700; color: #111827; margin: 0; line-height: 1.3; word-break: break-word;">${name}</h3>
         </div>
         
-        <!-- Content Section -->
-        <div class="px-4 py-3 space-y-3 text-sm">
+        <!-- Content -->
+        <div style="padding: 16px;">
+          <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: ${(description || capacity || contact) ? '16px' : '0'};">
+            <svg style="width: 18px; height: 18px; color: #6b7280; margin-top: 2px; flex-shrink: 0;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
+            </svg>
+            <div style="flex: 1; min-width: 0;">
+              ${address ? `
+                <div style="font-size: 12px; font-weight: 500; color: #1f2937; margin-bottom: 6px; line-height: 1.5; word-break: break-word;">${address}</div>
+              ` : ''}
+              ${barangay ? `
+                <div style="font-size: 12px; font-weight: 500; color: #1f2937; margin-bottom: ${address ? '6px' : coordinates ? '6px' : '0'}; line-height: 1.5; word-break: break-word;">${barangay}</div>
+              ` : ''}
+              ${coordinates ? `
+                <div style="font-size: 11px; color: #6b7280; font-family: 'Courier New', monospace; word-break: break-all; line-height: 1.5;">
+                  ${coordinates[1].toFixed(6)}, ${coordinates[0].toFixed(6)}
+                </div>
+              ` : ''}
+            </div>
+          </div>
+          
           ${description ? `
-            <div class="space-y-1">
-              <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Description</div>
-              <div class="text-gray-700 break-words leading-relaxed">${description}</div>
-            </div>
-          ` : ''}
-          
-          ${address ? `
-            <div class="space-y-1 ${description ? 'pt-1 border-t border-gray-100' : ''}">
-              <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Address</div>
-              <div class="text-gray-700 break-words leading-relaxed text-sm">${address}</div>
-            </div>
-          ` : ''}
-          
-          ${barangay ? `
-            <div class="space-y-1 ${(description || address) ? 'pt-1 border-t border-gray-100' : ''}">
-              <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Barangay</div>
-              <div class="text-gray-700 break-words leading-relaxed text-sm">${barangay}</div>
+            <div style="margin-bottom: ${(capacity || contact) ? '16px' : '0'}; padding-top: ${(address || barangay || coordinates) ? '12px' : '0'}; ${(address || barangay || coordinates) ? 'border-top: 1px solid #e5e7eb;' : ''}">
+              <div style="font-size: 14px; color: #374151; line-height: 1.6; word-break: break-word;">${description}</div>
             </div>
           ` : ''}
           
           ${(capacity || contact) ? `
-            <div class="pt-2 border-t border-gray-200 space-y-2.5">
+            <div style="padding-top: ${(description || address || barangay || coordinates) ? '12px' : '0'}; ${(description || address || barangay || coordinates) ? 'border-top: 1px solid #e5e7eb;' : ''}">
               ${capacity ? `
-                <div class="space-y-1">
-                  <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Capacity</div>
-                  <div class="text-gray-700 text-sm font-medium">${capacity}</div>
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: ${contact ? '8px' : '0'};">
+                  <svg style="width: 16px; height: 16px; color: #6b7280; flex-shrink: 0;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                  </svg>
+                  <span style="font-size: 14px; color: #1f2937; font-weight: 500;">${capacity}</span>
                 </div>
               ` : ''}
-              
               ${contact ? `
-                <div class="space-y-1 ${capacity ? 'pt-1 border-t border-gray-100' : ''}">
-                  <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Contact</div>
-                  <div class="text-gray-700 break-words leading-relaxed text-sm">${contact}</div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <svg style="width: 16px; height: 16px; color: #6b7280; flex-shrink: 0;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"></path>
+                  </svg>
+                  <span style="font-size: 14px; color: #1f2937; word-break: break-word;">${contact}</span>
                 </div>
               ` : ''}
-            </div>
-          ` : ''}
-          
-          ${coordinates ? `
-            <div class="space-y-1 ${hasPrimaryInfo || hasSecondaryInfo ? 'pt-2 border-t border-gray-200' : ''}">
-              <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Coordinates</div>
-              <div class="text-gray-600 font-mono text-xs break-all leading-relaxed">
-                ${coordinates[1].toFixed(6)}, ${coordinates[0].toFixed(6)}
-              </div>
-            </div>
-          ` : ''}
-          
-          ${Object.keys(props).length > 0 && !name && !address && !description && !barangay && !capacity && !contact ? `
-            <div class="pt-2 border-t border-gray-200 space-y-1.5">
-              <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Additional Information</div>
-              ${Object.entries(props).slice(0, 5).map(([key, value]) => 
-                `<div class="space-y-0.5">
-                  <span class="text-xs font-medium text-gray-600">${key}:</span>
-                  <span class="text-xs text-gray-700 ml-1">${value}</span>
-                </div>`
-              ).join('')}
             </div>
           ` : ''}
         </div>

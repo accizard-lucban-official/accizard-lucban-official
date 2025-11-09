@@ -19,7 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { MapPin, X, Type, FileText, MapPin as MapPinIcon, Navigation } from "lucide-react";
+import { MapPin, X, Type, FileText, MapPin as MapPinIcon, Navigation, Trash2 } from "lucide-react";
 import { Pin, PinType } from "@/types/pin";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -53,6 +53,7 @@ interface PinModalProps {
   existingPin?: Pin;
   prefillData?: Partial<PinFormData>;
   onMapClick?: (lngLat: { lng: number; lat: number }) => void;
+  onDelete?: (pinId: string) => void;
 }
 
 export interface PinFormData {
@@ -84,7 +85,8 @@ export function PinModal({
   mode,
   existingPin,
   prefillData,
-  onMapClick
+  onMapClick,
+  onDelete
 }: PinModalProps) {
   const [formData, setFormData] = useState<PinFormData>({
     type: "",
@@ -113,25 +115,9 @@ export function PinModal({
         reportId: existingPin.reportId
       });
       setIsWaitingForMapClick(false);
-    } else if (prefillData) {
-      setFormData(prev => ({
-        type: prefillData.type || prev.type || "",
-        title: prefillData.title || prev.title || "",
-        description: prefillData.description || prev.description || "",
-        latitude: prefillData.latitude !== undefined ? prefillData.latitude : prev.latitude,
-        longitude: prefillData.longitude !== undefined ? prefillData.longitude : prev.longitude,
-        locationName: prefillData.locationName || prev.locationName || "",
-        reportId: prefillData.reportId || prev.reportId
-      }));
-      // Stop waiting for map click if coordinates are provided
-      if (prefillData.latitude !== undefined && prefillData.longitude !== undefined) {
-        setIsWaitingForMapClick(false);
-      } else if (!prefillData.latitude && !prefillData.longitude && mode === "create") {
-        setIsWaitingForMapClick(true);
-      }
-    } else if (mode === "create" && !existingPin) {
-      // Reset for new pin
-      setFormData({
+    } else if (mode === "create") {
+      // Always start with a clean form in create mode
+      const baseFormData = {
         type: "",
         title: "",
         description: "",
@@ -139,8 +125,30 @@ export function PinModal({
         longitude: null,
         locationName: "",
         reportId: undefined
-      });
-      setIsWaitingForMapClick(true); // Start in map click mode for new pins
+      };
+      
+      // Then apply prefillData if provided, checking for explicit values
+      if (prefillData) {
+        setFormData({
+          type: prefillData.type !== undefined ? prefillData.type : baseFormData.type,
+          title: prefillData.title !== undefined ? prefillData.title : baseFormData.title,
+          description: prefillData.description !== undefined ? prefillData.description : baseFormData.description,
+          latitude: prefillData.latitude !== undefined ? prefillData.latitude : baseFormData.latitude,
+          longitude: prefillData.longitude !== undefined ? prefillData.longitude : baseFormData.longitude,
+          locationName: prefillData.locationName !== undefined ? prefillData.locationName : baseFormData.locationName,
+          reportId: prefillData.reportId !== undefined ? prefillData.reportId : baseFormData.reportId
+        });
+        // Stop waiting for map click if coordinates are provided
+        if (prefillData.latitude !== undefined && prefillData.longitude !== undefined) {
+          setIsWaitingForMapClick(false);
+        } else {
+          setIsWaitingForMapClick(true);
+        }
+      } else {
+        // No prefillData, use clean form
+        setFormData(baseFormData);
+        setIsWaitingForMapClick(true); // Start in map click mode for new pins
+      }
     }
   }, [mode, existingPin, prefillData, isOpen]);
 
@@ -153,6 +161,13 @@ export function PinModal({
       console.error("Error saving pin:", error);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleDelete = () => {
+    if (onDelete && existingPin?.id) {
+      onDelete(existingPin.id);
+      onClose();
     }
   };
 
@@ -177,13 +192,8 @@ export function PinModal({
   };
 
   const isValid = () => {
-    return (
-      formData.type &&
-      formData.title.trim() &&
-      formData.locationName.trim() &&
-      formData.latitude !== null &&
-      formData.longitude !== null
-    );
+    // Only pin type is required
+    return formData.type.trim().length > 0;
   };
 
   const isFromReport = !!prefillData?.reportId;
@@ -193,6 +203,23 @@ export function PinModal({
 
   return (
     <>
+      {/* Custom scrollbar styles */}
+      <style>{`
+        .pin-modal-scroll::-webkit-scrollbar {
+          width: 8px;
+        }
+        .pin-modal-scroll::-webkit-scrollbar-track {
+          background: #f1f5f9;
+          border-radius: 4px;
+        }
+        .pin-modal-scroll::-webkit-scrollbar-thumb {
+          background: #cbd5e1;
+          border-radius: 4px;
+        }
+        .pin-modal-scroll::-webkit-scrollbar-thumb:hover {
+          background: #94a3b8;
+        }
+      `}</style>
       {/* Mobile Backdrop - only show on mobile */}
       {isMobile && (
         <div 
@@ -204,7 +231,7 @@ export function PinModal({
       {/* Overlay Panel */}
       <div 
         className={cn(
-          "bg-white shadow-2xl transition-transform duration-300 ease-in-out",
+          "bg-white shadow-2xl transition-transform duration-300 ease-in-out flex flex-col",
           // Desktop: Right side overlay within map container
           "md:absolute md:right-0 md:top-0 md:h-full md:w-[420px] lg:w-[450px] md:z-50",
           // Mobile: Bottom sheet (fixed for mobile)
@@ -224,13 +251,13 @@ export function PinModal({
       >
         {/* Mobile Drag Handle */}
         {isMobile && (
-          <div className="flex justify-center pt-3 pb-2">
+          <div className="flex justify-center pt-3 pb-2 flex-shrink-0">
             <div className="w-12 h-1.5 bg-gray-300 rounded-full" />
           </div>
         )}
 
         {/* Header */}
-        <div className="sticky top-0 bg-white border-b border-gray-200 px-4 sm:px-6 py-3 z-10">
+        <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3 flex-shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <MapPin className="h-5 w-5 text-[#FF4F0B]" />
@@ -257,12 +284,19 @@ export function PinModal({
         </div>
 
         {/* Scrollable Content */}
-        <div className="overflow-y-auto px-4 sm:px-6 pt-3 pb-4" style={{ maxHeight: isMobile ? 'calc(85vh - 140px)' : 'calc(100vh - 120px)' }}>
-          <div className="space-y-5">
+        <div 
+          className="pin-modal-scroll px-4 sm:px-6 pt-3 pb-4 flex-1 overflow-y-auto" 
+          style={{ 
+            scrollbarWidth: 'thin',
+            scrollbarColor: '#cbd5e1 #f1f5f9',
+            minHeight: 0
+          }}
+        >
+          <div className="space-y-3">
           {/* Pin Type */}
-          <div className="space-y-1.5">
+          <div className="space-y-1">
             <Label htmlFor="pin-type" className="text-sm font-medium text-gray-700">
-              Pin Type
+              Pin Type <span className="text-red-500">*</span>
             </Label>
             <Select 
               value={formData.type} 
@@ -312,6 +346,34 @@ export function PinModal({
               </SelectContent>
             </Select>
           </div>
+
+          {/* Report ID - Only show for Accident/Hazard types */}
+          {accidentHazardTypes.includes(formData.type) && (
+            <div className="space-y-1">
+              <Label htmlFor="report-id" className="text-sm font-medium text-gray-700">
+                Report ID
+              </Label>
+              <div className="relative">
+                <div className="flex items-center">
+                  <div className="flex items-center px-3 h-10 bg-gray-50 border border-r-0 border-gray-300 rounded-l-md text-sm font-medium text-gray-700">
+                    RID
+                  </div>
+                  <Input
+                    id="report-id"
+                    type="text"
+                    placeholder="Enter report ID number"
+                    value={formData.reportId || ''}
+                    onChange={(e) => {
+                      // Only allow numeric characters
+                      const value = e.target.value.replace(/[^0-9]/g, '');
+                      setFormData({ ...formData, reportId: value || undefined });
+                    }}
+                    className="h-10 rounded-l-none border-l-0 border-gray-300 focus:border-black focus:ring-black/20"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Title */}
           <div className="space-y-1.5">
@@ -369,9 +431,9 @@ export function PinModal({
           </div>
 
           {/* Location Section */}
-          <div className="space-y-3">
+          <div className="space-y-2">
             {/* Location Name */}
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label htmlFor="location-name" className="text-sm font-medium text-gray-700">
                 Location Name
               </Label>
@@ -385,41 +447,40 @@ export function PinModal({
             </div>
 
             {/* Coordinates */}
-            <div className="grid grid-cols-2 gap-2 sm:gap-3 mb-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="latitude" className="text-sm font-medium text-gray-700">
-                  Latitude
-                </Label>
-                <Input
-                  id="latitude"
-                  type="number"
-                  step="any"
-                  placeholder="0.000000"
-                  value={formData.latitude !== null && formData.latitude !== undefined ? formData.latitude.toString() : ''}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setFormData({ ...formData, latitude: val === '' ? null : parseFloat(val) || null });
-                  }}
-                  className="h-10 border-gray-300 focus:border-black focus:ring-black/20"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="longitude" className="text-sm font-medium text-gray-700">
-                  Longitude
-                </Label>
-                <Input
-                  id="longitude"
-                  type="number"
-                  step="any"
-                  placeholder="0.000000"
-                  value={formData.longitude !== null && formData.longitude !== undefined ? formData.longitude.toString() : ''}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setFormData({ ...formData, longitude: val === '' ? null : parseFloat(val) || null });
-                  }}
-                  className="h-10 border-gray-300 focus:border-black focus:ring-black/20"
-                />
-              </div>
+            <div className="space-y-1 mb-4">
+              <Label htmlFor="coordinates" className="text-sm font-medium text-gray-700">
+                Coordinates
+              </Label>
+              <Input
+                id="coordinates"
+                type="text"
+                placeholder="Latitude, Longitude (e.g., 14.1139, 121.5556)"
+                value={
+                  formData.latitude !== null && formData.latitude !== undefined &&
+                  formData.longitude !== null && formData.longitude !== undefined
+                    ? `${formData.latitude}, ${formData.longitude}`
+                    : ''
+                }
+                onChange={(e) => {
+                  const val = e.target.value.trim();
+                  if (val === '') {
+                    setFormData({ ...formData, latitude: null, longitude: null });
+                    return;
+                  }
+                  
+                  // Parse "Latitude, Longitude" format
+                  const parts = val.split(',').map(p => p.trim());
+                  if (parts.length === 2) {
+                    const lat = parseFloat(parts[0]);
+                    const lng = parseFloat(parts[1]);
+                    if (!isNaN(lat) && !isNaN(lng)) {
+                      setFormData({ ...formData, latitude: lat, longitude: lng });
+                    }
+                  }
+                  // If only one value is entered, don't update yet (wait for comma and second value)
+                }}
+                className="h-10 border-gray-300 focus:border-black focus:ring-black/20"
+              />
             </div>
           </div>
 
@@ -440,38 +501,38 @@ export function PinModal({
             </div>
           )}
 
-          {/* Report ID (if from report) */}
-          {formData.reportId && (
-            <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-lg">
-              <div className="space-y-0.5">
-                <Label className="text-xs font-semibold text-blue-900 uppercase tracking-wide">
-                  Linked Report
-                </Label>
-                <p className="text-sm text-blue-800 font-mono">
-                  {formData.reportId}
-                </p>
-              </div>
-            </div>
-          )}
           </div>
         </div>
 
-        {/* Action Buttons - Sticky Footer */}
-        <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 sm:px-6 py-2 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] h-auto">
-          <Button 
-            onClick={handleSave} 
-            className="w-full h-10 bg-[#FF4F0B] hover:bg-[#FF4F0B]/90 text-white font-medium shadow-sm hover:shadow-md transition-all"
-            disabled={!isValid() || isSaving}
-          >
-            {isSaving ? (
-              <>
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
-                Saving...
-              </>
-            ) : (
-              mode === "create" ? "Add Pin" : "Save Changes"
+        {/* Action Buttons - Footer */}
+        <div className="bg-white border-t border-gray-200 px-4 sm:px-6 py-2 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] flex-shrink-0">
+          <div className="flex gap-3">
+            {mode === "edit" && onDelete && existingPin?.id && (
+              <Button 
+                onClick={handleDelete} 
+                variant="destructive"
+                className="h-10 px-4 border-red-300 hover:bg-red-600 hover:border-red-400"
+                disabled={isSaving}
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete
+              </Button>
             )}
-          </Button>
+            <Button 
+              onClick={handleSave} 
+              className="flex-1 h-10 bg-brand-orange hover:bg-brand-orange/90 text-white font-medium shadow-sm hover:shadow-md transition-all"
+              disabled={!isValid() || isSaving}
+            >
+              {isSaving ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+                  Saving...
+                </>
+              ) : (
+                mode === "create" ? "Add Pin" : "Save Changes"
+              )}
+            </Button>
+          </div>
         </div>
       </div>
     </>

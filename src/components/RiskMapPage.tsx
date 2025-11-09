@@ -24,7 +24,6 @@ import { usePins } from "@/hooks/usePins";
 import { Pin, PinType } from "@/types/pin";
 import { toast } from "@/components/ui/sonner";
 import { PinModal, PinFormData } from "./PinModal";
-import { CompactPinForm } from "./CompactPinForm";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 
@@ -80,7 +79,6 @@ export function RiskMapPage() {
   const [pinModalPrefill, setPinModalPrefill] = useState<Partial<PinFormData> | undefined>(undefined);
   const [isLegendDialogOpen, setIsLegendDialogOpen] = useState(false);
   const [tempClickedLocation, setTempClickedLocation] = useState<{ lat: number; lng: number; locationName: string } | null>(null);
-  const [compactFormPosition, setCompactFormPosition] = useState<{ x: number; y: number } | null>(null);
   
   // Delete Confirmation State
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -89,6 +87,10 @@ export function RiskMapPage() {
   // Filters Panel State
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [mapLayerStyle, setMapLayerStyle] = useState<'streets' | 'satellite'>('streets');
+  
+  // Track previous filter state to prevent duplicate toast messages
+  const previousFilterStateRef = useRef<string>('');
+  const hasShownToastRef = useRef<boolean>(false);
   
   // Add Placemark Mode State
   const [isAddPlacemarkMode, setIsAddPlacemarkMode] = useState(false);
@@ -260,6 +262,15 @@ export function RiskMapPage() {
       return;
     }
     
+    // If checking an accident/hazard filter, turn off all emergency facility filters
+    setFacilityFilters({
+      evacuationCenters: false,
+      healthFacilities: false,
+      policeStations: false,
+      fireStations: false,
+      governmentOffices: false
+    });
+    
     // If checking, uncheck all other accident filters (only one at a time)
     const newFilters = {
       roadCrash: false,
@@ -287,6 +298,21 @@ export function RiskMapPage() {
       setFacilityFilters(prev => ({ ...prev, [key]: false }));
       return;
     }
+    
+    // If checking a facility filter, turn off all accident/hazard filters
+    setAccidentFilters({
+      roadCrash: false,
+      fire: false,
+      medicalEmergency: false,
+      flooding: false,
+      volcanicActivity: false,
+      landslide: false,
+      earthquake: false,
+      civilDisturbance: false,
+      armedConflict: false,
+      infectiousDisease: false,
+      others: false
+    });
     
     // If checking, count total active filters
     const totalActive = Object.values(accidentFilters).filter(Boolean).length + 
@@ -536,6 +562,7 @@ ${placemarks}
     setPinModalPrefill({
       type: pin.type,
       title: pin.title,
+      description: pin.description || "",
       latitude: pin.latitude,
       longitude: pin.longitude,
       locationName: pin.locationName,
@@ -682,6 +709,17 @@ ${placemarks}
   useEffect(() => {
     const activeTypes = getActiveFilterTypes();
     
+    // Get active accident/hazard types (excluding facilities)
+    const activeAccidentTypes = Object.entries(accidentFilters)
+      .filter(([_, isActive]) => isActive)
+      .map(([key]) => convertFilterKeyToType(key));
+    
+    // If no filters are active, clear pins and don't subscribe
+    if (activeTypes.length === 0) {
+      setPins([]);
+      return () => {}; // Return empty cleanup function
+    }
+    
     // Build filter object
     const filters: any = {
       searchQuery: searchQuery
@@ -692,23 +730,64 @@ ${placemarks}
       filters.types = activeTypes;
     }
 
-    // Add date range filters
-    if (date?.from) {
-      filters.dateFrom = date.from;
+    // Add date range filters only if accident/hazard types are selected
+    // Date filters should not apply to emergency support facilities
+    if (activeAccidentTypes.length > 0) {
+      if (date?.from) {
+        filters.dateFrom = date.from;
+      }
+      if (date?.to) {
+        filters.dateTo = date.to;
+      }
     }
-    if (date?.to) {
-      filters.dateTo = date.to;
+
+    // Create a unique key for the current filter state
+    const currentFilterKey = JSON.stringify({
+      types: activeAccidentTypes.sort(),
+      dateFrom: date?.from?.toISOString(),
+      dateTo: date?.to?.toISOString()
+    });
+    
+    // Check if filters have changed
+    const filtersChanged = previousFilterStateRef.current !== currentFilterKey;
+    
+    // Reset toast flag when filters change
+    if (filtersChanged) {
+      previousFilterStateRef.current = currentFilterKey;
+      hasShownToastRef.current = false;
     }
 
     const unsubscribe = subscribeToPins(
       filters,
       (fetchedPins) => {
         setPins(fetchedPins);
+        
+        // Show message only once when filters change
+        if (activeAccidentTypes.length > 0 && !hasShownToastRef.current) {
+          if (fetchedPins.length === 0) {
+            // No pins found
+            const firstActiveType = activeAccidentTypes[0];
+            toast.info(`No reports for ${firstActiveType}`, {
+              duration: 3000
+            });
+          } else {
+            // Pins found - show count and type
+            const firstActiveType = activeAccidentTypes[0];
+            const count = fetchedPins.length;
+            toast.info(`${count} ${count === 1 ? 'report' : 'reports'} for ${firstActiveType}`, {
+              duration: 3000
+            });
+          }
+          hasShownToastRef.current = true;
+        }
       },
       (error) => {
         // Only show error toast if it's a real error, not just "no pins found"
         if (error.message && !error.message.includes('permission-denied')) {
-          toast.error('Failed to fetch pins from database');
+          // Show more specific error message
+          const errorMessage = error.message || 'Failed to fetch pins from database';
+          toast.error(errorMessage);
+          console.error('Error fetching pins:', error);
         }
       }
     );
@@ -958,8 +1037,8 @@ ${placemarks}
               <MapboxMap 
               showControls={true}
               onLegendClick={() => setIsLegendDialogOpen(true)}
-              onMapClick={async (lngLat, event?) => {
-                // If in add placemark mode, place the marker and open the compact form
+              onMapClick={async (lngLat) => {
+                // If in add placemark mode, place the marker and open the form
                 if (isAddPlacemarkMode) {
                   const locationName = await reverseGeocode(lngLat.lat.toString(), lngLat.lng.toString());
                   console.log("=== PLACING PLACEMARK ===");
@@ -980,25 +1059,8 @@ ${placemarks}
                     lng: lngLat.lng,
                     locationName: locationName
                   });
-                  
-                  // Calculate position for compact form (near the clicked point)
-                  if (event && event.point) {
-                    // Get the map container to calculate absolute position
-                    const mapContainer = event.target.getContainer();
-                    if (mapContainer) {
-                      const rect = mapContainer.getBoundingClientRect();
-                      setCompactFormPosition({
-                        x: rect.left + event.point.x,
-                        y: rect.top + event.point.y
-                      });
-                    } else {
-                      setCompactFormPosition(null);
-                    }
-                  } else {
-                    // Fallback: position in top-right
-                    setCompactFormPosition(null);
-                  }
-                  
+                  console.log("Pin modal prefill set with coordinates");
+                  setIsPinModalOpen(true);
                   setIsAddPlacemarkMode(false); // Exit add placemark mode
                   setIsFiltersOpen(false);
                   toast.success("Placemark placed! Fill in pin details.");
@@ -1045,41 +1107,21 @@ ${placemarks}
               onStyleChange={(style) => setMapLayerStyle(style)}
                       />
             
-            {/* Compact Pin Form - appears on map when placing placemark */}
-            {pinModalMode === "create" && pinModalPrefill && (
-              <CompactPinForm
-                isOpen={!!pinModalPrefill}
-                onClose={() => {
-                  setPinModalPrefill(undefined);
-                  setTempClickedLocation(null);
-                  setCompactFormPosition(null);
-                  setIsAddPlacemarkMode(false);
-                }}
-                onSave={async (pinData) => {
-                  await handleSavePin(pinData);
-                  setPinModalPrefill(undefined);
-                  setTempClickedLocation(null);
-                  setCompactFormPosition(null);
-                }}
-                prefillData={pinModalPrefill}
-                position={compactFormPosition || undefined}
-              />
-            )}
-
-            {/* Pin Modal for Edit - positioned within map container */}
+            {/* Pin Modal for Create/Edit - positioned within map container */}
             <PinModal
-              isOpen={isPinModalOpen && pinModalMode === "edit"}
+              isOpen={isPinModalOpen}
               onClose={() => {
                 setIsPinModalOpen(false);
                 setPinModalPrefill(undefined);
                 setEditingPin(undefined);
-                setTempClickedLocation(null);
-                setIsAddPlacemarkMode(false);
+                setTempClickedLocation(null); // Clear temporary marker when modal closes
+                setIsAddPlacemarkMode(false); // Exit add placemark mode when modal closes
               }}
               onSave={handleSavePin}
               mode={pinModalMode}
               existingPin={editingPin}
               prefillData={pinModalPrefill}
+              onDelete={handleDeletePinClick}
             />
             
             {/* Filters Overlay - positioned within map container */}
@@ -1132,81 +1174,17 @@ ${placemarks}
                     scrollbarColor: '#cbd5e1 #f1f5f9'
                   }}
                 >
-                  <Accordion type="multiple" defaultValue={["timeline", "layers", "accidents", "facilities"]} className="space-y-3">
-                    {/* Timeline */}
-                    <AccordionItem value="timeline" className="mb-0 border-b-0 bg-white rounded-xl overflow-hidden">
-                      <AccordionTrigger className="py-4 px-5 text-sm font-semibold hover:no-underline bg-gradient-to-r from-orange-50 to-orange-100/50 text-orange-700 hover:from-orange-100 hover:to-orange-200/50 transition-all">
-                        <div className="flex items-center gap-3">
-                          <CalendarIcon className="h-4 w-4 text-brand-orange" />
-                          <span className="text-sm text-brand-orange">Timeline</span>
-                        </div>
-                      </AccordionTrigger>
-                      <AccordionContent className="pt-4 pb-5 px-5">
-                        <div className="flex flex-col space-y-3">
-                          <div>
-                            <label className="text-xs font-semibold text-gray-700 mb-2 block">Date Range</label>
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <Button
-                                  variant="outline"
-                                  className={cn(
-                                    "w-full justify-start text-left font-normal h-10 border-gray-300 hover:border-gray-300 hover:bg-gray-100",
-                                    !date?.from && "text-muted-foreground"
-                                  )}
-                                >
-                                  <CalendarIcon className="mr-2 h-4 w-4" />
-                                  {date?.from ? (
-                                    date.to ? (
-                                      <>
-                                        {format(date.from, "LLL dd, y")} -{" "}
-                                        {format(date.to, "LLL dd, y")}
-                                      </>
-                                    ) : (
-                                      format(date.from, "LLL dd, y")
-                                    )
-                                  ) : (
-                                    <span>Pick a date range</span>
-                                  )}
-                                </Button>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-auto p-0" align="start">
-                                <Calendar
-                                  initialFocus
-                                  mode="range"
-                                  defaultMonth={date?.from}
-                                  selected={date}
-                                  onSelect={setDate}
-                                  numberOfMonths={2}
-                                />
-                              </PopoverContent>
-                            </Popover>
-                          </div>
-                          <div>
-                            <label className="text-xs font-semibold text-gray-700 mb-2 block">Quick Filters</label>
-                            <Select onValueChange={(value) => handleQuickDateFilter(value as 'week' | 'month' | 'year')}>
-                              <SelectTrigger className="h-10 border-gray-300 hover:border-gray-300 hover:bg-gray-100">
-                                <SelectValue placeholder="Select quick filter" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="week">This Week</SelectItem>
-                                <SelectItem value="month">This Month</SelectItem>
-                                <SelectItem value="year">This Year</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-                      </AccordionContent>
-                    </AccordionItem>
+                  <Accordion type="multiple" defaultValue={["layers", "accidents", "facilities"]} className="space-y-2">
 
                     {/* Map Layers */}
                     <AccordionItem value="layers" className="mb-0 border-b-0 bg-white rounded-xl overflow-hidden">
-                      <AccordionTrigger className="py-4 px-5 text-sm font-semibold hover:no-underline bg-gradient-to-r from-orange-50 to-orange-100/50 text-orange-700 hover:from-orange-100 hover:to-orange-200/50 transition-all">
-                        <div className="flex items-center gap-3">
+                      <AccordionTrigger className="py-3 px-4 text-sm font-semibold hover:no-underline bg-gradient-to-r from-orange-50 to-orange-100/50 text-orange-700 hover:from-orange-100 hover:to-orange-200/50 transition-all">
+                        <div className="flex items-center gap-2.5">
                           <Layers className="h-4 w-4 text-brand-orange" />
                           <span className="text-sm text-brand-orange">Map Layers</span>
                         </div>
                       </AccordionTrigger>
-                      <AccordionContent className="pt-4 pb-5 px-5">
+                      <AccordionContent className="pt-3 pb-3 px-4">
                         <div className="flex flex-wrap gap-2.5">
                           <button
                             onClick={() => setLayerFilters(prev => {
@@ -1269,23 +1247,22 @@ ${placemarks}
 
                     {/* Accident/Hazard Types */}
                     <AccordionItem value="accidents" className="mb-0 border-b-0 bg-white rounded-xl overflow-hidden">
-                      <AccordionTrigger className="py-4 px-5 text-sm font-semibold hover:no-underline bg-gradient-to-r from-orange-50 to-orange-100/50 text-orange-700 hover:from-orange-100 hover:to-orange-200/50 transition-all">
-                        <div className="flex items-center gap-3">
+                      <AccordionTrigger className="py-3 px-4 text-sm font-semibold hover:no-underline bg-gradient-to-r from-orange-50 to-orange-100/50 text-orange-700 hover:from-orange-100 hover:to-orange-200/50 transition-all">
+                        <div className="flex items-center gap-2.5">
                           <CircleAlert className="h-4 w-4 text-brand-orange" />
                           <span className="text-sm text-brand-orange">Accident/Hazard Types</span>
                         </div>
                       </AccordionTrigger>
-                      <AccordionContent className="pt-4 pb-5 px-5">
-                      
+                      <AccordionContent className="pt-3 pb-3 px-4">
                         {/* Heatmap Toggle */}
-                        <div className="mb-5 pb-4 border-b border-gray-200">
-                          <label className="flex items-center justify-between cursor-pointer group p-3 rounded-lg hover:bg-gray-50 transition-colors">
-                            <div className="flex items-center gap-3">
-                              <div className="p-2 bg-orange-100 rounded-lg group-hover:bg-orange-200 transition-colors">
-                                <Flame className="h-4 w-4 text-orange-600" />
+                        <div className="mb-3 pb-3">
+                          <label className="flex items-center justify-between cursor-pointer p-2 rounded-lg">
+                            <div className="flex items-center gap-2.5">
+                              <div className="p-1.5 bg-orange-100 rounded-lg">
+                                <Flame className="h-3.5 w-3.5 text-orange-600" />
                               </div>
                               <div>
-                                <span className="text-m font-semibold text-gray-900 block">Heatmap</span>
+                                <span className="text-sm font-semibold text-gray-900 block">Heatmap</span>
                                 
                               </div>
                             </div>
@@ -1294,6 +1271,98 @@ ${placemarks}
                               onCheckedChange={setShowHeatmap}
                             />
                           </label>
+                        </div>
+                        
+                        {/* Date Range */}
+                        <div className="mb-3 pb-3">
+                          <div className="flex flex-col space-y-2">
+                            <div>
+                              <label className="text-xs font-semibold text-gray-700 mb-1.5 block">Date Range</label>
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <Popover>
+                                    <PopoverTrigger asChild>
+                                      <Button
+                                        variant="outline"
+                                        className={cn(
+                                          "w-full justify-start text-left font-normal h-10 border-gray-300 hover:border-gray-300 hover:bg-gray-100",
+                                          !date?.from && "text-muted-foreground"
+                                        )}
+                                      >
+                                        <CalendarIcon className="mr-2 h-4 w-4" />
+                                        {date?.from ? (
+                                          format(date.from, "LLL dd, y")
+                                        ) : (
+                                          <span>Start date</span>
+                                        )}
+                                      </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-auto p-0" align="start">
+                                      <Calendar
+                                        initialFocus
+                                        mode="single"
+                                        defaultMonth={date?.from}
+                                        selected={date?.from}
+                                        onSelect={(selectedDate) => {
+                                          setDate(prev => ({
+                                            from: selectedDate,
+                                            to: prev?.to
+                                          }));
+                                        }}
+                                      />
+                                    </PopoverContent>
+                                  </Popover>
+                                </div>
+                                <div>
+                                  <Popover>
+                                    <PopoverTrigger asChild>
+                                      <Button
+                                        variant="outline"
+                                        className={cn(
+                                          "w-full justify-start text-left font-normal h-10 border-gray-300 hover:border-gray-300 hover:bg-gray-100",
+                                          !date?.to && "text-muted-foreground"
+                                        )}
+                                      >
+                                        <CalendarIcon className="mr-2 h-4 w-4" />
+                                        {date?.to ? (
+                                          format(date.to, "LLL dd, y")
+                                        ) : (
+                                          <span>End date</span>
+                                        )}
+                                      </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-auto p-0" align="start">
+                                      <Calendar
+                                        initialFocus
+                                        mode="single"
+                                        defaultMonth={date?.to || date?.from}
+                                        selected={date?.to}
+                                        onSelect={(selectedDate) => {
+                                          setDate(prev => ({
+                                            from: prev?.from,
+                                            to: selectedDate
+                                          }));
+                                        }}
+                                      />
+                                    </PopoverContent>
+                                  </Popover>
+                                </div>
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-xs font-semibold text-gray-700 mb-1.5 block">Quick Filters</label>
+                              <Select onValueChange={(value) => handleQuickDateFilter(value as 'week' | 'month' | 'year')}>
+                                <SelectTrigger className="h-10 border-gray-300 hover:border-gray-300 hover:bg-gray-100">
+                                  <SelectValue placeholder="Select quick filter" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="week">This Week</SelectItem>
+                                  <SelectItem value="month">This Month</SelectItem>
+                                  <SelectItem value="year">This Year</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
                         </div>
                         <div className="flex flex-wrap gap-2.5">
                           {Object.entries(accidentFilters).map(([key, checked]) => {
@@ -1321,13 +1390,13 @@ ${placemarks}
 
                     {/* Emergency Support Facilities */}
                     <AccordionItem value="facilities" className="mb-0 border-b-0 bg-white rounded-xl overflow-hidden">
-                      <AccordionTrigger className="py-4 px-5 text-sm font-semibold hover:no-underline bg-gradient-to-r from-orange-50 to-orange-100/50 text-orange-700 hover:from-orange-100 hover:to-orange-200/50 transition-all">
-                        <div className="flex items-center gap-3">
+                      <AccordionTrigger className="py-3 px-4 text-sm font-semibold hover:no-underline bg-gradient-to-r from-orange-50 to-orange-100/50 text-orange-700 hover:from-orange-100 hover:to-orange-200/50 transition-all">
+                        <div className="flex items-center gap-2.5">
                           <Building2 className="h-4 w-4 text-brand-orange" />
                           <span className="text-sm text-brand-orange">Emergency Support Facilities</span>
                         </div>
                       </AccordionTrigger>
-                      <AccordionContent className="pt-4 pb-5 px-5">
+                      <AccordionContent className="pt-3 pb-3 px-4">
                         <div className="flex flex-wrap gap-2.5">
                           {Object.entries(facilityFilters).map(([key, checked]) => {
                             const displayName = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());

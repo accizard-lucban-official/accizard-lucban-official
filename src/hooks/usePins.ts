@@ -302,19 +302,31 @@ export function usePins() {
     onError?: (error: Error) => void
   ): (() => void) => {
     try {
-      let q = query(collection(db, "pins"), orderBy("createdAt", "desc"));
+      let q = query(collection(db, "pins"));
 
       // Apply filters
       if (filters.types && filters.types.length > 0) {
-        q = query(collection(db, "pins"), where("type", "in", filters.types), orderBy("createdAt", "desc"));
+        // Firestore "in" operator has a limit of 10 items
+        // If more than 10 types, we need to split into multiple queries or use a different approach
+        if (filters.types.length > 10) {
+          console.warn('Too many types selected (max 10). Using first 10 types.');
+          filters.types = filters.types.slice(0, 10);
+        }
+        console.log('Querying pins with types:', filters.types);
+        // Remove orderBy to avoid needing composite index - we'll sort client-side
+        q = query(collection(db, "pins"), where("type", "in", filters.types));
+      } else {
+        console.log('Querying all pins (no type filter)');
       }
 
       if (filters.categories && filters.categories.length > 0) {
-        q = query(collection(db, "pins"), where("category", "in", filters.categories), orderBy("createdAt", "desc"));
+        // Remove orderBy to avoid needing composite index - we'll sort client-side
+        q = query(collection(db, "pins"), where("category", "in", filters.categories));
       }
 
       if (filters.reportId) {
-        q = query(collection(db, "pins"), where("reportId", "==", filters.reportId), orderBy("createdAt", "desc"));
+        // Remove orderBy to avoid needing composite index - we'll sort client-side
+        q = query(collection(db, "pins"), where("reportId", "==", filters.reportId));
       }
 
       const unsubscribe = onSnapshot(
@@ -329,6 +341,7 @@ export function usePins() {
               type: data.type,
               category: data.category,
               title: data.title,
+              description: data.description || undefined,
               latitude: data.latitude,
               longitude: data.longitude,
               locationName: data.locationName,
@@ -339,6 +352,9 @@ export function usePins() {
               createdByName: data.createdByName
             } as Pin;
           });
+
+          // Sort by createdAt descending (client-side to avoid composite index requirement)
+          pins.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
           // Client-side filtering for date range (Firestore doesn't support complex queries)
           if (filters.dateFrom) {
@@ -361,10 +377,43 @@ export function usePins() {
           console.log('Filtered pins:', pins.length);
           onUpdate(pins);
         },
-        (err) => {
+        (err: any) => {
           console.error('Error in pins subscription:', err);
+          console.error('Error details:', {
+            code: err?.code,
+            message: err?.message,
+            stack: err?.stack
+          });
+          
+          // Provide more specific error information
+          let errorMessage = 'Failed to fetch pins from database';
+          
+          if (err?.code === 'failed-precondition') {
+            // Missing composite index - Firestore usually provides a link in the error
+            const indexLink = err?.message?.match(/https:\/\/console\.firebase\.google\.com[^\s]+/)?.[0];
+            if (indexLink) {
+              console.error('Missing Firestore composite index. Create it here:', indexLink);
+              errorMessage = 'Database index required. Check console for link to create index.';
+            } else {
+              errorMessage = 'Database index required. The query needs an index on (type, createdAt).';
+              console.error('Missing Firestore composite index. The query requires an index on (type, createdAt).');
+            }
+          } else if (err?.code === 'permission-denied') {
+            errorMessage = 'Permission denied. You may not have access to view pins.';
+          } else if (err?.code === 'unavailable') {
+            errorMessage = 'Database temporarily unavailable. Please try again.';
+          } else if (err?.code === 'deadline-exceeded') {
+            errorMessage = 'Query timeout. Please try again.';
+          } else if (err?.message) {
+            errorMessage = err.message;
+          }
+          
           if (onError) {
-            onError(err as Error);
+            const error = new Error(errorMessage);
+            (error as any).code = err?.code;
+            (error as any).originalError = err;
+            (error as any).indexLink = err?.message?.match(/https:\/\/console\.firebase\.google\.com[^\s]+/)?.[0];
+            onError(error);
           }
         }
       );
@@ -411,6 +460,7 @@ export function usePins() {
           type: data.type,
           category: data.category,
           title: data.title,
+          description: data.description || undefined,
           latitude: data.latitude,
           longitude: data.longitude,
           locationName: data.locationName,
