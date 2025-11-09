@@ -13,7 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel, SelectSeparator } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Plus, MapPin, Layers, CalendarIcon, Search, Building2, Ambulance, Waves, Mountain, Building, CircleAlert, Users, ShieldAlert, Activity, Flame, Car, Siren, Home, Navigation, RotateCcw, HelpCircle, Info, ZoomIn, ZoomOut, LocateFixed, X, Filter, Download, FileText, Globe } from "lucide-react";
+import { Plus, MapPin, Layers, CalendarIcon, Search, Building2, Ambulance, Waves, Mountain, Building, CircleAlert, Users, ShieldAlert, Activity, Flame, Car, Siren, Home, Navigation, RotateCcw, HelpCircle, Info, ZoomIn, ZoomOut, LocateFixed, X, Filter, Download, FileText, Globe, Wrench, AlertTriangle, Zap, Leaf } from "lucide-react";
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear } from "date-fns";
 import { cn, ensureOk } from "@/lib/utils";
 import { Layout } from "./Layout";
@@ -39,6 +39,10 @@ const pinTypeIcons: Record<string, any> = {
   "Civil Disturbance": Users,
   "Armed Conflict": ShieldAlert,
   "Infectious Disease": Activity,
+  "Poor Infrastructure": Wrench,
+  "Obstructions": AlertTriangle,
+  "Electrical Hazard": Zap,
+  "Environmental Hazard": Leaf,
   "Others": HelpCircle,
   "Evacuation Centers": Building,
   "Health Facilities": Building2,
@@ -106,6 +110,10 @@ export function RiskMapPage() {
     civilDisturbance: false,
     armedConflict: false,
     infectiousDisease: false,
+    poorInfrastructure: false,
+    obstructions: false,
+    electricalHazard: false,
+    environmentalHazard: false,
     others: false
   });
 
@@ -129,7 +137,8 @@ export function RiskMapPage() {
   // Accident/Hazard types
   const accidentHazardTypes = [
     "Road Crash", "Fire", "Medical Emergency", "Flooding", "Volcanic Activity",
-    "Landslide", "Earthquake", "Civil Disturbance", "Armed Conflict", "Infectious Disease", "Others"
+    "Landslide", "Earthquake", "Civil Disturbance", "Armed Conflict", "Infectious Disease",
+    "Poor Infrastructure", "Obstructions", "Electrical Hazard", "Environmental Hazard", "Others"
   ];
 
   // Emergency facility types
@@ -283,6 +292,10 @@ export function RiskMapPage() {
       civilDisturbance: false,
       armedConflict: false,
       infectiousDisease: false,
+      poorInfrastructure: false,
+      obstructions: false,
+      electricalHazard: false,
+      environmentalHazard: false,
       others: false,
       [key]: true
     };
@@ -311,6 +324,10 @@ export function RiskMapPage() {
       civilDisturbance: false,
       armedConflict: false,
       infectiousDisease: false,
+      poorInfrastructure: false,
+      obstructions: false,
+      electricalHazard: false,
+      environmentalHazard: false,
       others: false
     });
     
@@ -380,6 +397,10 @@ export function RiskMapPage() {
       civilDisturbance: checked,
       armedConflict: checked,
       infectiousDisease: checked,
+      poorInfrastructure: checked,
+      obstructions: checked,
+      electricalHazard: checked,
+      environmentalHazard: checked,
       others: checked
     };
     setAccidentFilters(newFilters);
@@ -654,6 +675,10 @@ ${placemarks}
       'civilDisturbance': 'Civil Disturbance',
       'armedConflict': 'Armed Conflict',
       'infectiousDisease': 'Infectious Disease',
+      'poorInfrastructure': 'Poor Infrastructure',
+      'obstructions': 'Obstructions',
+      'electricalHazard': 'Electrical Hazard',
+      'environmentalHazard': 'Environmental Hazard',
       'others': 'Others',
       // Emergency Facilities
       'evacuationCenters': 'Evacuation Centers',
@@ -961,6 +986,22 @@ ${placemarks}
                         <span className="text-sm text-gray-700">Infectious Disease</span>
                       </div>
                       <div className="flex items-center gap-3">
+                        <img src="/markers/poor-infrastructure.svg" alt="Poor Infrastructure" className="w-10 h-10 flex-shrink-0" />
+                        <span className="text-sm text-gray-700">Poor Infrastructure</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <img src="/markers/obstruction.svg" alt="Obstructions" className="w-10 h-10 flex-shrink-0" />
+                        <span className="text-sm text-gray-700">Obstructions</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <img src="/markers/electrical-hazard.svg" alt="Electrical Hazard" className="w-10 h-10 flex-shrink-0" />
+                        <span className="text-sm text-gray-700">Electrical Hazard</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <img src="/markers/environmental-hazard.svg" alt="Environmental Hazard" className="w-10 h-10 flex-shrink-0" />
+                        <span className="text-sm text-gray-700">Environmental Hazard</span>
+                      </div>
+                      <div className="flex items-center gap-3">
                         <img src="/markers/default.svg" alt="Others" className="w-10 h-10 flex-shrink-0" />
                         <span className="text-sm text-gray-700">Others</span>
                       </div>
@@ -1159,7 +1200,7 @@ ${placemarks}
                       variant="ghost" 
                       size="icon"
                       onClick={() => setIsFiltersOpen(false)}
-                      className="h-8 w-8"
+                      className="h-8 w-8 hover:bg-gray-100 p-1"
                     >
                       <X className="h-4 w-4" />
                     </Button>

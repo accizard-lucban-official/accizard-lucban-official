@@ -1,6 +1,6 @@
 import * as React from "react"
 import { format } from "date-fns"
-import { Calendar as CalendarIcon } from "lucide-react"
+import { Calendar as CalendarIcon, ChevronDown } from "lucide-react"
 import { DateRange } from "react-day-picker"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -22,9 +22,20 @@ export function DateRangePicker({
   onChange,
   className,
 }: DateRangePickerProps) {
+  const [open, setOpen] = React.useState(false)
+  const currentYear = new Date().getFullYear()
+
+  const handleSelect = (range: DateRange | undefined) => {
+    onChange(range)
+
+    if (range?.from && range?.to) {
+      setOpen(false)
+    }
+  }
+
   return (
     <div className={cn("grid gap-2", className)}>
-      <Popover>
+      <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button
             id="date"
@@ -47,6 +58,7 @@ export function DateRangePicker({
             ) : (
               <span>Pick a date range</span>
             )}
+            <ChevronDown className="ml-auto h-4 w-4 text-muted-foreground" />
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-auto p-0" align="start">
@@ -55,8 +67,11 @@ export function DateRangePicker({
             mode="range"
             defaultMonth={value?.from}
             selected={value}
-            onSelect={onChange}
             numberOfMonths={2}
+            captionLayout="dropdown"
+            fromYear={2000}
+            toYear={currentYear + 5}
+            onSelect={handleSelect}
           />
         </PopoverContent>
       </Popover>

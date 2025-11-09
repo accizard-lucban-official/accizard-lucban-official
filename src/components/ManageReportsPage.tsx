@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Eye, Edit, Trash2, Plus, FileText, Calendar, Clock, MapPin, Upload, FileIcon, Image, Printer, Download, X, Search, FileDown, Car, Flame, Ambulance, Waves, Mountain, CircleAlert, Users, ShieldAlert, Activity, ArrowUpRight, ArrowUpDown, ArrowUp, ArrowDown, Layers, ZoomIn, ZoomOut, LocateFixed } from "lucide-react";
+import { Eye, Edit, Trash2, Plus, FileText, Calendar, Clock, MapPin, Upload, FileIcon, Image, Printer, Download, X, Search, FileDown, Car, Flame, Ambulance, Waves, Mountain, CircleAlert, Users, ShieldAlert, Activity, ArrowUpRight, ArrowUpDown, ArrowUp, ArrowDown, Layers, ZoomIn, ZoomOut, LocateFixed, Wrench, AlertTriangle, Zap, Leaf } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -13,17 +13,16 @@ import { Layout } from "./Layout";
 import { useNavigate } from "react-router-dom";
 import { DateRange } from "react-day-picker";
 import { format } from "date-fns";
-import { Calendar as CalendarIcon } from "lucide-react";
 import { cn, ensureOk, getHttpStatusMessage } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { MapboxMap } from "./MapboxMap";
 import { db } from "@/lib/firebase";
-import { collection, onSnapshot, orderBy, query, getDocs, getDoc, where, updateDoc, doc, serverTimestamp, deleteDoc } from "firebase/firestore";
+import { collection, onSnapshot, orderBy, query, getDocs, getDoc, where, updateDoc, doc, serverTimestamp, deleteDoc, addDoc } from "firebase/firestore";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { storage } from "@/lib/firebase";
 import { auth } from "@/lib/firebase";
@@ -44,6 +43,10 @@ const getReportTypeIcon = (type: string) => {
     'Civil Disturbance': Users,
     'Armed Conflict': ShieldAlert,
     'Infectious Disease': Activity,
+    'Poor Infrastructure': Wrench,
+    'Obstructions': AlertTriangle,
+    'Electrical Hazard': Zap,
+    'Environmental Hazard': Leaf,
   };
   return iconMap[type] || FileText;
 };
@@ -476,10 +479,156 @@ export function ManageReportsPage() {
     try {
       console.log("Adding new report:", formData);
       
-      // Here you would typically save to Firestore
-      // For now, just simulate the save operation
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Validate required fields
+      if (!formData.type) {
+        toast.error("Please select a report type");
+        setIsAddingReport(false);
+        return;
+      }
       
+      if (!formData.location || !formData.latitude || !formData.longitude) {
+        toast.error("Please select a location on the map");
+        setIsAddingReport(false);
+        return;
+      }
+
+      // Generate report ID with incremented value (RID-[Incremented value])
+      // Fetch all reports to find the maximum RID number
+      const reportsQuery = query(collection(db, "reports"));
+      const reportsSnapshot = await getDocs(reportsQuery);
+      
+      // Extract the number from reportId if it matches 'RID-[Number]'
+      const reportIds = reportsSnapshot.docs.map(doc => {
+        const raw = doc.data().reportId;
+        if (typeof raw === 'string' && raw.startsWith('RID-')) {
+          const num = parseInt(raw.replace('RID-', ''));
+          return isNaN(num) ? 0 : num;
+        }
+        // fallback for legacy reportIds (RPT- format or others)
+        return 0;
+      });
+      
+      const maxReportId = reportIds.length > 0 ? Math.max(...reportIds) : 0;
+      const nextReportId = maxReportId + 1;
+      const reportId = `RID-${nextReportId}`;
+      
+      // Get current user ID
+      const userId = currentUser?.id || auth.currentUser?.uid || "admin";
+      
+      // Upload media files if any are selected
+      let uploadedMediaUrls: string[] = [];
+      if (selectedFiles.length > 0) {
+        setIsUploadingMedia(true);
+        try {
+          for (let i = 0; i < selectedFiles.length; i++) {
+            const file = selectedFiles[i];
+            console.log(`Uploading file ${i + 1}/${selectedFiles.length}:`, file.name, file.type, file.size);
+            
+            // Validate file type
+            const isImage = file.type.startsWith('image/');
+            const isVideo = file.type.startsWith('video/');
+            if (!isImage && !isVideo) {
+              toast.error(`${file.name} is not a valid image or video file`);
+              continue;
+            }
+            
+            // Validate file size (max 50MB)
+            const maxSize = 50 * 1024 * 1024; // 50MB
+            if (file.size > maxSize) {
+              toast.error(`${file.name} is too large. Maximum size is 50MB`);
+              continue;
+            }
+            
+            // Create unique filename with timestamp and random suffix
+            const timestamp = Date.now();
+            const randomSuffix = Math.random().toString(36).substring(2, 8);
+            const fileExtension = file.name.split('.').pop() || '';
+            const fileName = `media_${timestamp}_${randomSuffix}.${fileExtension}`;
+            
+            // Create storage reference using the same structure as mobile app
+            // Structure: report_images/{userId}/{reportId}/admin/{fileName}
+            const storageRef = ref(storage, `report_images/${userId}/${reportId}/admin/${fileName}`);
+            console.log('Storage path:', `report_images/${userId}/${reportId}/admin/${fileName}`);
+            
+            // Upload file
+            await uploadBytes(storageRef, file);
+            
+            // Get download URL
+            const downloadURL = await getDownloadURL(storageRef);
+            uploadedMediaUrls.push(downloadURL);
+            console.log(`File ${i + 1} uploaded successfully:`, downloadURL);
+          }
+          
+          if (uploadedMediaUrls.length > 0) {
+            toast.success(`${uploadedMediaUrls.length} file(s) uploaded successfully!`);
+          }
+        } catch (error: any) {
+          console.error("Error uploading media files:", error);
+          let errorMessage = "Failed to upload media files. Please try again.";
+          if (error.code === 'storage/unauthorized') {
+            errorMessage = "You are not authorized to upload files. Please check your permissions.";
+          } else if (error.code === 'storage/canceled') {
+            errorMessage = "Upload was canceled.";
+          } else if (error.code === 'storage/quota-exceeded') {
+            errorMessage = "Storage quota exceeded. Please contact administrator.";
+          }
+          toast.error(errorMessage);
+          setIsUploadingMedia(false);
+          setIsAddingReport(false);
+          return;
+        } finally {
+          setIsUploadingMedia(false);
+        }
+      }
+      
+      // Convert report type from kebab-case to Title Case for Firestore
+      const reportTypeMap: Record<string, string> = {
+        'road-crash': 'Road Crash',
+        'medical-emergency': 'Medical Emergency',
+        'flooding': 'Flooding',
+        'volcanic-activity': 'Volcanic Activity',
+        'landslide': 'Landslide',
+        'earthquake': 'Earthquake',
+        'civil-disturbance': 'Civil Disturbance',
+        'armed-conflict': 'Armed Conflict',
+        'infectious-disease': 'Infectious Disease',
+        'poor-infrastructure': 'Poor Infrastructure',
+        'obstructions': 'Obstructions',
+        'electrical-hazard': 'Electrical Hazard',
+        'environmental-hazard': 'Environmental Hazard',
+        'others': 'Others'
+      };
+      const reportType = reportTypeMap[formData.type] || formData.type;
+      
+      // Create report document in Firestore
+      const reportData = {
+        reportId: reportId,
+        userId: userId,
+        reportType: reportType,
+        reporterName: formData.reportedBy || "",
+        reporterMobile: "", // Can be added later if needed
+        description: formData.description || "",
+        location: formData.location || "",
+        locationName: formData.location || "",
+        latitude: formData.latitude || 14.1139,
+        longitude: formData.longitude || 121.5556,
+        status: formData.status || "Pending",
+        timestamp: serverTimestamp(),
+        imageUrls: [], // Mobile user media (empty for admin-created reports)
+        adminMedia: uploadedMediaUrls, // Admin-uploaded media
+        barangay: formData.barangay || "",
+        createdBy: currentUser?.id || auth.currentUser?.uid || "admin",
+        createdByName: currentUser?.name || currentUser?.username || "Admin"
+      };
+      
+      // Add document to Firestore
+      const docRef = await addDoc(collection(db, "reports"), reportData);
+      console.log("Report created with ID:", docRef.id);
+      
+      // Move uploaded files from temp folder to actual report folder if needed
+      // (Optional: can be done later or files can stay in temp folder)
+      
+      // Reset form and close modal
       setShowAddModal(false);
       setFormData({
         type: "",
@@ -494,12 +643,13 @@ export function ManageReportsPage() {
         latitude: 14.1139,
         longitude: 121.5556
       });
+      setSelectedFiles([]); // Clear selected files
       setResidentSearch("");
       setAddLocationData(null);
       toast.success("Report added successfully!");
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error adding report:", error);
-      toast.error("Failed to add report. Please try again.");
+      toast.error(error.message || "Failed to add report. Please try again.");
     } finally {
       setIsAddingReport(false);
     }
@@ -543,6 +693,7 @@ export function ManageReportsPage() {
     if (!showAddModal) {
       setShowResidentSearch(false);
       setResidentSearch("");
+      setSelectedFiles([]); // Clear selected files when modal closes
     }
   }, [showAddModal]);
   
@@ -550,7 +701,10 @@ export function ManageReportsPage() {
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
-      if (!target.closest('.resident-search-dropdown')) {
+      // Don't close if clicking on the dropdown or the input field
+      if (!target.closest('.resident-search-dropdown') && 
+          target.id !== 'reported-by' && 
+          !target.closest('#reported-by')) {
         setShowResidentSearch(false);
       }
     };
@@ -2498,6 +2652,18 @@ export function ManageReportsPage() {
   const [previewImageUrl, setPreviewImageUrl] = useState("");
   const [previewImageName, setPreviewImageName] = useState("");
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  
+  // Create object URLs for file previews
+  const filePreviewUrls = useMemo(() => {
+    return selectedFiles.map(file => URL.createObjectURL(file));
+  }, [selectedFiles]);
+  
+  // Cleanup object URLs when files change or component unmounts
+  useEffect(() => {
+    return () => {
+      filePreviewUrls.forEach(url => URL.revokeObjectURL(url));
+    };
+  }, [filePreviewUrls]);
 
   // Helper function to get current time in HH:MM AM/PM format
   const getCurrentTime = () => {
@@ -2969,9 +3135,10 @@ export function ManageReportsPage() {
   const removeSelectedFile = (index: number) => {
     setSelectedFiles(prev => {
       const fileToRemove = prev[index];
-      // Clean up object URL for the removed file
-      if (fileToRemove && fileToRemove.type.startsWith('image/')) {
-        URL.revokeObjectURL(URL.createObjectURL(fileToRemove));
+      // Clean up object URL for the removed file to prevent memory leaks
+      if (fileToRemove) {
+        const objectUrl = URL.createObjectURL(fileToRemove);
+        URL.revokeObjectURL(objectUrl);
       }
       return prev.filter((_, i) => i !== index);
     });
@@ -2981,9 +3148,8 @@ export function ManageReportsPage() {
   const clearSelectedFiles = () => {
     // Clean up object URLs to prevent memory leaks
     selectedFiles.forEach(file => {
-      if (file.type.startsWith('image/')) {
-        URL.revokeObjectURL(URL.createObjectURL(file));
-      }
+      const objectUrl = URL.createObjectURL(file);
+      URL.revokeObjectURL(objectUrl);
     });
     setSelectedFiles([]);
   };
@@ -3197,8 +3363,9 @@ export function ManageReportsPage() {
   return (
     <Layout>
       <TooltipProvider>
-        {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+        <div className="space-y-6">
+          {/* Summary Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
           <Card className="shadow-sm">
             <CardContent className="p-6">
               <div className="flex items-start justify-between">
@@ -3281,7 +3448,7 @@ export function ManageReportsPage() {
         </div>
 
         {/* Reports Table */}
-        <Card>
+        <Card className="shadow-sm">
           {/* Table Toolbar */}
           <div className="border-b border-gray-200 px-6 py-4">
             <div className="flex items-center gap-3 flex-wrap">
@@ -3309,91 +3476,27 @@ export function ManageReportsPage() {
                 />
               </div>
 
-              {/* Date Range Filter */}
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={cn(
-                      "justify-start text-left font-normal w-auto",
-                      !date && "text-gray-800"
-                    )}
-                  >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {date?.from ? (
-                      date.to ? (
-                        <>
-                          {format(date.from, "MMM dd")} - {format(date.to, "MMM dd")}
-                        </>
-                      ) : (
-                        format(date.from, "MMM dd, y")
-                      )
-                    ) : (
-                      <span>Date Range</span>
-                    )}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-4" align="start">
-                  <div className="space-y-4">
-                    {/* Date Inputs */}
-                    <div className="flex items-center gap-3">
-                      <div className="space-y-1">
-                        <label className="text-xs font-medium text-gray-700">From</label>
-                        <Input
-                          type="date"
-                          value={date?.from ? format(date.from, "yyyy-MM-dd") : ""}
-                          onChange={(e) => {
-                            const newDate = e.target.value ? new Date(e.target.value) : undefined;
-                            setDate(prev => ({
-                              from: newDate,
-                              to: prev?.to
-                            }));
-                          }}
-                          className="w-36 h-9 text-sm"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-xs font-medium text-gray-700">To</label>
-                        <Input
-                          type="date"
-                          value={date?.to ? format(date.to, "yyyy-MM-dd") : ""}
-                          onChange={(e) => {
-                            const newDate = e.target.value ? new Date(e.target.value) : undefined;
-                            setDate(prev => ({
-                              from: prev?.from,
-                              to: newDate
-                            }));
-                          }}
-                          className="w-36 h-9 text-sm"
-                        />
-                      </div>
-                    </div>
-                    
-                    {/* Calendar */}
-                    <CalendarComponent
-                      mode="range"
-                      defaultMonth={date?.from}
-                      selected={date}
-                      onSelect={setDate}
-                      numberOfMonths={2}
-                    />
-                    
-                    {/* Clear Button */}
-                    {(date?.from || date?.to) && (
-                      <div className="flex justify-end">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setDate(undefined)}
-                        >
-                          Clear
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                </PopoverContent>
-              </Popover>
+          {/* Date Range Filter */}
+          <div className="flex items-end gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs font-medium text-gray-700">Date Range</Label>
+              <DateRangePicker
+                value={date}
+                onChange={setDate}
+                className="w-[260px]"
+              />
+            </div>
+            {(date?.from || date?.to) && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setDate(undefined)}
+                className="h-9"
+              >
+                Clear
+              </Button>
+            )}
+          </div>
 
               {/* Type Filter */}
               <Select value={typeFilter} onValueChange={setTypeFilter}>
@@ -3411,6 +3514,10 @@ export function ManageReportsPage() {
                   <SelectItem value="civil-disturbance">Civil Disturbance</SelectItem>
                   <SelectItem value="armed-conflict">Armed Conflict</SelectItem>
                   <SelectItem value="infectious-disease">Infectious Disease</SelectItem>
+                  <SelectItem value="poor-infrastructure">Poor Infrastructure</SelectItem>
+                  <SelectItem value="obstructions">Obstructions</SelectItem>
+                  <SelectItem value="electrical-hazard">Electrical Hazard</SelectItem>
+                  <SelectItem value="environmental-hazard">Environmental Hazard</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -3577,6 +3684,10 @@ export function ManageReportsPage() {
                             report.type === 'Civil Disturbance' ? 'text-violet-600' :
                             report.type === 'Armed Conflict' ? 'text-red-800' :
                             report.type === 'Infectious Disease' ? 'text-emerald-600' :
+                            report.type === 'Poor Infrastructure' ? 'text-amber-800' :
+                            report.type === 'Obstructions' ? 'text-yellow-600' :
+                            report.type === 'Electrical Hazard' ? 'text-yellow-500' :
+                            report.type === 'Environmental Hazard' ? 'text-green-600' :
                             'text-gray-600'
                           )}>
                             {(() => {
@@ -3851,7 +3962,7 @@ export function ManageReportsPage() {
                 Add New Report
               </DialogTitle>
               <DialogDescription>
-                Create a new emergency report with all required details.
+                Please fill out the required details to create a new emergency report.
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
@@ -3875,21 +3986,63 @@ export function ManageReportsPage() {
                       <SelectItem value="civil-disturbance">Civil Disturbance</SelectItem>
                       <SelectItem value="armed-conflict">Armed Conflict</SelectItem>
                       <SelectItem value="infectious-disease">Infectious Disease</SelectItem>
+                      <SelectItem value="poor-infrastructure">Poor Infrastructure</SelectItem>
+                      <SelectItem value="obstructions">Obstructions</SelectItem>
+                      <SelectItem value="electrical-hazard">Electrical Hazard</SelectItem>
+                      <SelectItem value="environmental-hazard">Environmental Hazard</SelectItem>
                       <SelectItem value="others">Others</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+                <div>
+                  <Label htmlFor="status">Status</Label>
+                  <Select value={formData.status} onValueChange={value => setFormData({
+                  ...formData,
+                  status: value
+                })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Pending">Pending</SelectItem>
+                      <SelectItem value="Ongoing">Ongoing</SelectItem>
+                      <SelectItem value="Not Responded">Not Responded</SelectItem>
+                      <SelectItem value="Responded">Responded</SelectItem>
+                      <SelectItem value="False Report">False Report</SelectItem>
+                      <SelectItem value="Redundant">Redundant</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="reported-by">Reported By</Label>
                   <div className="relative">
                     <Input 
                       id="reported-by" 
                       value={formData.reportedBy} 
-                      onChange={e => setFormData({
-                        ...formData,
-                        reportedBy: e.target.value
-                      })} 
-                      onFocus={() => setShowResidentSearch(true)}
+                      onChange={e => {
+                        const value = e.target.value;
+                        setFormData({
+                          ...formData,
+                          reportedBy: value
+                        });
+                        // Update resident search to trigger filtering
+                        setResidentSearch(value);
+                        // Always show suggestions when typing (filtering will happen automatically)
+                        setShowResidentSearch(true);
+                      }} 
+                      onFocus={() => {
+                        // Show suggestions when focused
+                        // If input is empty, show all residents; otherwise show filtered results
+                        if (formData.reportedBy.length === 0) {
+                          setResidentSearch("");
+                          setShowResidentSearch(true);
+                        } else {
+                          setShowResidentSearch(true);
+                        }
+                      }}
                       placeholder="Search or enter reporter name" 
                     />
                     {showResidentSearch && filteredResidents.length > 0 && (
@@ -3897,7 +4050,7 @@ export function ManageReportsPage() {
                         {filteredResidents.map((resident) => (
                           <div
                             key={resident.id}
-                            className="px-4 py-2 hover:bg-gray-100 cursor-pointer"
+                            className="px-4 py-2 hover:bg-gray-100 cursor-pointer transition-colors"
                             onClick={() => {
                               setFormData({
                                 ...formData,
@@ -3918,23 +4071,27 @@ export function ManageReportsPage() {
                         ))}
                       </div>
                     )}
+                    {showResidentSearch && filteredResidents.length === 0 && residentSearch.trim().length > 0 && (
+                      <div className="resident-search-dropdown absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg p-4">
+                        <div className="text-sm text-gray-500 text-center">No residents found</div>
+                      </div>
+                    )}
                   </div>
                 </div>
-              </div>
-              
-              <div>
-                <Label htmlFor="barangay">Barangay</Label>
-                <Select value={formData.barangay} onValueChange={value => setFormData({
-                ...formData,
-                barangay: value
-              })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select barangay" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {barangayOptions.map(barangay => <SelectItem key={barangay} value={barangay}>{barangay}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <div>
+                  <Label htmlFor="barangay">Barangay</Label>
+                  <Select value={formData.barangay} onValueChange={value => setFormData({
+                  ...formData,
+                  barangay: value
+                })}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select barangay" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {barangayOptions.map(barangay => <SelectItem key={barangay} value={barangay}>{barangay}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
               <div>
@@ -4006,26 +4163,6 @@ export function ManageReportsPage() {
               </div>
 
               <div>
-                <Label htmlFor="status">Status</Label>
-                <Select value={formData.status} onValueChange={value => setFormData({
-                ...formData,
-                status: value
-              })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Pending">Pending</SelectItem>
-                    <SelectItem value="Ongoing">Ongoing</SelectItem>
-                    <SelectItem value="Not Responded">Not Responded</SelectItem>
-                    <SelectItem value="Responded">Responded</SelectItem>
-                    <SelectItem value="False Report">False Report</SelectItem>
-                    <SelectItem value="Redundant">Redundant</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
                 <Label>Attached Media</Label>
                 <div 
                   className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center relative"
@@ -4068,22 +4205,93 @@ export function ManageReportsPage() {
                     Browse Files
                   </Button>
                 </div>
+                
+                {/* Show selected files */}
+                {selectedFiles.length > 0 && (
+                  <div className="mt-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium text-gray-700">
+                        Selected Files ({selectedFiles.length})
+                      </p>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={clearSelectedFiles}
+                        className="text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                      >
+                        Clear All
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto">
+                      {selectedFiles.map((file, index) => {
+                        const isImage = file.type.startsWith('image/');
+                        const isVideo = file.type.startsWith('video/');
+                        const fileUrl = filePreviewUrls[index];
+                        
+                        return (
+                          <div key={`${file.name}-${file.size}-${index}`} className="relative border border-gray-200 rounded-lg p-2 bg-gray-50">
+                            {isImage && (
+                              <img 
+                                src={fileUrl} 
+                                alt={file.name}
+                                className="w-full h-20 object-cover rounded cursor-pointer hover:opacity-80 transition-opacity"
+                                onClick={() => {
+                                  setPreviewImageUrl(fileUrl);
+                                  setPreviewImageName(file.name);
+                                  setShowImagePreview(true);
+                                }}
+                              />
+                            )}
+                            {isVideo && (
+                              <div className="w-full h-20 bg-gray-200 rounded flex items-center justify-center">
+                                <FileIcon className="h-8 w-8 text-gray-400" />
+                              </div>
+                            )}
+                            {!isImage && !isVideo && (
+                              <div className="w-full h-20 bg-gray-200 rounded flex items-center justify-center">
+                                <FileIcon className="h-8 w-8 text-gray-400" />
+                              </div>
+                            )}
+                            <div className="mt-1">
+                              <p className="text-xs text-gray-600 truncate" title={file.name}>
+                                {file.name}
+                              </p>
+                              <p className="text-xs text-gray-400">
+                                {(file.size / 1024 / 1024).toFixed(2)} MB
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="absolute top-1 right-1 h-6 w-6 bg-white hover:bg-red-100"
+                              onClick={() => removeSelectedFile(index)}
+                            >
+                              <X className="h-3 w-3 text-red-600" />
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             <DialogFooter>
               <Button 
                 type="button" 
                 onClick={handleAddReport}
-                disabled={isAddingReport}
+                disabled={isAddingReport || isUploadingMedia}
                 className="disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isAddingReport ? (
+                {(isAddingReport || isUploadingMedia) ? (
                   <div className="flex items-center">
                     <svg className="animate-spin -ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
-                    Adding...
+                    {isUploadingMedia ? "Uploading media..." : "Adding..."}
                   </div>
                 ) : (
                   "Add Report"
@@ -4469,6 +4677,10 @@ export function ManageReportsPage() {
                               <SelectItem value="Civil Disturbance">Civil Disturbance</SelectItem>
                               <SelectItem value="Armed Conflict">Armed Conflict</SelectItem>
                               <SelectItem value="Infectious Disease">Infectious Disease</SelectItem>
+                              <SelectItem value="Poor Infrastructure">Poor Infrastructure</SelectItem>
+                              <SelectItem value="Obstructions">Obstructions</SelectItem>
+                              <SelectItem value="Electrical Hazard">Electrical Hazard</SelectItem>
+                              <SelectItem value="Environmental Hazard">Environmental Hazard</SelectItem>
                             </SelectContent>
                           </Select>
                         ) : (
@@ -4484,6 +4696,10 @@ export function ManageReportsPage() {
                             selectedReport?.type === 'Civil Disturbance' ? 'text-violet-600' :
                             selectedReport?.type === 'Armed Conflict' ? 'text-red-800' :
                             selectedReport?.type === 'Infectious Disease' ? 'text-emerald-600' :
+                            selectedReport?.type === 'Poor Infrastructure' ? 'text-amber-800' :
+                            selectedReport?.type === 'Obstructions' ? 'text-yellow-600' :
+                            selectedReport?.type === 'Electrical Hazard' ? 'text-yellow-500' :
+                            selectedReport?.type === 'Environmental Hazard' ? 'text-green-600' :
                             'text-gray-600'
                           )}>
                             {(() => {
@@ -7258,6 +7474,7 @@ export function ManageReportsPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </div>
       </TooltipProvider>
     </Layout>
   );

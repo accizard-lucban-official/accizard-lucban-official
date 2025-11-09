@@ -25,7 +25,7 @@ import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 // Pin type icons mapping (for the select dropdown)
-import { Car, Flame, Ambulance, Waves, Mountain, CircleAlert, Users, ShieldAlert, Activity, Building, Building2 } from "lucide-react";
+import { Car, Flame, Ambulance, Waves, Mountain, CircleAlert, Users, ShieldAlert, Activity, Building, Building2, Wrench, AlertTriangle, Zap, Leaf, HelpCircle } from "lucide-react";
 
 const pinTypeIcons: Record<string, any> = {
   "Road Crash": Car,
@@ -38,6 +38,11 @@ const pinTypeIcons: Record<string, any> = {
   "Civil Disturbance": Users,
   "Armed Conflict": ShieldAlert,
   "Infectious Disease": Activity,
+  "Poor Infrastructure": Wrench,
+  "Obstructions": AlertTriangle,
+  "Electrical Hazard": Zap,
+  "Environmental Hazard": Leaf,
+  "Others": HelpCircle,
   "Evacuation Centers": Building,
   "Health Facilities": Building2,
   "Police Stations": ShieldAlert,
@@ -70,7 +75,8 @@ export interface PinFormData {
 // Accident/Hazard types
 const accidentHazardTypes = [
   "Road Crash", "Fire", "Medical Emergency", "Flooding", "Volcanic Activity",
-  "Landslide", "Earthquake", "Civil Disturbance", "Armed Conflict", "Infectious Disease"
+  "Landslide", "Earthquake", "Civil Disturbance", "Armed Conflict", "Infectious Disease",
+  "Poor Infrastructure", "Obstructions", "Electrical Hazard", "Environmental Hazard"
 ];
 
 // Emergency facility types
@@ -275,7 +281,7 @@ export function PinModal({
                 variant="ghost" 
                 size="icon"
                 onClick={onClose}
-                className="h-8 w-8 hover:bg-brand-orange hover:text-white group"
+                className="h-8 w-8 hover:bg-gray-100 group p-1"
               >
                 <X className="h-4 w-4" />
               </Button>

@@ -351,6 +351,11 @@ export function MapboxMap({
       'Civil Disturbance': '👥',
       'Armed Conflict': '🛡️',
       'Infectious Disease': '🦠',
+      'Poor Infrastructure': '🔧',
+      'Obstructions': '⚠️',
+      'Electrical Hazard': '⚡',
+      'Environmental Hazard': '🌿',
+      'Others': '📍',
       // Emergency Facilities
       'Evacuation Centers': '🏢',
       'Health Facilities': '🏥',
@@ -378,6 +383,10 @@ export function MapboxMap({
       'Civil Disturbance': '#7C3AED', // Violet
       'Armed Conflict': '#991B1B', // Darker Red
       'Infectious Disease': '#059669', // Emerald
+      'Poor Infrastructure': '#8B5A2B', // Brown
+      'Obstructions': '#F59E0B', // Amber
+      'Electrical Hazard': '#FBBF24', // Yellow
+      'Environmental Hazard': '#10B981', // Green
       'Others': '#F97316', // Orange (matches default marker color)
       // Emergency Facilities
       'Evacuation Centers': '#8B5CF6', // Purple
@@ -405,6 +414,10 @@ export function MapboxMap({
       'Civil Disturbance': '/markers/civil-disturbance.svg',
       'Armed Conflict': '/markers/armed-conflict.svg',
       'Infectious Disease': '/markers/infectious-disease.svg',
+      'Poor Infrastructure': '/markers/poor-infrastructure.svg',
+      'Obstructions': '/markers/obstruction.svg',
+      'Electrical Hazard': '/markers/electrical-hazard.svg',
+      'Environmental Hazard': '/markers/environmental-hazard.svg',
       'Others': '/markers/default.svg',
       // Emergency Facilities
       'Evacuation Centers': '/markers/evacuation-center.svg',
@@ -558,6 +571,10 @@ export function MapboxMap({
       "Civil Disturbance": ["M17 20h5v-2a3 3 0 00-5.356-1.857", "M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857", "M7 20H2v-2a3 3 0 015.356-1.857", "M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0", "M15 7a3 3 0 11-6 0 3 3 0 016 0z", "m6 3a2 2 0 11-4 0 2 2 0 014 0z", "M7 10a2 2 0 11-4 0 2 2 0 014 0z"],
       "Armed Conflict": ["M9 12l2 2 4-4", "m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"],
       "Infectious Disease": ["M13 10V3L4 14h7v7l9-11h-7z"],
+      "Poor Infrastructure": ["M14.7 6.3a1 1 0 00 0 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"],
+      "Obstructions": ["M12 9v2m0 4h.01", "m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"],
+      "Electrical Hazard": ["M13 10V3L4 14h7v7l9-11h-7z"],
+      "Environmental Hazard": ["M5 7a2 2 0 012-2h10a2 2 0 012 2v10a2 2 0 01-2 2H7a2 2 0 01-2-2V7z", "M12 12l-3-3m0 0l3-3m-3 3h6"],
       // Emergency Facilities
       "Evacuation Centers": ["M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5", "M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"],
       "Health Facilities": ["M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5", "M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"],
