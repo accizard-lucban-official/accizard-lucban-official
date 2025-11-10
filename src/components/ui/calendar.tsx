@@ -21,33 +21,33 @@ function Calendar({
         IconLeft: ({ ..._props }) => <ChevronLeft className="h-4 w-4" />,
         IconRight: ({ ..._props }) => <ChevronRight className="h-4 w-4" />,
       }}
-      className={cn("p-3", className)}
+      className={cn("p-2 text-sm", className)}
       classNames={{
-        months: "flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
-        month: "space-y-4",
+        months: "flex flex-col gap-2 sm:flex-row sm:gap-4",
+        month: "space-y-2",
         caption: "flex justify-center pt-1 relative items-center",
-        caption_label: "text-sm font-medium",
-        caption_dropdowns: "flex gap-2",
+        caption_label: "sr-only",
+        caption_dropdowns: "flex items-center gap-1",
         dropdown:
-          "rounded-md border border-input bg-background py-1 px-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-        dropdown_month: "capitalize",
-        dropdown_year: "min-w-[4rem]",
-        nav: "space-x-1 flex items-center",
+          "rounded-md border border-input bg-background py-0.5 px-2 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&>label]:inline-flex [&>label]:items-center [&>label>span]:sr-only",
+        dropdown_month: "capitalize min-w-[6.5rem]",
+        dropdown_year: "min-w-[3.75rem]",
+        nav: "flex items-center space-x-1",
         nav_button: cn(
           buttonVariants({ variant: "outline" }),
-          "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100"
+          "h-6 w-6 bg-transparent p-0 opacity-60 hover:opacity-100"
         ),
         nav_button_previous: "absolute left-1",
         nav_button_next: "absolute right-1",
-        table: "w-full border-collapse space-y-1",
+        table: "w-full border-collapse space-y-0.5",
         head_row: "flex",
         head_cell:
-          "text-muted-foreground rounded-md w-9 font-normal text-[0.8rem]",
-        row: "flex w-full mt-2",
-        cell: "h-9 w-9 text-center text-sm p-0 relative [&:has([aria-selected].day-range-end)]:rounded-r-md [&:has([aria-selected].day-outside)]:bg-accent/50 [&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20",
+          "text-muted-foreground rounded-md w-8 font-normal text-[0.7rem]",
+        row: "flex w-full mt-1",
+        cell: "h-8 w-8 text-center text-xs p-0 relative [&:has([aria-selected].day-range-end)]:rounded-r-md [&:has([aria-selected].day-outside)]:bg-accent/50 [&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20",
         day: cn(
           buttonVariants({ variant: "ghost" }),
-          "h-9 w-9 p-0 font-normal aria-selected:opacity-100"
+          "h-8 w-8 p-0 font-normal text-[0.75rem] aria-selected:opacity-100"
         ),
         day_range_end: "day-range-end",
         day_selected:

@@ -233,6 +233,7 @@ interface MapboxMapProps {
   showGeocoder?: boolean;
   onGeocoderResult?: (result: { lat: number; lng: number; address: string }) => void;
   showDirections?: boolean; // Control whether to show routes and travel time
+  showUserLocationMarker?: boolean;
   onEditPin?: (pin: Pin) => void; // Callback when edit button is clicked
   onDeletePin?: (pinId: string) => void; // Callback when delete button is clicked
   canEdit?: boolean; // Whether user can edit/delete pins
@@ -283,6 +284,7 @@ export function MapboxMap({
   showGeocoder = false,
   onGeocoderResult,
   showDirections = true, // Default to true for backward compatibility
+  showUserLocationMarker = true,
   onEditPin,
   onDeletePin,
   canEdit = false, // Default to false for safety
@@ -304,7 +306,7 @@ export function MapboxMap({
   const tilesetHoverPopupRef = useRef<mapboxgl.Popup | null>(null);
   const geocoderRef = useRef<MapboxGeocoder | null>(null);
   const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
-  const [travelTime, setTravelTime] = useState<{duration: number, distance: number} | null>(null);
+  const [travelTime, setTravelTime] = useState<{duration: string, distance: number} | null>(null);
   const [routeData, setRouteData] = useState<any>(null);
   const [showRoute, setShowRoute] = useState(false);
   const [mapStyle, setMapStyle] = useState<'streets' | 'satellite'>('streets');
@@ -313,6 +315,10 @@ export function MapboxMap({
   const cursorElementRef = useRef<HTMLDivElement | null>(null);
   const onMapClickRef = useRef(onMapClick);
   const mapClickHandlerRef = useRef<((e: mapboxgl.MapMouseEvent) => void) | null>(null);
+  const travelTimeRequestRef = useRef<{ key: string; controller: AbortController | null } | null>(null);
+  const lastRouteKeyRef = useRef<string | null>(null);
+  const lastTravelTimeDataRef = useRef<{ key: string; duration: string; distance: number } | null>(null);
+  const lastRouteDataRef = useRef<any>(null);
   
   // Use external style if provided, otherwise use internal state
   const currentStyle = externalStyle || mapStyle;
@@ -686,7 +692,11 @@ export function MapboxMap({
   };
 
   // Function to calculate travel time using Mapbox Directions API
-  const calculateTravelTime = async (origin: {lat: number, lng: number}, destination: {lat: number, lng: number}) => {
+  const calculateTravelTime = async (
+    origin: {lat: number, lng: number},
+    destination: {lat: number, lng: number},
+    signal?: AbortSignal
+  ) => {
     try {
       const accessToken = mapboxgl.accessToken;
       if (!accessToken) {
@@ -695,7 +705,8 @@ export function MapboxMap({
 
       const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${origin.lng},${origin.lat};${destination.lng},${destination.lat}?access_token=${accessToken}&geometries=geojson&overview=full&steps=true&annotations=duration,distance`;
       
-      const data = await ensureOk(await fetch(url)).then(r => r.json());
+      const response = await ensureOk(await fetch(url, { signal }));
+      const data = await response.json();
       
       if (data.routes && data.routes.length > 0) {
         const route = data.routes[0];
@@ -753,55 +764,67 @@ export function MapboxMap({
   };
 
   // Function to display route on map
-  const displayRoute = (routeData: any) => {
+  const displayRoute = (routeData: any, options: { fitToRoute?: boolean } = {}) => {
     if (!map.current || !routeData) return;
 
-    // Remove existing route if any
-    if (map.current.getSource('route')) {
-      map.current.removeLayer('route');
-      map.current.removeSource('route');
-    }
+    const geometry = routeData.routes?.[0]?.geometry;
+    if (!geometry) return;
 
-    // Add route source
-    map.current.addSource('route', {
-      type: 'geojson',
-      data: {
+    const existingSource = map.current.getSource('route') as mapboxgl.GeoJSONSource | undefined;
+
+    if (existingSource) {
+      existingSource.setData({
         type: 'Feature',
         properties: {},
-        geometry: routeData.routes[0].geometry
+        geometry
+      });
+    } else {
+      map.current.addSource('route', {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          properties: {},
+          geometry
+        }
+      });
+    }
+
+    if (!map.current.getLayer('route')) {
+      map.current.addLayer({
+        id: 'route',
+        type: 'line',
+        source: 'route',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round'
+        },
+        paint: {
+          'line-color': '#FF4F0B',
+          'line-width': 4,
+          'line-opacity': 0.8
+        }
+      });
+    }
+
+    const fitToRoute = options.fitToRoute ?? true;
+
+    if (fitToRoute) {
+      const coordinates = geometry.coordinates;
+      if (coordinates && coordinates.length > 1) {
+        const bounds = coordinates.reduce((bounds: any, coord: any) => {
+          return bounds.extend(coord);
+        }, new mapboxgl.LngLatBounds(coordinates[0], coordinates[0]));
+
+        map.current.fitBounds(bounds, {
+          padding: 50
+        });
       }
-    });
-
-    // Add route layer
-    map.current.addLayer({
-      id: 'route',
-      type: 'line',
-      source: 'route',
-      layout: {
-        'line-join': 'round',
-        'line-cap': 'round'
-      },
-      paint: {
-        'line-color': '#FF4F0B',
-        'line-width': 4,
-        'line-opacity': 0.8
-      }
-    });
-
-    // Fit map to route bounds
-    const coordinates = routeData.routes[0].geometry.coordinates;
-    const bounds = coordinates.reduce((bounds: any, coord: any) => {
-      return bounds.extend(coord);
-    }, new mapboxgl.LngLatBounds(coordinates[0], coordinates[0]));
-
-    map.current.fitBounds(bounds, {
-      padding: 50
-    });
+    }
   };
 
   // Function to create popup content with travel time
   const createPopupContentWithTravelTime = async (marker: Marker) => {
-    let travelTimeInfo = '';
+    let travelTimeSection = '';
     
     if (userLocation && marker.latitude && marker.longitude) {
       const travelData = await calculateTravelTime(
@@ -809,21 +832,20 @@ export function MapboxMap({
         { lat: marker.latitude, lng: marker.longitude }
       );
       
-      if (travelData) {
-        // Store route data and display route automatically
+      if (travelData && showDirections) {
         setRouteData(travelData.routeData);
         setShowRoute(true);
         displayRoute(travelData.routeData);
-        
-        travelTimeInfo = `
-          <div class="mt-3 pt-3 border-t border-gray-300">
-            <div class="flex items-center gap-2 mb-1">
-              <svg class="w-4 h-4 text-gray-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-              </svg>
-              <span class="text-sm font-medium text-gray-700">Travel time</span>
+
+        travelTimeSection = `
+          <div class="flex items-start gap-2 text-sm text-gray-800">
+            <svg class="w-4 h-4 mt-0.5 flex-shrink-0 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            <div class="leading-tight">
+              <p class="font-semibold">Estimated travel</p>
+              <p class="text-xs text-gray-600 mt-0.5">${travelData.duration} (${travelData.distance} km)</p>
             </div>
-            <div class="text-xs text-gray-500 ml-6">${travelData.duration} (${travelData.distance} km)</div>
           </div>
         `;
       }
@@ -842,44 +864,36 @@ export function MapboxMap({
     }
 
     const isFacility = getPinCategory(marker.type as any) === 'facility';
-    const showRID = !isFacility;
+    const typeBadgeClasses = isFacility ? 'bg-gray-100 text-gray-700' : 'bg-brand-orange text-white';
+    const statusBadge = !isFacility && marker.status
+      ? `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide bg-gray-100 text-gray-700 border border-gray-200">${marker.status}</span>`
+      : '';
     
     return `
-      <div class="w-[200px]" style="font-family: 'DM Sans', sans-serif;">
-        <div class="bg-gray-50 px-3 py-2 border-b border-gray-200">
-          <!-- Top bar: Type on left for facilities, RID on left + Type on right for accidents -->
-          <div class="flex items-center ${isFacility ? 'justify-start' : 'justify-between'} mb-2 pb-2 border-b border-gray-300">
-            ${isFacility ? `
-              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800" style="font-family: 'DM Sans', sans-serif;">
-                ${marker.type}
-              </span>
-            ` : `
-              <div class="flex items-center gap-2">
-                ${marker.reportId ? `
-                  <span class="text-xs font-semibold text-gray-600" style="font-family: 'DM Sans', sans-serif;">RID</span>
-                  <span class="text-xs text-gray-900" style="font-family: 'DM Sans', sans-serif;">${marker.reportId}</span>
-                ` : '<span class="text-xs text-gray-400" style="font-family: \'DM Sans\', sans-serif;">No RID</span>'}
-              </div>
-              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800" style="font-family: 'DM Sans', sans-serif;">
-                ${marker.type}
-              </span>
-            `}
+      <div class="min-w-[240px] max-w-[280px] rounded-xl overflow-hidden border border-gray-200 bg-white shadow-md" style="font-family: 'DM Sans', sans-serif;">
+        <div class="px-3 py-3 bg-gray-50 border-b border-gray-200">
+          <div class="flex items-center justify-between gap-2">
+            <span class="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide shadow-sm ${typeBadgeClasses}">
+              ${marker.type}
+            </span>
+            ${statusBadge}
           </div>
-          <h4 class="text-xs font-semibold text-gray-700 uppercase tracking-wide" style="font-family: 'DM Sans', sans-serif; line-height: 1.2;">Report Details</h4>
         </div>
-        <div class="p-3">
-          <div class="flex items-start gap-2 mb-2">
-            <svg class="w-4 h-4 text-gray-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div class="p-3 space-y-3">
+          <div class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-gray-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
             </svg>
-            <div class="min-w-0 flex-1">
-              <span class="text-sm font-medium text-gray-900 break-words block" style="font-family: 'DM Sans', sans-serif; line-height: 1.2;">${locationName}</span>
-              <span class="text-xs text-gray-500 block mt-0.5" style="font-family: 'DM Sans', sans-serif; line-height: 1.2;">${marker.latitude?.toFixed(6)}, ${marker.longitude?.toFixed(6)}</span>
+            <div class="min-w-0 flex-1 pb-2 border-b border-gray-200">
+              <p class="text-sm font-semibold text-gray-900 leading-snug break-words">${locationName}</p>
+              ${marker.latitude !== undefined && marker.longitude !== undefined ? `
+                <p class="text-xs text-gray-500 font-mono mt-1">${marker.latitude.toFixed(6)}, ${marker.longitude.toFixed(6)}</p>
+              ` : ''}
             </div>
           </div>
           
-          ${travelTimeInfo}
+          ${travelTimeSection}
         </div>
       </div>
     `;
@@ -1120,10 +1134,11 @@ export function MapboxMap({
           // Only center and zoom if directions are enabled
           if (showDirections) {
             // Center the map on the clicked location
-            map.current.flyTo({
+            map.current.easeTo({
               center: [e.lngLat.lng, e.lngLat.lat],
-              zoom: 12, // Zoom in closer to the clicked location
-              essential: true
+              zoom: 12,
+              essential: true,
+              duration: 600
             });
 
             // Display route if user location is available
@@ -1220,12 +1235,22 @@ export function MapboxMap({
       return;
     }
 
-    // Use flyTo for smooth animation
-    map.current.flyTo({
+    const mapInstance = map.current;
+    const currentCenter = mapInstance.getCenter();
+    const currentZoom = mapInstance.getZoom();
+
+    const centerChanged = Math.abs(currentCenter.lng - center[0]) > 0.0001 || Math.abs(currentCenter.lat - center[1]) > 0.0001;
+    const zoomChanged = Math.abs(currentZoom - zoom) > 0.01;
+
+    if (!centerChanged && !zoomChanged) {
+      return;
+    }
+
+    mapInstance.easeTo({
       center: center,
       zoom: zoom,
       essential: true,
-      duration: 1500 // 1.5 second animation
+      duration: 800
     });
   }, [center, zoom, mapLoaded, showOnlyCurrentLocation]);
 
@@ -1251,6 +1276,183 @@ export function MapboxMap({
     if (showHeatmap) {
       return;
     }
+
+    const renderClickedLocationMarker = () => {
+      if (!map.current || !clickedLocation) {
+        return;
+      }
+
+      // Remove any existing popup before rendering a new one
+      if (popupRef.current) {
+        popupRef.current.remove();
+        popupRef.current = null;
+      }
+
+      const clickedLocationEl = createMarkerElement('Default', true, false);
+      clickedLocationEl.title = 'Selected location';
+
+      const clickedLocationMarker = new mapboxgl.Marker({
+        element: clickedLocationEl,
+        anchor: 'center'
+      })
+      .setLngLat([clickedLocation.lng, clickedLocation.lat])
+      .addTo(map.current);
+
+      markersRef.current.push(clickedLocationMarker);
+
+      const travelTimeElementId = `travel-time-${clickedLocation.lat.toFixed(6).replace(/\./g, '_')}-${clickedLocation.lng.toFixed(6).replace(/\./g, '_')}`;
+      const travelTimeHtml = showDirections
+        ? `<div class="mt-3 pt-3 border-t border-gray-300">
+            <div class="flex items-center gap-2 mb-1">
+              <svg class="w-4 h-4 text-gray-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+              <span class="text-sm font-medium text-gray-700">Travel time</span>
+            </div>
+            <div class="text-xs text-gray-500 ml-6" id="${travelTimeElementId}">Calculating...</div>
+          </div>`
+        : '';
+
+      const clickedPopup = new mapboxgl.Popup({
+        offset: 25,
+        closeButton: false,
+        closeOnClick: false,
+        className: 'custom-popup',
+        maxWidth: '200px'
+      })
+      .setLngLat([clickedLocation.lng, clickedLocation.lat])
+      .setHTML(`
+        <div class="w-[200px]">
+          <div class="bg-gray-50 px-3 py-2 border-b border-gray-200">
+            <h4 class="text-xs font-semibold text-gray-700 uppercase tracking-wide">Selected Location</h4>
+          </div>
+          <div class="p-3">
+            <div class="flex items-start gap-2 mb-2">
+              <svg class="w-4 h-4 text-gray-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
+              </svg>
+              <div class="min-w-0 flex-1">
+                <span class="text-sm font-medium text-gray-900 break-words leading-tight block">${clickedLocation.address}</span>
+                <span class="text-xs text-gray-500 font-mono block mt-1">${clickedLocation.lat.toFixed(6)}, ${clickedLocation.lng.toFixed(6)}</span>
+              </div>
+            </div>
+            ${travelTimeHtml}
+          </div>
+        </div>
+      `)
+      .addTo(map.current);
+
+      popupRef.current = clickedPopup;
+
+      if (showDirections) {
+        const travelTimeElement = document.getElementById(travelTimeElementId);
+        if (!userLocation) {
+          if (travelTimeElement) {
+            travelTimeElement.textContent = 'Allow location access to calculate';
+          }
+          return;
+        }
+
+        const origin = { lat: userLocation.lat, lng: userLocation.lng };
+        const destination = { lat: clickedLocation.lat, lng: clickedLocation.lng };
+        const routeKey = `${origin.lat.toFixed(6)},${origin.lng.toFixed(6)}->${destination.lat.toFixed(6)},${destination.lng.toFixed(6)}`;
+
+        if (lastTravelTimeDataRef.current && lastTravelTimeDataRef.current.key === routeKey) {
+          const shouldFitToRoute = routeKey !== lastRouteKeyRef.current || !map.current?.getSource('route');
+          if (travelTimeElement) {
+            travelTimeElement.textContent = `${lastTravelTimeDataRef.current.duration} (${lastTravelTimeDataRef.current.distance} km)`;
+          }
+          if (lastRouteDataRef.current?.routes?.[0]) {
+            displayRoute(lastRouteDataRef.current, { fitToRoute: shouldFitToRoute });
+          }
+          lastRouteKeyRef.current = routeKey;
+          return;
+        }
+
+        if (travelTimeElement) {
+          travelTimeElement.textContent = 'Calculating...';
+        }
+
+        if (travelTimeRequestRef.current?.controller) {
+          travelTimeRequestRef.current.controller.abort();
+        }
+
+        const controller = new AbortController();
+        travelTimeRequestRef.current = { key: routeKey, controller };
+
+        calculateTravelTime(origin, destination, controller.signal)
+          .then(travelTimeData => {
+            if (travelTimeRequestRef.current?.key !== routeKey) {
+              return;
+            }
+            travelTimeRequestRef.current = null;
+
+            const travelTimeElementFresh = document.getElementById(travelTimeElementId);
+
+            if (travelTimeData && travelTimeData.routeData) {
+              const shouldFitToRoute = routeKey !== lastRouteKeyRef.current || !map.current?.getSource('route');
+              if (travelTimeElementFresh) {
+                travelTimeElementFresh.textContent = `${travelTimeData.duration} (${travelTimeData.distance} km)`;
+              }
+              lastTravelTimeDataRef.current = {
+                key: routeKey,
+                duration: travelTimeData.duration,
+                distance: travelTimeData.distance
+              };
+              lastRouteDataRef.current = travelTimeData.routeData;
+              setTravelTime({
+                duration: travelTimeData.duration,
+                distance: travelTimeData.distance
+              });
+              setRouteData(travelTimeData.routeData);
+              setShowRoute(true);
+              displayRoute(travelTimeData.routeData, { fitToRoute: shouldFitToRoute });
+              lastRouteKeyRef.current = routeKey;
+            } else {
+              if (travelTimeElementFresh) {
+                travelTimeElementFresh.textContent = 'Unable to calculate';
+              }
+              lastTravelTimeDataRef.current = null;
+              lastRouteDataRef.current = null;
+              lastRouteKeyRef.current = null;
+              setTravelTime(null);
+              setShowRoute(false);
+              if (map.current) {
+                if (map.current.getLayer('route')) {
+                  map.current.removeLayer('route');
+                }
+                if (map.current.getSource('route')) {
+                  map.current.removeSource('route');
+                }
+              }
+            }
+          })
+          .catch(error => {
+            if (error?.name === 'AbortError') {
+              return;
+            }
+            console.error('Error calculating travel time:', error);
+            const travelTimeElementFresh = document.getElementById(travelTimeElementId);
+            if (travelTimeElementFresh) {
+              travelTimeElementFresh.textContent = 'Unable to calculate';
+            }
+            lastTravelTimeDataRef.current = null;
+            lastRouteDataRef.current = null;
+            lastRouteKeyRef.current = null;
+            setTravelTime(null);
+            setShowRoute(false);
+            if (map.current) {
+              if (map.current.getLayer('route')) {
+                map.current.removeLayer('route');
+              }
+              if (map.current.getSource('route')) {
+                map.current.removeSource('route');
+              }
+            }
+          });
+      }
+    };
 
     // Handle single marker (from database)
     if (singleMarker) {
@@ -1307,7 +1509,7 @@ export function MapboxMap({
       
 
       // Add current location marker if available and not showing only current location
-      if (userLocation && !showOnlyCurrentLocation) {
+      if (userLocation && !showOnlyCurrentLocation && showUserLocationMarker) {
         
         const currentLocationEl = document.createElement('div');
         currentLocationEl.className = 'current-location-marker';
@@ -1332,98 +1534,31 @@ export function MapboxMap({
 
       // Add clicked location marker if provided
       if (clickedLocation) {
-        const clickedLocationEl = document.createElement('div');
-        clickedLocationEl.className = 'clicked-location-marker';
-        clickedLocationEl.style.width = '28px';
-        clickedLocationEl.style.height = '28px';
-        clickedLocationEl.style.backgroundColor = '#f97316'; // brand-orange
-        clickedLocationEl.style.borderRadius = '50%';
-        clickedLocationEl.style.border = '3px solid white';
-        clickedLocationEl.style.boxShadow = '0 0 12px rgba(249, 115, 22, 0.6)'; // brand-orange with opacity
-        clickedLocationEl.style.cursor = 'pointer';
-        clickedLocationEl.title = 'Selected location';
-
-        const clickedLocationMarker = new mapboxgl.Marker({
-          element: clickedLocationEl,
-          anchor: 'center'
-        })
-        .setLngLat([clickedLocation.lng, clickedLocation.lat])
-        .addTo(map.current);
-
-        markersRef.current.push(clickedLocationMarker);
-
-        // Add popup for clicked location
-        const clickedPopup = new mapboxgl.Popup({
-          offset: 25,
-          closeButton: false,
-          closeOnClick: false,
-          className: 'custom-popup',
-          maxWidth: '200px'
-        })
-        .setLngLat([clickedLocation.lng, clickedLocation.lat])
-        .setHTML(`
-          <div class="w-[200px]">
-            <div class="bg-gray-50 px-3 py-2 border-b border-gray-200">
-              <h4 class="text-xs font-semibold text-gray-700 uppercase tracking-wide">Selected Location</h4>
-            </div>
-            <div class="p-3">
-              <div class="flex items-start gap-2 mb-2">
-                <svg class="w-4 h-4 text-gray-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                </svg>
-                <div class="min-w-0 flex-1">
-                  <span class="text-sm font-medium text-gray-900 break-words leading-tight block">${clickedLocation.address}</span>
-                  <span class="text-xs text-gray-500 font-mono block mt-1">${clickedLocation.lat.toFixed(6)}, ${clickedLocation.lng.toFixed(6)}</span>
-                </div>
-              </div>
-              <div class="mt-3 pt-3 border-t border-gray-300">
-                <div class="flex items-center gap-2 mb-1">
-                  <svg class="w-4 h-4 text-gray-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                  </svg>
-                  <span class="text-sm font-medium text-gray-700">Travel time</span>
-                </div>
-                <div class="text-xs text-gray-500 ml-6" id="travel-time-${clickedLocation.lat}-${clickedLocation.lng}">Calculating...</div>
-              </div>
-            </div>
-          </div>
-        `)
-        .addTo(map.current);
-
-        // Calculate and update travel time asynchronously, and display route
-        if (userLocation) {
-          calculateTravelTime(
-            { lat: userLocation.lat, lng: userLocation.lng },
-            { lat: clickedLocation.lat, lng: clickedLocation.lng }
-          ).then(travelTimeData => {
-            if (travelTimeData) {
-              // Update travel time display
-              const travelTimeElement = document.getElementById(`travel-time-${clickedLocation.lat}-${clickedLocation.lng}`);
-              if (travelTimeElement) {
-                travelTimeElement.textContent = `${travelTimeData.duration} (${travelTimeData.distance} km)`;
-              }
-              
-              // Display route automatically
-              if (travelTimeData.routeData) {
-                setRouteData(travelTimeData.routeData);
-                setShowRoute(true);
-                displayRoute(travelTimeData.routeData);
-              }
-            }
-          }).catch(error => {
-            console.error('Error calculating travel time:', error);
-            const travelTimeElement = document.getElementById(`travel-time-${clickedLocation.lat}-${clickedLocation.lng}`);
-            if (travelTimeElement) {
-              travelTimeElement.textContent = 'Unable to calculate';
-            }
-          });
-        }
-
-        popupRef.current = clickedPopup;
+        renderClickedLocationMarker();
       }
 
       return; // Exit early since we're showing a single marker
+    }
+
+    // Render clicked location marker even when no single marker is provided
+    if (clickedLocation) {
+      renderClickedLocationMarker();
+    } else if (map.current && showDirections) {
+      // Remove any existing route when there is no selected location
+      if (map.current.getLayer('route')) {
+        map.current.removeLayer('route');
+      }
+      if (map.current.getSource('route')) {
+        map.current.removeSource('route');
+      }
+      setShowRoute(false);
+      setRouteData(null);
+      travelTimeRequestRef.current?.controller?.abort();
+      travelTimeRequestRef.current = null;
+      lastRouteKeyRef.current = null;
+      lastRouteDataRef.current = null;
+      lastTravelTimeDataRef.current = null;
+      setTravelTime(null);
     }
 
     // Render pins from database
@@ -1594,16 +1729,37 @@ export function MapboxMap({
   // Handle route display
   useEffect(() => {
     if (map.current && mapLoaded && routeData && showRoute) {
-      displayRoute(routeData);
+      displayRoute(routeData, { fitToRoute: false });
     }
   }, [mapLoaded, routeData, showRoute]);
 
+  useEffect(() => {
+    if (!showDirections) {
+      setShowRoute(false);
+      setRouteData(null);
+      setTravelTime(null);
+      travelTimeRequestRef.current?.controller?.abort();
+      travelTimeRequestRef.current = null;
+      lastRouteKeyRef.current = null;
+      lastRouteDataRef.current = null;
+      lastTravelTimeDataRef.current = null;
+      if (map.current) {
+        if (map.current.getLayer('route')) {
+          map.current.removeLayer('route');
+        }
+        if (map.current.getSource('route')) {
+          map.current.removeSource('route');
+        }
+      }
+    }
+  }, [showDirections, mapLoaded]);
+
   // Handle route display for location selection mode
   useEffect(() => {
-    if (map.current && mapLoaded && routeData && showOnlyCurrentLocation) {
+    if (map.current && mapLoaded && routeData && showOnlyCurrentLocation && showDirections) {
       displayRoute(routeData);
     }
-  }, [mapLoaded, routeData, showOnlyCurrentLocation]);
+  }, [mapLoaded, routeData, showOnlyCurrentLocation, showDirections]);
 
   // Handle heatmap
   useEffect(() => {

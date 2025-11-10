@@ -144,6 +144,20 @@ service cloud.firestore {
       allow read, write: if true;
     }
     
+    // Admin position catalog (used in admin creation form)
+    match /adminPositions/{positionId} {
+      // Everyone can read available positions
+      allow read: if true;
+      // Only authenticated admins (super admin or LDRRMO admin) can manage positions
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Dispatch vehicles catalog (used in report dispatch form)
+    match /vehicles/{vehicleId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
     // Pins collection (Map Markers)
     match /pins/{pinId} {
       // Public read access (mobile app + web app + anyone can view pins)

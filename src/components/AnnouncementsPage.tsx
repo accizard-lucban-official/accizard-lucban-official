@@ -28,12 +28,10 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, Plus, Edit, Trash2, Calendar, AlertTriangle, Info, X, Eye, ChevronUp, ChevronDown, Check, CalendarIcon } from "lucide-react";
+import { Search, Plus, Edit, Trash2, Calendar, AlertTriangle, Info, X, Eye, ChevronUp, ChevronDown, Check } from "lucide-react";
 import { Layout } from "./Layout";
 import { DateRange } from "react-day-picker";
-import { Calendar as CalendarComponent } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { format, addYears } from "date-fns";
+import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { db } from "@/lib/firebase";
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp } from "firebase/firestore";
@@ -41,6 +39,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "@/components/ui/use-toast";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
   
 function formatTimeNoSeconds(time: string | number | null | undefined) {
   if (!time) return '-';
@@ -87,20 +86,6 @@ export function AnnouncementsPage() {
   const [isLoadingAnnouncements, setIsLoadingAnnouncements] = useState(true);
 
   const today = new Date();
-  // For dual calendar date range picker
-  const [fromMonth, setFromMonth] = useState((dateRange?.from || today).getMonth());
-  const [fromYear, setFromYear] = useState((dateRange?.from || today).getFullYear());
-  const [toMonth, setToMonth] = useState((dateRange?.to || today).getMonth());
-  const [toYear, setToYear] = useState((dateRange?.to || today).getFullYear());
-  // For month/year dropdowns in date range picker
-  const currentMonth = (dateRange?.from || today).getMonth();
-  const currentYear = (dateRange?.from || today).getFullYear();
-  const months = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December"
-  ];
-  const years = Array.from({ length: 21 }, (_, i) => today.getFullYear() - 10 + i);
-
   // Fetch announcement types from Firestore on mount
   useEffect(() => {
     async function fetchTypes() {
@@ -460,41 +445,23 @@ export function AnnouncementsPage() {
               </div>
 
               {/* Date Range Filter */}
-              <Popover>
-                <PopoverTrigger asChild>
+              <div className="flex items-end gap-3">
+                <DateRangePicker
+                  value={dateRange}
+                  onChange={setDateRange}
+                  className="w-[260px]"
+                />
+                {(dateRange?.from || dateRange?.to) && (
                   <Button
                     variant="outline"
                     size="sm"
-                    className={cn(
-                      "justify-start text-left font-normal w-auto",
-                      !dateRange && "text-gray-800"
-                    )}
+                    onClick={() => setDateRange(undefined)}
+                    className="h-9"
                   >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {dateRange?.from ? (
-                      dateRange.to ? (
-                        <>
-                          {format(dateRange.from, "MMM dd")} - {format(dateRange.to, "MMM dd")}
-                        </>
-                      ) : (
-                        format(dateRange.from, "MMM dd, y")
-                      )
-                    ) : (
-                      <span>Date Range</span>
-                    )}
+                    Clear
                   </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <CalendarComponent
-                    initialFocus
-                    mode="range"
-                    defaultMonth={dateRange?.from}
-                    selected={dateRange}
-                    onSelect={setDateRange}
-                    numberOfMonths={2}
-                  />
-                </PopoverContent>
-              </Popover>
+                )}
+              </div>
 
               {/* Type Filter */}
               <Select value={typeFilter} onValueChange={setTypeFilter}>
@@ -737,7 +704,7 @@ export function AnnouncementsPage() {
                                 <TooltipTrigger asChild>
                                   <AlertDialogTrigger asChild>
                                     <Button size="sm" variant="outline" className="text-red-600">
-                                      <Trash2 className="h-4 w-4" />
+                                      <Trash2 className="h-4 w-4 text-red-600" />
                                     </Button>
                                   </AlertDialogTrigger>
                                 </TooltipTrigger>

@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Eye, Edit, Trash2, Plus, FileText, Calendar, Clock, MapPin, Upload, FileIcon, Image, Printer, Download, X, Search, FileDown, Car, Flame, Ambulance, Waves, Mountain, CircleAlert, Users, ShieldAlert, Activity, ArrowUpRight, ArrowUpDown, ArrowUp, ArrowDown, Layers, ZoomIn, ZoomOut, LocateFixed, Wrench, AlertTriangle, Zap, Leaf } from "lucide-react";
+import { Eye, Edit, Trash2, Plus, FileText, Calendar, Clock, MapPin, Upload, FileIcon, Image, Printer, Download, X, Search, FileDown, Car, Flame, Ambulance, Waves, Mountain, CircleAlert, Users, ShieldAlert, Activity, ArrowUpRight, ArrowUpDown, ArrowUp, ArrowDown, Layers, ZoomIn, ZoomOut, LocateFixed, Wrench, AlertTriangle, Zap, Leaf, Check, ChevronDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -51,6 +51,165 @@ const getReportTypeIcon = (type: string) => {
   return iconMap[type] || FileText;
 };
 
+type AgencyOption = {
+  id: string;
+  name: string;
+  isLocal?: boolean;
+};
+
+type DriverOption = {
+  id: string;
+  name: string;
+  position?: string;
+};
+
+type VehicleOption = {
+  id: string;
+  name: string;
+  isLocal?: boolean;
+};
+
+const NO_DRIVER_SELECTION = "__no_driver_selection__";
+const NO_VEHICLE_SELECTION = "__no_vehicle_selection__";
+
+type DispatchDataState = {
+  receivedBy: string;
+  timeCallReceived: string;
+  timeOfDispatch: string;
+  timeOfArrival: string;
+  hospitalArrival: string;
+  returnedToOpcen: string;
+  disasterRelated: string;
+  agencyPresent: string[];
+  driverId: string;
+  driverName: string;
+  vehicleId: string;
+  vehicleName: string;
+  typeOfEmergency: string;
+  vehicleInvolved: string;
+  injuryClassification: string;
+  majorInjuryTypes: string[];
+  minorInjuryTypes: string[];
+  medicalClassification: string;
+  majorMedicalSymptoms: string[];
+  minorMedicalSymptoms: string[];
+  chiefComplaint: string;
+  diagnosis: string;
+  natureOfIllness: string;
+  natureOfIllnessOthers: string;
+  actionsTaken: string[];
+  referredTo: string;
+  transportFrom: string;
+  transportTo: string;
+  othersDescription: string;
+  vitalSigns: {
+    temperature: string;
+    pulseRate: string;
+    respiratoryRate: string;
+    bloodPressure: string;
+  };
+  responders: Array<{
+    id: string;
+    team: string;
+    drivers: string[];
+    responders: string[];
+  }>;
+};
+
+const createInitialDispatchState = (): DispatchDataState => ({
+  receivedBy: "",
+  timeCallReceived: "",
+  timeOfDispatch: "",
+  timeOfArrival: "",
+  hospitalArrival: "",
+  returnedToOpcen: "",
+  disasterRelated: "",
+  agencyPresent: [],
+  driverId: "",
+  driverName: "",
+  vehicleId: "",
+  vehicleName: "",
+  typeOfEmergency: "",
+  vehicleInvolved: "",
+  injuryClassification: "",
+  majorInjuryTypes: [],
+  minorInjuryTypes: [],
+  medicalClassification: "",
+  majorMedicalSymptoms: [],
+  minorMedicalSymptoms: [],
+  chiefComplaint: "",
+  diagnosis: "",
+  natureOfIllness: "",
+  natureOfIllnessOthers: "",
+  actionsTaken: [],
+  referredTo: "",
+  transportFrom: "",
+  transportTo: "",
+  othersDescription: "",
+  vitalSigns: {
+    temperature: "",
+    pulseRate: "",
+    respiratoryRate: "",
+    bloodPressure: ""
+  },
+  responders: []
+});
+
+const normalizeDispatchData = (data: any): DispatchDataState => {
+  const base = createInitialDispatchState();
+  if (!data) {
+    return base;
+  }
+
+  return {
+    ...base,
+    ...data,
+    agencyPresent: Array.isArray(data.agencyPresent)
+      ? data.agencyPresent
+      : data.agencyPresent
+        ? [data.agencyPresent]
+        : [],
+    driverId: typeof data.driverId === "string" ? data.driverId : "",
+    driverName: typeof data.driverName === "string"
+      ? data.driverName
+      : typeof data.driver === "string"
+        ? data.driver
+        : "",
+    vehicleId: typeof data.vehicleId === "string" ? data.vehicleId : "",
+    vehicleName: typeof data.vehicleName === "string"
+      ? data.vehicleName
+      : typeof data.vehicle === "string"
+        ? data.vehicle
+        : "",
+    majorInjuryTypes: Array.isArray(data.majorInjuryTypes)
+      ? data.majorInjuryTypes
+      : data.majorInjuryTypes
+        ? [data.majorInjuryTypes]
+        : [],
+    minorInjuryTypes: Array.isArray(data.minorInjuryTypes)
+      ? data.minorInjuryTypes
+      : data.minorInjuryTypes
+        ? [data.minorInjuryTypes]
+        : [],
+    majorMedicalSymptoms: Array.isArray(data.majorMedicalSymptoms)
+      ? data.majorMedicalSymptoms
+      : data.majorMedicalSymptoms
+        ? [data.majorMedicalSymptoms]
+        : [],
+    minorMedicalSymptoms: Array.isArray(data.minorMedicalSymptoms)
+      ? data.minorMedicalSymptoms
+      : data.minorMedicalSymptoms
+        ? [data.minorMedicalSymptoms]
+        : [],
+    actionsTaken: Array.isArray(data.actionsTaken)
+      ? data.actionsTaken
+      : data.actionsTaken
+        ? [data.actionsTaken]
+        : [],
+    responders: Array.isArray(data.responders) ? data.responders : base.responders,
+  };
+};
+
 export function ManageReportsPage() {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
@@ -73,10 +232,12 @@ export function ManageReportsPage() {
   // Preview Map (Report Modal - Directions Tab) state
   const [previewMapCenter, setPreviewMapCenter] = useState<[number, number]>([121.5556, 14.1139]);
   const [previewMapZoom, setPreviewMapZoom] = useState(14);
-  const [previewMapStyle, setPreviewMapStyle] = useState<'streets' | 'satellite'>('streets');
   const [previewSearchQuery, setPreviewSearchQuery] = useState("");
   const [previewSearchSuggestions, setPreviewSearchSuggestions] = useState<any[]>([]);
   const [isPreviewSearchOpen, setIsPreviewSearchOpen] = useState(false);
+  const [addLocationSearchQuery, setAddLocationSearchQuery] = useState("");
+  const [addLocationSearchSuggestions, setAddLocationSearchSuggestions] = useState<any[]>([]);
+  const [isAddLocationSearchOpen, setIsAddLocationSearchOpen] = useState(false);
   
   // Initialize preview map center when a report is selected
   useEffect(() => {
@@ -129,6 +290,30 @@ export function ManageReportsPage() {
     const t = setTimeout(() => handlePreviewGeocodingSearch(previewSearchQuery), 300);
     return () => clearTimeout(t);
   }, [previewSearchQuery, handlePreviewGeocodingSearch]);
+
+  const handleAddLocationGeocodingSearch = useCallback(async (query: string) => {
+    if (query.trim().length < 3) {
+      setAddLocationSearchSuggestions([]);
+      setIsAddLocationSearchOpen(false);
+      return;
+    }
+
+    try {
+      const accessToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN;
+      if (!accessToken) return;
+
+      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(
+        query
+      )}.json?access_token=${accessToken}&limit=5&proximity=121.5569,14.1133&country=PH&bbox=116,4,127,21.5`;
+      const data = await ensureOk(await fetch(url)).then((r) => r.json());
+      setAddLocationSearchSuggestions(data.features || []);
+      setIsAddLocationSearchOpen(Boolean(data.features && data.features.length > 0));
+    } catch {
+      setAddLocationSearchSuggestions([]);
+      setIsAddLocationSearchOpen(false);
+    }
+  }, []);
+
   const [showBatchDeleteDialog, setShowBatchDeleteDialog] = useState(false);
   
   // Loading states
@@ -457,6 +642,12 @@ export function ManageReportsPage() {
   const [showResidentSearch, setShowResidentSearch] = useState(false);
   const [showAddLocationMap, setShowAddLocationMap] = useState(false);
   const [addLocationData, setAddLocationData] = useState<{lat: number, lng: number, address: string} | null>(null);
+
+  useEffect(() => {
+    if (!showAddLocationMap) return;
+    const t = setTimeout(() => handleAddLocationGeocodingSearch(addLocationSearchQuery), 300);
+    return () => clearTimeout(t);
+  }, [addLocationSearchQuery, handleAddLocationGeocodingSearch, showAddLocationMap]);
   
   // Memoize the single marker to prevent flinching
   const singleMarkerForMap = useMemo(() => {
@@ -473,6 +664,16 @@ export function ManageReportsPage() {
       longitude: addLocationData.lng
     };
   }, [addLocationData, formData.location]);
+  const addLocationMapCenter = addLocationData
+    ? [addLocationData.lng, addLocationData.lat] as [number, number]
+    : formData.longitude && formData.latitude
+    ? [Number(formData.longitude), Number(formData.latitude)] as [number, number]
+    : [121.5556, 14.1139] as [number, number];
+  const addLocationMapZoom = addLocationData
+    ? 16
+    : formData.longitude && formData.latitude
+    ? 15
+    : 14;
   
   const handleAddReport = async () => {
     setIsAddingReport(true);
@@ -727,6 +928,14 @@ export function ManageReportsPage() {
       });
     }
   }, [showAddLocationMap, formData, addLocationData]);
+
+useEffect(() => {
+  if (!showAddLocationMap) {
+    setAddLocationSearchQuery("");
+    setAddLocationSearchSuggestions([]);
+    setIsAddLocationSearchOpen(false);
+  }
+}, [showAddLocationMap]);
   
   // Handle location map click for add report
   const handleAddReportMapClick = async (lngLat: { lng: number; lat: number }) => {
@@ -747,6 +956,28 @@ export function ManageReportsPage() {
       console.error('Error getting address for clicked location:', error);
       toast.error('Failed to get address for selected location');
     }
+  };
+
+  const handleSelectAddLocationSuggestion = (feature: any) => {
+    if (!feature?.geometry?.coordinates) return;
+    const [lng, lat] = feature.geometry.coordinates;
+    const address = feature.place_name || feature.text || 'Selected location';
+
+    setAddLocationData({
+      lat,
+      lng,
+      address,
+    });
+
+    setFormData((prev) => ({
+      ...prev,
+      location: address,
+      latitude: lat,
+      longitude: lng,
+    }));
+
+    setAddLocationSearchSuggestions([]);
+    setIsAddLocationSearchOpen(false);
   };
   const handleDeleteReport = (reportId: string) => {
     setReportToDelete(reportId);
@@ -997,6 +1228,14 @@ export function ManageReportsPage() {
                           : 'N/A'}
                       </td>
                     </tr>
+                <tr>
+                  <th>Driver</th>
+                  <td class="value-cell">${dispatch?.driverName || dispatch?.driverId || 'N/A'}</td>
+                </tr>
+                <tr>
+                  <th>Vehicle Used</th>
+                  <td class="value-cell">${dispatch?.vehicleName || dispatch?.vehicleId || 'N/A'}</td>
+                </tr>
                     <tr>
                       <th>Time Call Received</th>
                       <td class="value-cell">${dispatch?.timeCallReceived || 'N/A'}</td>
@@ -1031,7 +1270,7 @@ export function ManageReportsPage() {
                     </tr>
                     <tr>
                       <th>Agency Present</th>
-                      <td class="value-cell">${dispatch?.agencyPresent || 'N/A'}</td>
+                      <td class="value-cell">${Array.isArray(dispatch?.agencyPresent) ? dispatch.agencyPresent.join(', ') : (dispatch?.agencyPresent || 'N/A')}</td>
                     </tr>
                     <tr>
                       <th>Type of Emergency</th>
@@ -1251,7 +1490,11 @@ export function ManageReportsPage() {
     "Nagsinamo", "Nalunao", "Palola", "Piis", "Samil", "Tiawe", "Tinamnan"
   ];
   const [adminOptions, setAdminOptions] = useState(["Admin 1", "Admin 2", "Admin 3", "Admin 4", "Admin 5"]);
-  const [agencyOptions, setAgencyOptions] = useState(["PNP", "BFP", "MTMO", "BPOC"]);
+  const [agencyOptions, setAgencyOptions] = useState<AgencyOption[]>([]);
+  const [newAgencyName, setNewAgencyName] = useState("");
+  const [driverOptions, setDriverOptions] = useState<DriverOption[]>([]);
+  const [vehicleOptions, setVehicleOptions] = useState<VehicleOption[]>([]);
+  const [newVehicleName, setNewVehicleName] = useState("");
   const emergencyTypeOptions = ["Road Crash", "Medical Assistance", "Medical Emergency"];
   const vehicleInvolvedOptions = [
     "MV to MV",
@@ -1333,15 +1576,15 @@ export function ManageReportsPage() {
     "Coordinated and Contacted Relative",
     "Primary and Secondary Assessments",
     "First Aid Management Done",
-    "Vital Signs Taken (Temperature, pulse rate, respiratory rate, blood pressure)",
+    "Vital Signs Taken",
     "Interviewed patient or relative/s",
     "Coordinated with RHU",
     "Coordinated with Refer Quezon",
-    "Referred to (Short Desc)",
+    "Referred",
     "Endorsed patient/s to nurse on duty",
     "Assisted patient/s in Response Vehicle",
-    "Transport from (Place from) to (Place to)",
-    "Others (Short Desc)"
+    "Transported",
+    "Others"
   ];
   const [teamOptions, setTeamOptions] = useState([
     "Alpha Team",
@@ -1359,24 +1602,6 @@ export function ManageReportsPage() {
   const [newMemberName, setNewMemberName] = useState("");
   const [selectedTeamForManagement, setSelectedTeamForManagement] = useState<"Team Alpha" | "Team Sulu">("Team Alpha");
 
-  const [driverOptions, setDriverOptions] = useState([
-    "John Smith",
-    "Jane Doe",
-    "Mike Johnson",
-    "Sarah Wilson",
-    "David Brown"
-  ]);
-  const [responderOptions, setResponderOptions] = useState([
-    "John Smith",
-    "Jane Doe",
-    "Mike Johnson",
-    "Sarah Wilson",
-    "David Brown",
-    "Lisa Garcia",
-    "Robert Martinez",
-    "Emily Davis",
-    "Michael Rodriguez"
-  ]);
   const truncateLocation = (location: string, maxLength: number = 30) => {
     return location.length > maxLength ? `${location.substring(0, maxLength)}...` : location;
   };
@@ -2293,6 +2518,14 @@ export function ManageReportsPage() {
                   </td>
                 </tr>
                 <tr>
+                  <th>Driver</th>
+                  <td class="value-cell">${dispatch?.driverName || dispatch?.driverId || 'N/A'}</td>
+                </tr>
+                <tr>
+                  <th>Vehicle Used</th>
+                  <td class="value-cell">${dispatch?.vehicleName || dispatch?.vehicleId || 'N/A'}</td>
+                </tr>
+                <tr>
                   <th>Time Call Received</th>
                   <td class="value-cell">${dispatch?.timeCallReceived || 'N/A'}</td>
                 </tr>
@@ -2326,7 +2559,7 @@ export function ManageReportsPage() {
                 </tr>
                 <tr>
                   <th>Agency Present</th>
-                  <td class="value-cell">${dispatch?.agencyPresent || 'N/A'}</td>
+                  <td class="value-cell">${Array.isArray(dispatch?.agencyPresent) ? dispatch.agencyPresent.join(', ') : (dispatch?.agencyPresent || 'N/A')}</td>
                 </tr>
                 <tr>
                   <th>Type of Emergency</th>
@@ -2719,9 +2952,10 @@ export function ManageReportsPage() {
         const currentData = docSnap.data();
         
         // Merge with existing dispatchInfo if it exists
+        const sanitizedDispatchData = normalizeDispatchData(dispatchData);
         const mergedDispatchInfo = {
           ...currentData.dispatchInfo,
-          ...dispatchData
+          ...sanitizedDispatchData
         };
         
         await updateDoc(docRef, {
@@ -2747,8 +2981,9 @@ export function ManageReportsPage() {
       if (docSnap.exists()) {
         const data = docSnap.data();
         if (data.dispatchInfo) {
-          setDispatchData(data.dispatchInfo);
-          return data.dispatchInfo;
+          const normalized = normalizeDispatchData(data.dispatchInfo);
+          setDispatchData(normalized);
+          return normalized;
         }
       }
     } catch (error) {
@@ -2830,6 +3065,257 @@ export function ManageReportsPage() {
     }
   };
 
+  const fetchDrivers = useCallback(async () => {
+    try {
+      const snapshot = await getDocs(collection(db, "admins"));
+      const drivers = snapshot.docs
+        .map(docSnap => {
+          const data = docSnap.data();
+          const position = (data.position || "").toString().toLowerCase();
+          if (!position.includes("driver")) {
+            return null;
+          }
+          const name = data.name || data.fullName || data.username || "";
+          if (!name) {
+            return null;
+          }
+          return {
+            id: docSnap.id,
+            name: name as string,
+            position: data.position,
+          } as DriverOption;
+        })
+        .filter((option): option is DriverOption => option !== null)
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      setDriverOptions(drivers);
+    } catch (error) {
+      console.error("Error fetching drivers:", error);
+      setDriverOptions([]);
+    }
+  }, []);
+
+  const fetchVehicles = useCallback(async () => {
+    try {
+      const snapshot = await getDocs(collection(db, "vehicles"));
+      if (snapshot.empty) {
+        setVehicleOptions([]);
+        return;
+      }
+
+      const vehicles = snapshot.docs
+        .map(docSnap => {
+          const data = docSnap.data();
+          const name = (data?.name || data?.label || data?.vehicleName || "").toString().trim();
+          if (!name) return null;
+          return {
+            id: docSnap.id,
+            name,
+          } as VehicleOption;
+        })
+        .filter((option): option is VehicleOption => option !== null)
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      setVehicleOptions(vehicles);
+    } catch (error) {
+      console.error("Error fetching vehicles:", error);
+      setVehicleOptions([]);
+    }
+  }, []);
+
+  const fetchAgencies = useCallback(async () => {
+    try {
+      const snapshot = await getDocs(collection(db, "agencies"));
+      if (snapshot.empty) {
+        setAgencyOptions([]);
+        return;
+      }
+
+      const fetched = snapshot.docs
+        .map(docSnap => {
+          const data = docSnap.data();
+          const name = (data?.name || data?.title || "").toString().trim();
+          if (!name) return null;
+          return {
+            id: docSnap.id,
+            name,
+          } as AgencyOption;
+        })
+        .filter((option): option is AgencyOption => option !== null)
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      setAgencyOptions(fetched);
+    } catch (error) {
+      console.error("Error fetching agencies:", error);
+      setAgencyOptions([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAgencies();
+  }, [fetchAgencies]);
+
+  useEffect(() => {
+    fetchDrivers();
+    fetchVehicles();
+  }, [fetchDrivers, fetchVehicles]);
+
+  const handleAddAgencyOption = useCallback(async () => {
+    const trimmed = newAgencyName.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    if (agencyOptions.some(option => option.name.toLowerCase() === trimmed.toLowerCase())) {
+      toast.info("Agency already exists in the list.");
+      setNewAgencyName("");
+      return;
+    }
+
+    try {
+      const docRef = await addDoc(collection(db, "agencies"), {
+        name: trimmed,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+
+      setAgencyOptions(prev => [...prev, { id: docRef.id, name: trimmed }].sort((a, b) => a.name.localeCompare(b.name)));
+      toast.success("Agency added successfully.");
+    } catch (error) {
+      console.error("Error adding agency:", error);
+      toast.error("Failed to save agency to database. Added locally instead.");
+      setAgencyOptions(prev => [...prev, { id: `local-${Date.now()}`, name: trimmed, isLocal: true }].sort((a, b) => a.name.localeCompare(b.name)));
+    } finally {
+      setNewAgencyName("");
+    }
+  }, [agencyOptions, newAgencyName]);
+
+  const handleAddVehicleOption = useCallback(async () => {
+    const trimmed = newVehicleName.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    if (vehicleOptions.some(option => option.name.toLowerCase() === trimmed.toLowerCase())) {
+      toast.info("Vehicle already exists in the list.");
+      setNewVehicleName("");
+      return;
+    }
+
+    try {
+      const docRef = await addDoc(collection(db, "vehicles"), {
+        name: trimmed,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+
+      const vehicleRecord: VehicleOption = { id: docRef.id, name: trimmed };
+      setVehicleOptions(prev => [...prev, vehicleRecord].sort((a, b) => a.name.localeCompare(b.name)));
+      setDispatchData(prev => ({
+        ...prev,
+        vehicleId: vehicleRecord.id,
+        vehicleName: vehicleRecord.name
+      }));
+      toast.success("Vehicle added successfully.");
+    } catch (error) {
+      console.error("Error adding vehicle:", error);
+      toast.error("Failed to save vehicle to database. Added locally instead.");
+      const vehicleRecord: VehicleOption = { id: `local-${Date.now()}`, name: trimmed, isLocal: true };
+      setVehicleOptions(prev => [...prev, vehicleRecord].sort((a, b) => a.name.localeCompare(b.name)));
+      setDispatchData(prev => ({
+        ...prev,
+        vehicleId: vehicleRecord.id,
+        vehicleName: vehicleRecord.name
+      }));
+    } finally {
+      setNewVehicleName("");
+    }
+  }, [newVehicleName, vehicleOptions]);
+
+  const handleDeleteVehicleOption = useCallback(async (vehicleId: string, vehicleName: string) => {
+    try {
+      if (!vehicleId.startsWith("local-")) {
+        await deleteDoc(doc(db, "vehicles", vehicleId));
+      }
+      setVehicleOptions(prev => prev.filter(vehicle => vehicle.id !== vehicleId));
+      setDispatchData(prev => {
+        if (prev.vehicleId === vehicleId) {
+          return {
+            ...prev,
+            vehicleId: "",
+            vehicleName: ""
+          };
+        }
+        return prev;
+      });
+      toast.success(`Removed vehicle "${vehicleName}"`);
+    } catch (error) {
+      console.error("Error deleting vehicle:", error);
+      toast.error("Failed to delete vehicle");
+    }
+  }, []);
+
+  const toggleAgencySelection = (agencyName: string) => {
+    setDispatchData(prev => {
+      const current = Array.isArray(prev.agencyPresent)
+        ? prev.agencyPresent
+        : prev.agencyPresent
+          ? [prev.agencyPresent as unknown as string]
+          : [];
+
+      const isSelected = current.includes(agencyName);
+      const updated = isSelected
+        ? current.filter(name => name !== agencyName)
+        : [...current, agencyName];
+
+      return {
+        ...prev,
+        agencyPresent: updated
+      };
+    });
+  };
+
+  const toggleMajorInjuryType = (injuryType: string) => {
+    setDispatchData(prev => {
+      const types = Array.isArray(prev.majorInjuryTypes) ? prev.majorInjuryTypes : [];
+      const isSelected = types.includes(injuryType);
+      return {
+        ...prev,
+        majorInjuryTypes: isSelected
+          ? types.filter(type => type !== injuryType)
+          : [...types, injuryType]
+      };
+    });
+  };
+
+  const toggleMinorInjuryType = (injuryType: string) => {
+    setDispatchData(prev => {
+      const types = Array.isArray(prev.minorInjuryTypes) ? prev.minorInjuryTypes : [];
+      const isSelected = types.includes(injuryType);
+      return {
+        ...prev,
+        minorInjuryTypes: isSelected
+          ? types.filter(type => type !== injuryType)
+          : [...types, injuryType]
+      };
+    });
+  };
+
+  const toggleActionSelection = (action: string) => {
+    setDispatchData(prev => {
+      const isSelected = prev.actionsTaken.includes(action);
+      const updated = isSelected
+        ? prev.actionsTaken.filter(a => a !== action)
+        : [...prev.actionsTaken, action];
+
+      return {
+        ...prev,
+        actionsTaken: updated,
+        othersDescription: action === "Others" && !updated.includes("Others") ? "" : prev.othersDescription
+      };
+    });
+  };
+
   const addTeamMember = async (teamName: string, memberName: string) => {
     try {
       const teamRef = collection(db, "teamMembers");
@@ -2886,45 +3372,33 @@ export function ManageReportsPage() {
     }
   };
 
-  const [dispatchData, setDispatchData] = useState({
-    receivedBy: "",
-    timeCallReceived: "",
-    timeOfDispatch: "",
-    timeOfArrival: "",
-    hospitalArrival: "",
-    returnedToOpcen: "",
-    disasterRelated: "",
-    agencyPresent: "",
-    typeOfEmergency: "",
-    vehicleInvolved: "",
-    injuryClassification: "",
-    majorInjuryTypes: [] as string[],
-    minorInjuryTypes: [] as string[],
-    medicalClassification: "",
-    majorMedicalSymptoms: [] as string[],
-    minorMedicalSymptoms: [] as string[],
-    chiefComplaint: "",
-    diagnosis: "",
-    natureOfIllness: "",
-    natureOfIllnessOthers: "",
-    actionsTaken: [] as string[],
-    referredTo: "",
-    transportFrom: "",
-    transportTo: "",
-    othersDescription: "",
-    vitalSigns: {
-      temperature: "",
-      pulseRate: "",
-      respiratoryRate: "",
-      bloodPressure: ""
-    },
-    responders: [] as Array<{
-      id: string;
-      team: string;
-      drivers: string[];
-      responders: string[]; 
-    }>
-  });
+  const [dispatchData, setDispatchData] = useState<DispatchDataState>(() => createInitialDispatchState());
+
+  useEffect(() => {
+    if (!dispatchData.driverId) {
+      return;
+    }
+    const match = driverOptions.find(option => option.id === dispatchData.driverId);
+    if (match && dispatchData.driverName !== match.name) {
+      setDispatchData(prev => ({
+        ...prev,
+        driverName: match.name
+      }));
+    }
+  }, [dispatchData.driverId, dispatchData.driverName, driverOptions]);
+
+  useEffect(() => {
+    if (!dispatchData.vehicleId) {
+      return;
+    }
+    const match = vehicleOptions.find(option => option.id === dispatchData.vehicleId);
+    if (match && dispatchData.vehicleName !== match.name) {
+      setDispatchData(prev => ({
+        ...prev,
+        vehicleName: match.name
+      }));
+    }
+  }, [dispatchData.vehicleId, dispatchData.vehicleName, vehicleOptions]);
 
   const [patients, setPatients] = useState([
     {
@@ -3478,8 +3952,7 @@ export function ManageReportsPage() {
 
           {/* Date Range Filter */}
           <div className="flex items-end gap-3">
-            <div className="space-y-1">
-              <Label className="text-xs font-medium text-gray-700">Date Range</Label>
+            <div>
               <DateRangePicker
                 value={date}
                 onChange={setDate}
@@ -3818,7 +4291,7 @@ export function ManageReportsPage() {
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent>
-                              <p>View location on map</p>
+                              <p>Pin location on map</p>
                             </TooltipContent>
                           </Tooltip>
                           
@@ -3851,7 +4324,7 @@ export function ManageReportsPage() {
                                 variant="outline"
                                 onClick={() => handleDeleteReport(report.firestoreId)}
                               >
-                                <Trash2 className="h-4 w-4" />
+                                <Trash2 className="h-4 w-4 text-red-600" />
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent>
@@ -4119,7 +4592,6 @@ export function ManageReportsPage() {
                         size="icon"
                         variant="outline"
                         onClick={() => setShowAddLocationMap(true)}
-                        className="border-brand-orange text-brand-orange hover:bg-orange-50"
                       >
                         <MapPin className="h-4 w-4" />
                       </Button>
@@ -4315,40 +4787,7 @@ export function ManageReportsPage() {
             setIsPatientEditMode(false);
             setPreviewEditData(null);
             // Reset dispatch data when modal is closed
-            setDispatchData({
-              receivedBy: "",
-              timeCallReceived: "",
-              timeOfDispatch: "",
-              timeOfArrival: "",
-              hospitalArrival: "",
-              returnedToOpcen: "",
-              disasterRelated: "",
-              agencyPresent: "",
-              typeOfEmergency: "",
-              vehicleInvolved: "",
-              injuryClassification: "",
-              majorInjuryTypes: [],
-              minorInjuryTypes: [],
-              medicalClassification: "",
-              majorMedicalSymptoms: [],
-              minorMedicalSymptoms: [],
-              chiefComplaint: "",
-              diagnosis: "",
-              natureOfIllness: "",
-              natureOfIllnessOthers: "",
-              actionsTaken: [],
-              referredTo: "",
-              transportFrom: "",
-              transportTo: "",
-              othersDescription: "",
-              vitalSigns: {
-                temperature: "",
-                pulseRate: "",
-                respiratoryRate: "",
-                bloodPressure: ""
-              },
-              responders: []
-            });
+            setDispatchData(createInitialDispatchState());
             // Reset patient data when modal is closed
             setPatients([{
               id: 1,
@@ -4394,46 +4833,26 @@ export function ManageReportsPage() {
           <DialogContent className="sm:max-w-[900px] max-h-[90vh] bg-white flex flex-col overflow-hidden">
             {selectedReport ? (
               <>
-                {/* Header Row: Title, ID, and Action Buttons */}
-                <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h2 className="text-2xl font-bold text-gray-900">Report Preview</h2>
-                    <div className="text-sm text-gray-700">Report ID: {selectedReport.id}</div>
-                  </div>
-                  <div className="flex gap-2">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button size="sm" variant="outline" onClick={handlePrintPreview}>
-                          <Printer className="h-4 w-4" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Print report</p>
-                      </TooltipContent>
-                    </Tooltip>
-                    
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button size="sm" variant="outline">
-                          <Download className="h-4 w-4" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Download report</p>
-                      </TooltipContent>
-                    </Tooltip>
+                {/* Header Row: Title, Icon, and Report ID */}
+                <div className="mb-3">
+                  <div className="flex items-center gap-3">
+                    <FileText className="h-6 w-6 text-brand-orange" />
+                    <h2 className="text-xl font-semibold text-gray-900">Report Preview</h2>
+                    <span className="inline-flex items-center rounded-md border border-brand-orange/40 bg-orange-50 px-3 py-1 text-sm font-medium text-brand-orange">
+                      {selectedReport.id}
+                    </span>
                   </div>
                 </div>
                 {/* Navigation Tabs */}
                 <Tabs value={previewTab} onValueChange={setPreviewTab} className="w-full flex-1 flex flex-col">
-              <TabsList className="grid w-full grid-cols-4">
+              <TabsList className="grid w-full grid-cols-4 mb-2">
                 <TabsTrigger value="directions">Directions</TabsTrigger>
                 <TabsTrigger value="details">Report Details</TabsTrigger>
                 <TabsTrigger value="dispatch">Dispatch Form</TabsTrigger>
                 <TabsTrigger value="patient">Patient Information</TabsTrigger>
               </TabsList>
 
-              <TabsContent value="directions" className="mt-4 flex-1 min-h-0 flex flex-col">
+              <TabsContent value="directions" className="mt-2 flex-1 min-h-0 flex flex-col">
                 <div className="flex-1 w-full relative min-h-0" style={{ height: 'calc(90vh - 200px)' }}>
                   {selectedReport ? (
                     <div 
@@ -4493,57 +4912,12 @@ export function ManageReportsPage() {
                           </Popover>
                         </div>
 
-                        {/* Layer Toggle */}
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-9 px-3"
-                              onClick={() => setPreviewMapStyle(previewMapStyle === 'streets' ? 'satellite' : 'streets')}
-                            >
-                              <Layers className="h-4 w-4 mr-2" />
-                              {previewMapStyle === 'streets' ? 'Satellite' : 'Streets'}
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>Switch to {previewMapStyle === 'streets' ? 'Satellite' : 'Streets'} view</p>
-                          </TooltipContent>
-                        </Tooltip>
-
-                        {/* Zoom and Location Controls */}
-                        <div className="flex items-center border-l border-gray-200 pl-3 gap-1">
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button variant="outline" size="sm" className="h-9 w-9 p-0" onClick={() => setPreviewMapZoom(z => Math.min(z + 1, 20))}>
-                                <ZoomIn className="h-4 w-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent><p>Zoom in</p></TooltipContent>
-                          </Tooltip>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button variant="outline" size="sm" className="h-9 w-9 p-0" onClick={() => setPreviewMapZoom(z => Math.max(z - 1, 1))}>
-                                <ZoomOut className="h-4 w-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent><p>Zoom out</p></TooltipContent>
-                          </Tooltip>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button variant="outline" size="sm" className="h-9 w-9 p-0" onClick={handlePreviewLocateUser}>
-                                <LocateFixed className="h-4 w-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent><p>Show my location</p></TooltipContent>
-                          </Tooltip>
-                        </div>
                       </div>
 
                       <MapboxMap 
                         center={previewMapCenter}
                         zoom={previewMapZoom}
-                        showControls={false}
+                        showControls={true}
                         showGeocoder={false}
                         singleMarker={selectedReport.latitude && selectedReport.longitude ? 
                           {
@@ -4559,9 +4933,8 @@ export function ManageReportsPage() {
                             longitude: Number(selectedReport.longitude)
                           } : 
                           undefined}
-                disableSingleMarkerPulse={true}
+                        disableSingleMarkerPulse={true}
                         hideStyleToggle={true}
-                        externalStyle={previewMapStyle}
                       />
                     </div>
                   ) : (
@@ -4575,7 +4948,7 @@ export function ManageReportsPage() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="details" className="mt-4 flex-1 min-h-0 flex flex-col">
+              <TabsContent value="details" className="mt-2 flex-1 min-h-0 flex flex-col">
                   <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-4 gap-2">
                   <div className="text-lg font-semibold text-gray-800">Report Details</div>
                   <div className="flex gap-2 flex-wrap">
@@ -5107,7 +5480,7 @@ export function ManageReportsPage() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="dispatch" className="mt-4 flex-1 min-h-0 flex flex-col">
+              <TabsContent value="dispatch" className="mt-2 flex-1 min-h-0 flex flex-col">
                 <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-4 gap-2">
                   <div className="text-lg font-semibold text-gray-900">Dispatch Form</div>
                   <div className="flex gap-2 flex-wrap">
@@ -5220,6 +5593,138 @@ export function ManageReportsPage() {
                                   })()}</span>
                                 </div>
                               )
+                            )}
+                          </TableCell>
+                        </TableRow>
+                        <TableRow>
+                          <TableCell className="font-medium text-gray-700 align-top w-1/3 min-w-[150px]">Driver</TableCell>
+                          <TableCell>
+                            {isDispatchEditMode ? (
+                              driverOptions.length > 0 ? (
+                                <Select
+                                  value={dispatchData.driverId || NO_DRIVER_SELECTION}
+                                  onValueChange={(value) => {
+                                    if (value === NO_DRIVER_SELECTION) {
+                                      setDispatchData(prev => ({
+                                        ...prev,
+                                        driverId: "",
+                                        driverName: ""
+                                      }));
+                                      return;
+                                    }
+                                    const selectedDriver = driverOptions.find(driver => driver.id === value);
+                                    setDispatchData(prev => ({
+                                      ...prev,
+                                      driverId: value,
+                                      driverName: selectedDriver?.name || ""
+                                    }));
+                                  }}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Select driver" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value={NO_DRIVER_SELECTION}>No driver assigned</SelectItem>
+                                    {driverOptions.map(driver => (
+                                      <SelectItem key={driver.id} value={driver.id}>
+                                        {driver.name}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              ) : (
+                                <div className="text-sm text-gray-500">
+                                  No drivers available. Add an admin with the "Driver" position in Manage Users.
+                                </div>
+                              )
+                            ) : (
+                              dispatchData.driverName || dispatchData.driverId || "Not specified"
+                            )}
+                          </TableCell>
+                        </TableRow>
+                        <TableRow>
+                          <TableCell className="font-medium text-gray-700 align-top w-1/3 min-w-[150px]">Vehicle Used</TableCell>
+                          <TableCell>
+                            {isDispatchEditMode ? (
+                              <div className="space-y-3">
+                                <Select
+                                  value={dispatchData.vehicleId || NO_VEHICLE_SELECTION}
+                                  onValueChange={(value) => {
+                                    if (value === NO_VEHICLE_SELECTION) {
+                                      setDispatchData(prev => ({
+                                        ...prev,
+                                        vehicleId: "",
+                                        vehicleName: ""
+                                      }));
+                                      return;
+                                    }
+                                    const selectedVehicle = vehicleOptions.find(vehicle => vehicle.id === value);
+                                    if (selectedVehicle && `${selectedVehicle.id}:delete` === value) {
+                                      return;
+                                    }
+                                    setDispatchData(prev => ({
+                                      ...prev,
+                                      vehicleId: value,
+                                      vehicleName: selectedVehicle?.name || ""
+                                    }));
+                                  }}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder={vehicleOptions.length === 0 ? "Add a vehicle to select" : "Select vehicle"} />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value={NO_VEHICLE_SELECTION}>No vehicle used</SelectItem>
+                                    {vehicleOptions.map(vehicle => (
+                                      <div key={vehicle.id} className="flex items-center justify-between pr-2 pl-1">
+                                        <SelectItem value={vehicle.id} className="flex-1">
+                                          {vehicle.name}
+                                        </SelectItem>
+                                        <Button
+                                          type="button"
+                                          size="icon"
+                                          variant="ghost"
+                                          className="h-7 w-7 text-red-500 hover:text-red-600 hover:bg-red-50"
+                                          onClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            handleDeleteVehicleOption(vehicle.id, vehicle.name);
+                                          }}
+                                        >
+                                          <Trash2 className="h-3.5 w-3.5" />
+                                        </Button>
+                                      </div>
+                                    ))}
+                                    <div className="border-t border-gray-100 p-2">
+                                      <div className="flex gap-2">
+                                        <Input
+                                          placeholder="Add new vehicle"
+                                          value={newVehicleName}
+                                          onChange={e => setNewVehicleName(e.target.value)}
+                                          onKeyDown={e => {
+                                            if (e.key === "Enter") {
+                                              e.preventDefault();
+                                              handleAddVehicleOption();
+                                            }
+                                          }}
+                                          className="text-sm"
+                                        />
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={handleAddVehicleOption}
+                                          disabled={!newVehicleName.trim()}
+                                          className="h-8 px-3"
+                                        >
+                                          <Plus className="h-4 w-4" />
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            ) : (
+                              dispatchData.vehicleName || dispatchData.vehicleId || "Not specified"
                             )}
                           </TableCell>
                         </TableRow>
@@ -5382,21 +5887,44 @@ export function ManageReportsPage() {
                           <TableCell className="font-medium text-gray-700 align-top w-1/3 min-w-[150px]">Disaster Related</TableCell>
                           <TableCell>
                             {isDispatchEditMode ? (
-                              <Select value={dispatchData.disasterRelated} onValueChange={v => setDispatchData(d => ({ ...d, disasterRelated: v }))}>
-                                <SelectTrigger><SelectValue placeholder="Select option" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="Yes">Yes</SelectItem>
-                                  <SelectItem value="No">No</SelectItem>
-                                </SelectContent>
-                              </Select>
+                              <div className="inline-flex rounded-md border border-gray-200 bg-white p-1">
+                                <button
+                                  type="button"
+                                  className={cn(
+                                    "px-3 py-1 text-sm font-medium rounded-md transition-colors",
+                                    dispatchData.disasterRelated === "Yes"
+                                      ? "bg-brand-orange text-white shadow-sm"
+                                      : "text-gray-600 hover:bg-gray-50"
+                                  )}
+                                  onClick={() =>
+                                    setDispatchData(d => ({
+                                      ...d,
+                                      disasterRelated: "Yes"
+                                    }))
+                                  }
+                                >
+                                  Yes
+                                </button>
+                                <button
+                                  type="button"
+                                  className={cn(
+                                    "px-3 py-1 text-sm font-medium rounded-md transition-colors",
+                                    dispatchData.disasterRelated !== "Yes"
+                                      ? "bg-brand-orange text-white shadow-sm"
+                                      : "text-gray-600 hover:bg-gray-50"
+                                  )}
+                                  onClick={() =>
+                                    setDispatchData(d => ({
+                                      ...d,
+                                      disasterRelated: "No"
+                                    }))
+                                  }
+                                >
+                                  No
+                                </button>
+                              </div>
                             ) : (
-                              dispatchData.disasterRelated ? (
-                                <Badge className={dispatchData.disasterRelated === "Yes" ? "bg-red-100 text-red-800 hover:bg-red-50" : "bg-green-100 text-green-800 hover:bg-green-50"}>
-                                  {dispatchData.disasterRelated}
-                                </Badge>
-                              ) : (
-                                "Not specified"
-                              )
+                              dispatchData.disasterRelated || "Not specified"
                             )}
                           </TableCell>
                         </TableRow>
@@ -5404,63 +5932,93 @@ export function ManageReportsPage() {
                           <TableCell className="font-medium text-gray-700 align-top w-1/3 min-w-[150px]">Agency Present</TableCell>
                           <TableCell>
                             {isDispatchEditMode ? (
-                              <Select value={dispatchData.agencyPresent} onValueChange={v => setDispatchData(d => ({ ...d, agencyPresent: v }))}>
-                                <SelectTrigger><SelectValue placeholder="Select agency" /></SelectTrigger>
-                                <SelectContent>
-                                  {agencyOptions.map((agency, index) => (
-                                    <div key={agency} className="flex items-center justify-between px-2 py-1.5 hover:bg-gray-100">
-                                      <SelectItem value={agency} className="flex-1">{agency}</SelectItem>
-                                      <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setAgencyOptions(agencyOptions.filter((_, i) => i !== index));
-                                        }}
-                                        className="h-6 w-6 p-0 text-brand-red hover:text-brand-red-700 hover:bg-red-50"
-                                      >
-                                        <Trash2 className="h-3 w-3" />
-                                      </Button>
+                              <div className="space-y-3">
+                                <Popover>
+                                  <PopoverTrigger asChild>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      className={cn(
+                                        "w-full justify-between text-left font-normal",
+                                        dispatchData.agencyPresent.length === 0 && "text-muted-foreground"
+                                      )}
+                                    >
+                                          <span className="flex flex-wrap gap-1">
+                                            {dispatchData.agencyPresent.length > 0
+                                              ? dispatchData.agencyPresent.map((agency, index) => (
+                                                  <span
+                                                    key={`${agency}-${index}`}
+                                                    className="inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-md border border-brand-orange/40 bg-orange-50 text-brand-orange"
+                                                  >
+                                                    {agency}
+                                                  </span>
+                                                ))
+                                              : "Select agencies"}
+                                      </span>
+                                      <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                    </Button>
+                                  </PopoverTrigger>
+                                  <PopoverContent className="w-64 p-0" align="start">
+                                    <div className="max-h-60 overflow-y-auto">
+                                      {agencyOptions.map(option => {
+                                        const isSelected = dispatchData.agencyPresent.includes(option.name);
+                                            return (
+                                          <button
+                                            key={option.id}
+                                            type="button"
+                                            className={cn(
+                                                  "flex w-full items-center gap-2 px-3 py-2 text-sm",
+                                                  isSelected ? "bg-orange-50/70 text-brand-orange" : "text-gray-700 hover:bg-orange-50"
+                                            )}
+                                            onClick={() => toggleAgencySelection(option.name)}
+                                          >
+                                            <Checkbox
+                                              checked={isSelected}
+                                              className="h-4 w-4"
+                                            />
+                                            <span className="flex-1 text-left">{option.name}</span>
+                                          </button>
+                                        );
+                                      })}
+                                      {agencyOptions.length === 0 && (
+                                        <div className="px-3 py-2 text-sm text-gray-500">
+                                          No agencies available. Add one below.
+                                        </div>
+                                      )}
                                     </div>
-                                  ))}
-                                  <div className="border-t border-gray-200 p-2">
-                                    <div className="flex gap-2">
-                                      <Input
-                                        placeholder="Add new agency"
-                                        className="text-sm"
-                                        onKeyPress={e => {
-                                          if (e.key === 'Enter' && e.currentTarget.value.trim()) {
-                                            setAgencyOptions([...agencyOptions, e.currentTarget.value.trim()]);
-                                            e.currentTarget.value = '';
-                                          }
-                                        }}
-                                      />
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={e => {
-                                          const input = e.currentTarget.previousElementSibling as HTMLInputElement;
-                                          if (input.value.trim()) {
-                                            setAgencyOptions([...agencyOptions, input.value.trim()]);
-                                            input.value = '';
-                                          }
-                                        }}
-                                        className="h-8 px-2"
-                                      >
-                                        <Plus className="h-3 w-3" />
-                                      </Button>
+                                    <div className="border-t border-gray-100 p-2">
+                                      <div className="flex gap-2">
+                                        <Input
+                                          placeholder="Add new agency"
+                                          value={newAgencyName}
+                                          onChange={e => setNewAgencyName(e.target.value)}
+                                          onKeyDown={e => {
+                                            if (e.key === "Enter") {
+                                              e.preventDefault();
+                                              handleAddAgencyOption();
+                                            }
+                                          }}
+                                          className="text-sm"
+                                        />
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={handleAddAgencyOption}
+                                          disabled={!newAgencyName.trim()}
+                                          className="h-8 px-3"
+                                        >
+                                          <Plus className="h-4 w-4" />
+                                        </Button>
+                                      </div>
                                     </div>
-                                  </div>
-                                </SelectContent>
-                              </Select>
+                                  </PopoverContent>
+                                </Popover>
+                              </div>
                             ) : (
-                              dispatchData.agencyPresent ? (
-                                <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-50">
-                                  {dispatchData.agencyPresent}
-                                </Badge>
-                              ) : (
-                                "Not specified"
-                              )
+                              dispatchData.agencyPresent && dispatchData.agencyPresent.length > 0
+                                ? dispatchData.agencyPresent.join(", ")
+                                : "Not specified"
                             )}
                           </TableCell>
                         </TableRow>
@@ -5501,13 +6059,7 @@ export function ManageReportsPage() {
                                 </SelectContent>
                               </Select>
                             ) : (
-                              dispatchData.typeOfEmergency ? (
-                                <Badge className="bg-orange-100 text-orange-800 hover:bg-orange-50">
-                                  {dispatchData.typeOfEmergency}
-                                </Badge>
-                              ) : (
-                                "Not specified"
-                              )
+                              dispatchData.typeOfEmergency || "Not specified"
                             )}
                           </TableCell>
                         </TableRow>
@@ -5535,20 +6087,48 @@ export function ManageReportsPage() {
                               <TableCell className="font-medium text-gray-700 align-top w-1/3 min-w-[150px]">Classification of Injury</TableCell>
                               <TableCell>
                                 {isDispatchEditMode ? (
-                                  <Select value={dispatchData.injuryClassification} onValueChange={v => setDispatchData(d => ({ ...d, injuryClassification: v, majorInjuryTypes: [], minorInjuryTypes: [] }))}>
-                                    <SelectTrigger><SelectValue placeholder="Select injury classification" /></SelectTrigger>
-                                    <SelectContent>
-                                      {injuryClassificationOptions.map(classification => <SelectItem key={classification} value={classification}>{classification}</SelectItem>)}
-                                    </SelectContent>
-                                  </Select>
+                                  <div className="inline-flex rounded-md border border-gray-200 bg-white p-1">
+                                    <button
+                                      type="button"
+                                      className={cn(
+                                        "px-3 py-1 text-sm font-medium rounded-md transition-colors",
+                                        dispatchData.injuryClassification === "Major"
+                                          ? "bg-brand-orange text-white shadow-sm"
+                                          : "text-gray-600 hover:bg-gray-50"
+                                      )}
+                                      onClick={() =>
+                                        setDispatchData(d => ({
+                                          ...d,
+                                          injuryClassification: "Major",
+                                          majorInjuryTypes: [],
+                                          minorInjuryTypes: []
+                                        }))
+                                      }
+                                    >
+                                      Major
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className={cn(
+                                        "px-3 py-1 text-sm font-medium rounded-md transition-colors",
+                                        dispatchData.injuryClassification === "Minor"
+                                          ? "bg-brand-orange text-white shadow-sm"
+                                          : "text-gray-600 hover:bg-gray-50"
+                                      )}
+                                      onClick={() =>
+                                        setDispatchData(d => ({
+                                          ...d,
+                                          injuryClassification: "Minor",
+                                          majorInjuryTypes: [],
+                                          minorInjuryTypes: []
+                                        }))
+                                      }
+                                    >
+                                      Minor
+                                    </button>
+                                  </div>
                                 ) : (
-                                  dispatchData.injuryClassification ? (
-                                    <Badge className={dispatchData.injuryClassification === "Major" ? "bg-red-100 text-red-800 hover:bg-red-50" : "bg-yellow-100 text-yellow-800 hover:bg-yellow-50"}>
-                                      {dispatchData.injuryClassification}
-                                    </Badge>
-                                  ) : (
-                                    "Not specified"
-                                  )
+                                  dispatchData.injuryClassification || "Not specified"
                                 )}
                               </TableCell>
                             </TableRow>
@@ -5559,44 +6139,60 @@ export function ManageReportsPage() {
                                 <TableCell className="font-medium text-gray-700 align-top w-1/3 min-w-[150px]">Major Injury Types</TableCell>
                                 <TableCell>
                                   {isDispatchEditMode ? (
-                                    <div className="space-y-2">
-                                      {majorInjuryTypeOptions.map((injuryType) => (
-                                        <div key={injuryType} className="flex items-center space-x-2">
-                                          <Checkbox
-                                            id={`major-${injuryType}`}
-                                            checked={dispatchData.majorInjuryTypes.includes(injuryType)}
-                                            onCheckedChange={(checked) => {
-                                              if (checked) {
-                                                setDispatchData(d => ({
-                                                  ...d,
-                                                  majorInjuryTypes: [...d.majorInjuryTypes, injuryType]
-                                                }));
-                                              } else {
-                                                setDispatchData(d => ({
-                                                  ...d,
-                                                  majorInjuryTypes: d.majorInjuryTypes.filter(type => type !== injuryType)
-                                                }));
-                                              }
-                                            }}
-                                          />
-                                          <Label htmlFor={`major-${injuryType}`} className="text-sm">
-                                            {injuryType}
-                                          </Label>
+                                    <Popover>
+                                      <PopoverTrigger asChild>
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          className={cn(
+                                            "w-full justify-between text-left font-normal",
+                                            dispatchData.majorInjuryTypes.length === 0 && "text-muted-foreground"
+                                          )}
+                                        >
+                                          <span className="flex flex-wrap gap-1">
+                                            {dispatchData.majorInjuryTypes.length > 0
+                                              ? dispatchData.majorInjuryTypes.map((injuryType, index) => (
+                                                  <span
+                                                    key={`${injuryType}-${index}`}
+                                                    className="inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-md border border-brand-orange/40 bg-orange-50 text-brand-orange"
+                                                  >
+                                                    {injuryType}
+                                                  </span>
+                                                ))
+                                              : "Select major injury types"}
+                                          </span>
+                                          <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                        </Button>
+                                      </PopoverTrigger>
+                                      <PopoverContent className="w-64 p-0" align="start">
+                                        <div className="max-h-60 overflow-y-auto">
+                                          {majorInjuryTypeOptions.map((injuryType) => {
+                                            const isSelected = dispatchData.majorInjuryTypes.includes(injuryType);
+                                            return (
+                                              <button
+                                                key={injuryType}
+                                                type="button"
+                                                className={cn(
+                                                  "flex w-full items-center gap-2 px-3 py-2 text-sm",
+                                                  isSelected ? "bg-orange-50/70 text-brand-orange" : "text-gray-700 hover:bg-orange-50"
+                                                )}
+                                                onClick={() => toggleMajorInjuryType(injuryType)}
+                                              >
+                                                <Checkbox
+                                                  checked={isSelected}
+                                                  className="h-4 w-4"
+                                                />
+                                                <span className="flex-1 text-left">{injuryType}</span>
+                                              </button>
+                                            );
+                                          })}
                                         </div>
-                                      ))}
-                                    </div>
+                                      </PopoverContent>
+                                    </Popover>
                                   ) : (
-                                    dispatchData.majorInjuryTypes.length > 0 ? (
-                                      <div className="flex flex-wrap gap-1">
-                                        {dispatchData.majorInjuryTypes.map((injuryType, index) => (
-                                          <Badge key={index} className="bg-red-100 text-red-800 hover:bg-red-50 text-xs">
-                                            {injuryType}
-                                          </Badge>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      "No major injury types selected"
-                                    )
+                                    dispatchData.majorInjuryTypes.length > 0
+                                      ? dispatchData.majorInjuryTypes.join(", ")
+                                      : "No major injury types selected"
                                   )}
                                 </TableCell>
                               </TableRow>
@@ -5608,44 +6204,60 @@ export function ManageReportsPage() {
                                 <TableCell className="font-medium text-gray-700 align-top w-1/3 min-w-[150px]">Minor Injury Types</TableCell>
                                 <TableCell>
                                   {isDispatchEditMode ? (
-                                    <div className="space-y-2">
-                                      {minorInjuryTypeOptions.map((injuryType) => (
-                                        <div key={injuryType} className="flex items-center space-x-2">
-                                          <Checkbox
-                                            id={`minor-${injuryType}`}
-                                            checked={dispatchData.minorInjuryTypes.includes(injuryType)}
-                                            onCheckedChange={(checked) => {
-                                              if (checked) {
-                                                setDispatchData(d => ({
-                                                  ...d,
-                                                  minorInjuryTypes: [...d.minorInjuryTypes, injuryType]
-                                                }));
-                                              } else {
-                                                setDispatchData(d => ({
-                                                  ...d,
-                                                  minorInjuryTypes: d.minorInjuryTypes.filter(type => type !== injuryType)
-                                                }));
-                                              }
-                                            }}
-                                          />
-                                          <Label htmlFor={`minor-${injuryType}`} className="text-sm">
-                                            {injuryType}
-                                          </Label>
+                                    <Popover>
+                                      <PopoverTrigger asChild>
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          className={cn(
+                                            "w-full justify-between text-left font-normal",
+                                            dispatchData.minorInjuryTypes.length === 0 && "text-muted-foreground"
+                                          )}
+                                        >
+                                          <span className="flex flex-wrap gap-1">
+                                            {dispatchData.minorInjuryTypes.length > 0
+                                              ? dispatchData.minorInjuryTypes.map((injuryType, index) => (
+                                                  <span
+                                                    key={`${injuryType}-${index}`}
+                                                    className="inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-md border border-brand-orange/40 bg-orange-50 text-brand-orange"
+                                                  >
+                                                    {injuryType}
+                                                  </span>
+                                                ))
+                                              : "Select minor injury types"}
+                                          </span>
+                                          <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                        </Button>
+                                      </PopoverTrigger>
+                                      <PopoverContent className="w-64 p-0" align="start">
+                                        <div className="max-h-60 overflow-y-auto">
+                                          {minorInjuryTypeOptions.map((injuryType) => {
+                                            const isSelected = dispatchData.minorInjuryTypes.includes(injuryType);
+                                            return (
+                                              <button
+                                                key={injuryType}
+                                                type="button"
+                                                className={cn(
+                                                  "flex w-full items-center gap-2 px-3 py-2 text-sm",
+                                                  isSelected ? "bg-orange-50/70 text-brand-orange" : "text-gray-700 hover:bg-orange-50"
+                                                )}
+                                                onClick={() => toggleMinorInjuryType(injuryType)}
+                                              >
+                                                <Checkbox
+                                                  checked={isSelected}
+                                                  className="h-4 w-4"
+                                                />
+                                                <span className="flex-1 text-left">{injuryType}</span>
+                                              </button>
+                                            );
+                                          })}
                                         </div>
-                                      ))}
-                                    </div>
+                                      </PopoverContent>
+                                    </Popover>
                                   ) : (
-                                    dispatchData.minorInjuryTypes.length > 0 ? (
-                                      <div className="flex flex-wrap gap-1">
-                                        {dispatchData.minorInjuryTypes.map((injuryType, index) => (
-                                          <Badge key={index} className="bg-yellow-100 text-yellow-800 hover:bg-yellow-50 text-xs">
-                                            {injuryType}
-                                          </Badge>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      "No minor injury types selected"
-                                    )
+                                    dispatchData.minorInjuryTypes.length > 0
+                                      ? dispatchData.minorInjuryTypes.join(", ")
+                                      : "No minor injury types selected"
                                   )}
                                 </TableCell>
                               </TableRow>
@@ -5667,13 +6279,7 @@ export function ManageReportsPage() {
                                     </SelectContent>
                                   </Select>
                                 ) : (
-                                  dispatchData.medicalClassification ? (
-                                    <Badge className={dispatchData.medicalClassification === "Major" ? "bg-red-100 text-red-800 hover:bg-red-50" : "bg-yellow-100 text-yellow-800 hover:bg-yellow-50"}>
-                                      {dispatchData.medicalClassification}
-                                    </Badge>
-                                  ) : (
-                                    "Not specified"
-                                  )
+                                  dispatchData.medicalClassification || "Not specified"
                                 )}
                               </TableCell>
                             </TableRow>
@@ -5711,17 +6317,9 @@ export function ManageReportsPage() {
                                       ))}
                                     </div>
                                   ) : (
-                                    dispatchData.majorMedicalSymptoms.length > 0 ? (
-                                      <div className="flex flex-wrap gap-1">
-                                        {dispatchData.majorMedicalSymptoms.map((symptom, index) => (
-                                          <Badge key={index} className="bg-red-100 text-red-800 hover:bg-red-50 text-xs">
-                                            {symptom}
-                                          </Badge>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      "No major medical symptoms selected"
-                                    )
+                                    dispatchData.majorMedicalSymptoms.length > 0
+                                      ? dispatchData.majorMedicalSymptoms.join(", ")
+                                      : "No major medical symptoms selected"
                                   )}
                                 </TableCell>
                               </TableRow>
@@ -5760,17 +6358,9 @@ export function ManageReportsPage() {
                                       ))}
                                     </div>
                                   ) : (
-                                    dispatchData.minorMedicalSymptoms.length > 0 ? (
-                                      <div className="flex flex-wrap gap-1">
-                                        {dispatchData.minorMedicalSymptoms.map((symptom, index) => (
-                                          <Badge key={index} className="bg-yellow-100 text-yellow-800 hover:bg-yellow-50 text-xs">
-                                            {symptom}
-                                          </Badge>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      "No minor medical symptoms selected"
-                                    )
+                                    dispatchData.minorMedicalSymptoms.length > 0
+                                      ? dispatchData.minorMedicalSymptoms.join(", ")
+                                      : "No minor medical symptoms selected"
                                   )}
                                 </TableCell>
                               </TableRow>
@@ -5848,22 +6438,11 @@ export function ManageReportsPage() {
                                     )}
                                   </div>
                                 ) : (
-                                  <div>
-                                    {dispatchData.natureOfIllness ? (
-                                      <div className="flex items-center gap-2">
-                                        <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-50">
-                                          {dispatchData.natureOfIllness}
-                                        </Badge>
-                                        {dispatchData.natureOfIllness === "Others" && dispatchData.natureOfIllnessOthers && (
-                                          <span className="text-sm text-gray-600">
-                                            - {dispatchData.natureOfIllnessOthers}
-                                          </span>
-                                        )}
-                                      </div>
-                                    ) : (
-                                      "Not specified"
-                                    )}
-                                  </div>
+                                  dispatchData.natureOfIllness
+                                    ? dispatchData.natureOfIllness === "Others" && dispatchData.natureOfIllnessOthers
+                                      ? `${dispatchData.natureOfIllness} - ${dispatchData.natureOfIllnessOthers}`
+                                      : dispatchData.natureOfIllness
+                                    : "Not specified"
                                 )}
                               </TableCell>
                             </TableRow>
@@ -5877,35 +6456,59 @@ export function ManageReportsPage() {
                             <TableCell>
                               {isDispatchEditMode ? (
                                 <div className="space-y-3">
-                                  <div className="space-y-2">
-                                    {actionsTakenOptions.map((action) => (
-                                      <div key={action} className="flex items-center space-x-2">
-                                        <Checkbox
-                                          id={`action-${action}`}
-                                          checked={dispatchData.actionsTaken.includes(action)}
-                                          onCheckedChange={(checked) => {
-                                            if (checked) {
-                                              setDispatchData(d => ({
-                                                ...d,
-                                                actionsTaken: [...d.actionsTaken, action]
-                                              }));
-                                            } else {
-                                              setDispatchData(d => ({
-                                                ...d,
-                                                actionsTaken: d.actionsTaken.filter(a => a !== action)
-                                              }));
-                                            }
-                                          }}
-                                        />
-                                        <Label htmlFor={`action-${action}`} className="text-sm">
-                                          {action}
-                                        </Label>
+                                  <Popover>
+                                    <PopoverTrigger asChild>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        className={cn(
+                                          "w-full justify-between text-left font-normal",
+                                          dispatchData.actionsTaken.length === 0 && "text-muted-foreground"
+                                        )}
+                                      >
+                                        <span className="flex flex-wrap gap-1">
+                                          {dispatchData.actionsTaken.length > 0
+                                            ? dispatchData.actionsTaken.map((action, index) => (
+                                                <span
+                                                  key={`${action}-${index}`}
+                                                  className="inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-md border border-brand-orange/40 bg-orange-50 text-brand-orange"
+                                                >
+                                                  {action}
+                                                </span>
+                                              ))
+                                            : "Select actions taken"}
+                                        </span>
+                                        <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                      </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-72 p-0" align="start">
+                                      <div className="max-h-60 overflow-y-auto">
+                                        {actionsTakenOptions.map(action => {
+                                          const isSelected = dispatchData.actionsTaken.includes(action);
+                                          return (
+                                            <button
+                                              key={action}
+                                              type="button"
+                                              className={cn(
+                                                "flex w-full items-center gap-2 px-3 py-2 text-sm",
+                                                isSelected ? "bg-orange-50/70 text-brand-orange" : "text-gray-700 hover:bg-orange-50"
+                                              )}
+                                              onClick={() => toggleActionSelection(action)}
+                                            >
+                                              <Checkbox
+                                                checked={isSelected}
+                                                className="h-4 w-4"
+                                              />
+                                              <span className="flex-1 text-left">{action}</span>
+                                            </button>
+                                          );
+                                        })}
                                       </div>
-                                    ))}
-                                  </div>
-                                  
+                                    </PopoverContent>
+                                  </Popover>
+
                                   {/* Additional input fields for specific actions */}
-                                  {dispatchData.actionsTaken.includes("Vital Signs Taken (Temperature, pulse rate, respiratory rate, blood pressure)") && (
+                                  {dispatchData.actionsTaken.includes("Vital Signs Taken") && (
                                     <div className="mt-3 p-3 bg-gray-50 rounded-lg">
                                       <Label className="text-sm font-medium text-gray-800 mb-3 block">
                                         Vital Signs Details (Optional - fill in available measurements):
@@ -5979,7 +6582,7 @@ export function ManageReportsPage() {
                                     </div>
                                   )}
                                   
-                                  {dispatchData.actionsTaken.includes("Referred to (Short Desc)") && (
+                                  {dispatchData.actionsTaken.includes("Referred") && (
                                     <div className="mt-3 p-3 bg-gray-50 rounded-lg">
                                       <Label htmlFor="referred-to" className="text-sm font-medium text-gray-800">
                                         Referred to:
@@ -5994,7 +6597,7 @@ export function ManageReportsPage() {
                                     </div>
                                   )}
                                   
-                                  {dispatchData.actionsTaken.includes("Transport from (Place from) to (Place to)") && (
+                                  {dispatchData.actionsTaken.includes("Transported") && (
                                     <div className="mt-3 p-3 bg-gray-50 rounded-lg">
                                       <Label className="text-sm font-medium text-gray-800 mb-3 block">
                                         Transport Details:
@@ -6028,7 +6631,7 @@ export function ManageReportsPage() {
                                     </div>
                                   )}
                                   
-                                  {dispatchData.actionsTaken.includes("Others (Short Desc)") && (
+                                  {dispatchData.actionsTaken.includes("Others") && (
                                     <div className="mt-3 p-3 bg-gray-50 rounded-lg">
                                       <Label htmlFor="others-description" className="text-sm font-medium text-gray-800">
                                         Others - Please specify:
@@ -6047,16 +6650,12 @@ export function ManageReportsPage() {
                                 <div className="space-y-2">
                                   {dispatchData.actionsTaken.length > 0 ? (
                                     <div className="space-y-2">
-                                      <div className="flex flex-wrap gap-1">
-                                        {dispatchData.actionsTaken.map((action, index) => (
-                                          <Badge key={index} className="bg-blue-100 text-blue-800 hover:bg-blue-50 text-xs">
-                                            {action}
-                                          </Badge>
-                                        ))}
+                                      <div className="text-sm text-gray-800">
+                                        {dispatchData.actionsTaken.join(", ")}
                                       </div>
                                       
                                       {/* Show additional details for specific actions */}
-                                      {dispatchData.actionsTaken.includes("Vital Signs Taken (Temperature, pulse rate, respiratory rate, blood pressure)") && (
+                                      {dispatchData.actionsTaken.includes("Vital Signs Taken") && (
                                         dispatchData.vitalSigns.temperature || dispatchData.vitalSigns.pulseRate || dispatchData.vitalSigns.respiratoryRate || dispatchData.vitalSigns.bloodPressure
                                       ) && (
                                         <div className="mt-2 p-3 bg-gray-50 rounded text-sm">
@@ -6078,19 +6677,19 @@ export function ManageReportsPage() {
                                         </div>
                                       )}
                                       
-                                      {dispatchData.actionsTaken.includes("Referred to (Short Desc)") && dispatchData.referredTo && (
+                                      {dispatchData.actionsTaken.includes("Referred") && dispatchData.referredTo && (
                                         <div className="mt-2 p-2 bg-gray-50 rounded text-sm">
                                           <span className="font-medium text-gray-800">Referred to:</span> {dispatchData.referredTo}
                                         </div>
                                       )}
                                       
-                                      {dispatchData.actionsTaken.includes("Transport from (Place from) to (Place to)") && (dispatchData.transportFrom || dispatchData.transportTo) && (
+                                      {dispatchData.actionsTaken.includes("Transported") && (dispatchData.transportFrom || dispatchData.transportTo) && (
                                         <div className="mt-2 p-2 bg-gray-50 rounded text-sm">
                                           <span className="font-medium text-gray-800">Transport:</span> {dispatchData.transportFrom} to {dispatchData.transportTo}
                                         </div>
                                       )}
                                       
-                                      {dispatchData.actionsTaken.includes("Others (Short Desc)") && dispatchData.othersDescription && (
+                                      {dispatchData.actionsTaken.includes("Others") && dispatchData.othersDescription && (
                                         <div className="mt-2 p-2 bg-gray-50 rounded text-sm">
                                           <span className="font-medium text-gray-800">Others:</span> {dispatchData.othersDescription}
                                         </div>
@@ -7078,7 +7677,25 @@ export function ManageReportsPage() {
                   }}
                 />
               </div>
+              {addLocationData && (
+                <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                  <p className="text-sm font-medium text-gray-800">Selected location</p>
+                  <p className="text-sm text-gray-600 mt-1 break-words">{addLocationData.address}</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Coordinates: {addLocationData.lat.toFixed(5)}, {addLocationData.lng.toFixed(5)}
+                  </p>
+                </div>
+              )}
             </div>
+            {addLocationData && (
+              <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                <p className="text-sm font-medium text-gray-800">Selected location</p>
+                <p className="text-sm text-gray-600 mt-1 break-words">{addLocationData.address}</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Coordinates: {addLocationData.lat.toFixed(5)}, {addLocationData.lng.toFixed(5)}
+                </p>
+              </div>
+            )}
             
             <DialogFooter className="flex gap-2">
               <Button 
@@ -7146,6 +7763,7 @@ export function ManageReportsPage() {
                       longitude: selectedReport.longitude
                     } : 
                     undefined}
+                  disableSingleMarkerPulse={true}
                   center={selectedReport?.latitude && selectedReport?.longitude ? 
                     [selectedReport.longitude, selectedReport.latitude] as [number, number] : 
                     [121.5556, 14.1139] as [number, number]} // Center on Lucban, Quezon
@@ -7184,7 +7802,10 @@ export function ManageReportsPage() {
 
         {/* Add Location Map Modal */}
         <Dialog open={showAddLocationMap} onOpenChange={setShowAddLocationMap}>
-          <DialogContent className="sm:max-w-[600px] max-h-[80vh] bg-white flex flex-col overflow-hidden">
+          <DialogContent
+            hideOverlay
+            className="sm:max-w-[720px] max-h-[85vh] bg-white flex flex-col overflow-hidden"
+          >
             <DialogHeader className="pb-2">
               <DialogTitle className="flex items-center gap-2">
                 <MapPin className="h-5 w-5 text-brand-orange" />
@@ -7196,21 +7817,83 @@ export function ManageReportsPage() {
             </DialogHeader>
             
             <div className="flex-1 min-h-0 flex flex-col py-2">
-              <div className="flex-1 min-h-0 border rounded-lg overflow-hidden" style={{ height: '300px' }}>
+              <div
+                className="relative flex-1 min-h-0 border rounded-lg overflow-hidden"
+                style={{ height: '420px' }}
+              >
+                <div className="pointer-events-none absolute top-4 left-4 right-4 z-10">
+                  <div className="bg-white border border-gray-200 px-4 py-3 rounded-lg shadow-lg pointer-events-auto">
+                    <Popover open={isAddLocationSearchOpen} onOpenChange={setIsAddLocationSearchOpen}>
+                      <PopoverTrigger asChild>
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500 z-10" />
+                          <Input
+                            type="text"
+                            placeholder="Search for a location..."
+                            value={addLocationSearchQuery}
+                            onChange={(e) => {
+                              setAddLocationSearchQuery(e.target.value);
+                              setIsAddLocationSearchOpen(true);
+                            }}
+                            onFocus={() => {
+                              if (addLocationSearchSuggestions.length > 0) {
+                                setIsAddLocationSearchOpen(true);
+                              }
+                            }}
+                            className="pl-9 pr-4 h-10 w-full border-gray-300"
+                          />
+                        </div>
+                      </PopoverTrigger>
+                      {addLocationSearchSuggestions.length > 0 && (
+                        <PopoverContent className="w-[420px] p-0" align="start">
+                          <div className="max-h-[320px] overflow-y-auto">
+                            {addLocationSearchSuggestions.map((suggestion: any, index: number) => (
+                              <button
+                                key={index}
+                                className="w-full text-left px-4 py-3 hover:bg-gray-100 border-b border-gray-100 last:border-b-0 transition-colors"
+                                onClick={() => handleSelectAddLocationSuggestion(suggestion)}
+                              >
+                                <div className="flex items-start gap-2">
+                                  <MapPin className="h-4 w-4 text-gray-500 mt-0.5 flex-shrink-0" />
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-medium text-gray-900 truncate">
+                                      {suggestion.text}
+                                    </p>
+                                    <p className="text-xs text-gray-500 truncate">
+                                      {suggestion.place_name}
+                                    </p>
+                                  </div>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </PopoverContent>
+                      )}
+                    </Popover>
+                  </div>
+                </div>
+
                 <MapboxMap 
                   onMapClick={handleAddReportMapClick}
-                  showOnlyCurrentLocation={true}
-                  showGeocoder={true}
+                  showOnlyCurrentLocation={false}
+                  showGeocoder={false}
                   showControls={true}
                   showDirections={true}
-                  onGeocoderResult={handleAddReportMapClick}
-                  singleMarker={singleMarkerForMap}
-                  center={
-                    addLocationData ? [addLocationData.lng, addLocationData.lat] as [number, number] :
-                    formData.latitude && formData.longitude ? 
-                    [formData.longitude, formData.latitude] as [number, number] : 
-                    [121.5556, 14.1139] as [number, number]}
-                  zoom={addLocationData ? 16 : 14}
+                  showUserLocationMarker={true}
+                  clickedLocation={
+                    addLocationData
+                      ? {
+                          lat: addLocationData.lat,
+                          lng: addLocationData.lng,
+                          address:
+                            addLocationData.address ||
+                            formData.location ||
+                            "Selected location",
+                        }
+                      : null
+                  }
+                  center={addLocationMapCenter}
+                  zoom={addLocationMapZoom}
                 />
               </div>
             </div>

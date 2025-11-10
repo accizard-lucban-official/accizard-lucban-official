@@ -13,7 +13,7 @@ import { Layout } from "./Layout";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { db, deleteResidentUserFunction, storage } from "@/lib/firebase";
-import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc } from "firebase/firestore";
+import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
 import { ref, getDownloadURL } from "firebase/storage";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/components/ui/use-toast";
@@ -21,6 +21,8 @@ import { useLocation } from "react-router-dom";
 import { useUserRole } from "@/hooks/useUserRole";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { DateRange } from "react-day-picker";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
 
 // Add this helper at the top (after imports):
 function formatTimeNoSeconds(time: string | number | null | undefined) {
@@ -37,6 +39,8 @@ function formatTimeNoSeconds(time: string | number | null | undefined) {
   if (isNaN(dateObj.getTime())) return '-';
   return dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
 }
+
+const ADMIN_POSITIONS_COLLECTION = "adminPositions";
 
 export function ManageUsersPage() {
   const { userRole, loading: roleLoading, canManageAdmins } = useUserRole();
@@ -59,6 +63,8 @@ export function ManageUsersPage() {
   const [confirmPermissionChange, setConfirmPermissionChange] = useState<any>(null);
   const [selectedAdmins, setSelectedAdmins] = useState<string[]>([]);
   const [selectedResidents, setSelectedResidents] = useState<string[]>([]);
+  const [adminDateRange, setAdminDateRange] = useState<DateRange | undefined>();
+  const [residentDateRange, setResidentDateRange] = useState<DateRange | undefined>();
   const [confirmBatchAction, setConfirmBatchAction] = useState<{
     type: 'delete' | 'permission' | 'verification';
     value?: boolean;
@@ -87,7 +93,7 @@ export function ManageUsersPage() {
 
   // Add new state for account status modal
   const [accountStatusModal, setAccountStatusModal] = useState<{ open: boolean, resident: any | null }>({ open: false, resident: null });
-  const [positions, setPositions] = useState<string[]>(["Responder", "Rider"]);
+  const [positions, setPositions] = useState<Array<{ id: string; name: string }>>([]);
   const [newPosition, setNewPosition] = useState("");
   const [confirmDeletePosition, setConfirmDeletePosition] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -105,6 +111,119 @@ export function ManageUsersPage() {
   const [isLoadingResidents, setIsLoadingResidents] = useState(true);
 
   const { toast } = useToast();
+
+  const positionOptions = useMemo(() => positions.map(position => position.name), [positions]);
+
+  useEffect(() => {
+    async function fetchPositions() {
+      try {
+        const snapshot = await getDocs(collection(db, ADMIN_POSITIONS_COLLECTION));
+        if (snapshot.empty) {
+          setPositions([]);
+          return;
+        }
+
+        const fetched = snapshot.docs
+          .map(docSnap => {
+            const data = docSnap.data();
+            const name = (data?.name || data?.title || "").toString().trim();
+            if (!name) return null;
+            return {
+              id: docSnap.id,
+              name
+            };
+          })
+          .filter((option): option is { id: string; name: string } => option !== null)
+          .sort((a, b) => a.name.localeCompare(b.name));
+
+        setPositions(fetched);
+      } catch (error) {
+        console.error("Error fetching admin positions:", error);
+        setPositions([]);
+      }
+    }
+
+    fetchPositions();
+  }, []);
+
+  const parseDateString = (value: string): Date | null => {
+    if (!value) return null;
+
+    const direct = new Date(value);
+    if (!isNaN(direct.getTime())) {
+      return direct;
+    }
+
+    const parts = value.split(/[\/\-]/).map(part => part.trim());
+    if (parts.length !== 3) {
+      return null;
+    }
+
+    let year: number;
+    let month: number;
+    let day: number;
+
+    if (value.includes("-") && parts[0].length === 4) {
+      year = parseInt(parts[0], 10);
+      month = parseInt(parts[1], 10);
+      day = parseInt(parts[2], 10);
+    } else {
+      month = parseInt(parts[0], 10);
+      day = parseInt(parts[1], 10);
+      const yearPart = parts[2];
+      const yearNumber = parseInt(yearPart, 10);
+      if (Number.isNaN(yearNumber)) {
+        return null;
+      }
+      year = yearPart.length === 2 ? 2000 + yearNumber : yearNumber;
+    }
+
+    if ([year, month, day].some(num => Number.isNaN(num))) {
+      return null;
+    }
+
+    const result = new Date(year, month - 1, day);
+    return Number.isNaN(result.getTime()) ? null : result;
+  };
+
+  const parseDateValue = (value: unknown): Date | null => {
+    if (!value) return null;
+    if (value instanceof Date) {
+      return Number.isNaN(value.getTime()) ? null : value;
+    }
+    if (typeof value === "number") {
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+    if (typeof value === "string") {
+      return parseDateString(value);
+    }
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      "toDate" in (value as { toDate?: () => unknown }) &&
+      typeof (value as { toDate?: () => unknown }).toDate === "function"
+    ) {
+      return parseDateValue(
+        (value as { toDate: () => Date }).toDate()
+      );
+    }
+    return null;
+  };
+
+  const isWithinDateRange = (date: Date | null, range: DateRange | undefined) => {
+    if (!range?.from || !range?.to) {
+      return true;
+    }
+    if (!date) {
+      return true;
+    }
+    const from = new Date(range.from);
+    from.setHours(0, 0, 0, 0);
+    const to = new Date(range.to);
+    to.setHours(23, 59, 59, 999);
+    return date >= from && date <= to;
+  };
 
   const location = useLocation();
 
@@ -298,7 +417,10 @@ export function ManageUsersPage() {
     const matchesSearch = admin.name?.toLowerCase().includes(searchTerm.toLowerCase()) || admin.username?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesPosition = positionFilter === "all" || admin.position === positionFilter;
     const matchesPermission = permissionFilter === "all" || permissionFilter === "has_permission" && admin.hasEditPermission || permissionFilter === "no_permission" && !admin.hasEditPermission;
-    return matchesSearch && matchesPosition && matchesPermission;
+    const adminCreatedDate =
+      parseDateValue(admin.createdTime) ?? parseDateValue(admin.createdDate);
+    const matchesDate = isWithinDateRange(adminCreatedDate, adminDateRange);
+    return matchesSearch && matchesPosition && matchesPermission && matchesDate;
   });
 
   // Sorting function for resident table
@@ -355,7 +477,10 @@ export function ManageUsersPage() {
       (verificationFilter === "verified" && resident.verified) || 
       (verificationFilter === "pending" && !resident.verified && !resident.suspended) ||
       (verificationFilter === "suspended" && resident.suspended);
-    return matchesAnyField && matchesBarangay && matchesVerification;
+    const residentCreatedDate =
+      parseDateValue(resident.createdTime) ?? parseDateValue(resident.createdDate);
+    const matchesDate = isWithinDateRange(residentCreatedDate, residentDateRange);
+    return matchesAnyField && matchesBarangay && matchesVerification && matchesDate;
   });
 
   const handleAddAdmin = async () => {
@@ -873,22 +998,80 @@ export function ManageUsersPage() {
   };
 
   // Add position
-  const handleAddPosition = () => {
+  const handleAddPosition = async () => {
     const trimmed = newPosition.trim();
-    if (trimmed && !positions.includes(trimmed)) {
-      setPositions([...positions, trimmed]);
+    if (!trimmed) {
+      return;
+    }
+
+    const exists = positionOptions.some(position => position.toLowerCase() === trimmed.toLowerCase());
+    if (exists) {
+      toast({
+        title: "Position already exists",
+        description: `"${trimmed}" is already in the position list.`,
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      const docRef = await addDoc(collection(db, ADMIN_POSITIONS_COLLECTION), {
+        name: trimmed,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      setPositions(prev => [...prev, { id: docRef.id, name: trimmed }].sort((a, b) => a.name.localeCompare(b.name)));
       setNewPosition("");
+      toast({
+        title: "Position added",
+        description: `"${trimmed}" has been added to the list.`
+      });
+    } catch (error) {
+      console.error("Error adding position:", error);
+      toast({
+        title: "Failed to add position",
+        description: "Please try again.",
+        variant: "destructive"
+      });
     }
   };
   // Delete position with confirmation
   const handleDeletePosition = (pos: string) => {
     setConfirmDeletePosition(pos);
   };
-  const confirmDeletePositionAction = () => {
-    if (confirmDeletePosition) {
-      setPositions(positions.filter(p => p !== confirmDeletePosition));
-      if (newAdmin.position === confirmDeletePosition) setNewAdmin({ ...newAdmin, position: "" });
-      if (positionFilter === confirmDeletePosition) setPositionFilter("all");
+  const confirmDeletePositionAction = async () => {
+    if (!confirmDeletePosition) {
+      return;
+    }
+
+    const positionRecord = positions.find(position => position.name === confirmDeletePosition);
+
+    try {
+      if (positionRecord) {
+        await deleteDoc(doc(db, ADMIN_POSITIONS_COLLECTION, positionRecord.id));
+      }
+
+      setPositions(prev => prev.filter(position => position.name !== confirmDeletePosition));
+
+      if (newAdmin.position === confirmDeletePosition) {
+        setNewAdmin({ ...newAdmin, position: "" });
+      }
+      if (positionFilter === confirmDeletePosition) {
+        setPositionFilter("all");
+      }
+
+      toast({
+        title: "Position deleted",
+        description: `"${confirmDeletePosition}" has been removed.`
+      });
+    } catch (error) {
+      console.error("Error deleting position:", error);
+      toast({
+        title: "Failed to delete position",
+        description: "Please try again.",
+        variant: "destructive"
+      });
+    } finally {
       setConfirmDeletePosition(null);
     }
   };
@@ -1156,10 +1339,21 @@ export function ManageUsersPage() {
                           <SelectValue placeholder="Select position" />
                         </SelectTrigger>
                         <SelectContent>
-                          {positions.map(pos => (
-                            <div key={pos} className="flex items-center justify-between pr-2">
-                              <SelectItem value={pos}>{pos}</SelectItem>
-                              <Button type="button" size="icon" variant="ghost" onClick={() => handleDeletePosition(pos)} className="ml-2 text-red-500">
+                          {positions.length === 0 && (
+                            <div className="px-3 py-2 text-sm text-gray-500">
+                              No positions available. Add a new position below.
+                            </div>
+                          )}
+                          {positions.map(position => (
+                            <div key={position.id} className="flex items-center justify-between pr-2">
+                              <SelectItem value={position.name}>{position.name}</SelectItem>
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => handleDeletePosition(position.name)}
+                                className="ml-2 text-red-500"
+                              >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
                             </div>
@@ -1269,7 +1463,25 @@ export function ManageUsersPage() {
                       onChange={e => setSearchTerm(e.target.value)} 
                       className="w-full pl-9" 
                     />
-            </div>
+                  </div>
+
+                  <div className="flex items-end gap-3">
+                    <DateRangePicker
+                      value={adminDateRange}
+                      onChange={setAdminDateRange}
+                      className="w-[260px]"
+                    />
+                    {(adminDateRange?.from || adminDateRange?.to) && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setAdminDateRange(undefined)}
+                        className="h-9"
+                      >
+                        Clear
+                      </Button>
+                    )}
+                  </div>
 
                   {/* Position Filter */}
                   <Select value={positionFilter} onValueChange={setPositionFilter}>
@@ -1278,7 +1490,12 @@ export function ManageUsersPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Positions</SelectItem>
-                      {positions.map(pos => (
+                      {positionOptions.length === 0 && (
+                        <div className="px-3 py-2 text-sm text-gray-500">
+                          No positions available.
+                        </div>
+                      )}
+                      {positionOptions.map(pos => (
                         <SelectItem key={pos} value={pos}>{pos}</SelectItem>
                       ))}
                     </SelectContent>
@@ -1546,11 +1763,17 @@ export function ManageUsersPage() {
                                             onValueChange={value => setEditingAdmin({ ...editingAdmin, position: value })}
                                           >
                                             <SelectTrigger className={showEditAdminErrors && !editingAdmin.position?.trim() ? "border-red-500" : ""}>
-                                              <SelectValue />
+                                              <SelectValue placeholder="Select position" />
                                             </SelectTrigger>
                                             <SelectContent>
-                                              <SelectItem value="Responder">Responder</SelectItem>
-                                              <SelectItem value="Rider">Rider</SelectItem>
+                                              {positionOptions.length === 0 && (
+                                                <div className="px-3 py-2 text-sm text-gray-500">
+                                                  No positions available. Add positions from the admin list.
+                                                </div>
+                                              )}
+                                              {positionOptions.map(pos => (
+                                                <SelectItem key={pos} value={pos}>{pos}</SelectItem>
+                                              ))}
                                             </SelectContent>
                                           </Select>
                                           {showEditAdminErrors && !editingAdmin.position?.trim() && <div className="text-xs text-red-600 mt-1">Position is required</div>}
@@ -1614,7 +1837,7 @@ export function ManageUsersPage() {
                                 <AlertDialog>
                                   <AlertDialogTrigger asChild>
                                     <Button size="sm" variant="outline" className="text-red-600">
-                                      <Trash2 className="h-4 w-4" />
+                                      <Trash2 className="h-4 w-4 text-red-600" />
                                     </Button>
                                   </AlertDialogTrigger>
                                   <AlertDialogContent>
@@ -1997,6 +2220,24 @@ export function ManageUsersPage() {
                     />
                   </div>
 
+                  <div className="flex items-end gap-3">
+                    <DateRangePicker
+                      value={residentDateRange}
+                      onChange={setResidentDateRange}
+                      className="w-[260px]"
+                    />
+                    {(residentDateRange?.from || residentDateRange?.to) && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setResidentDateRange(undefined)}
+                        className="h-9"
+                      >
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+
                   {/* Barangay Filter */}
                     <Select value={barangayFilter} onValueChange={setBarangayFilter}>
                     <SelectTrigger className="w-auto">
@@ -2290,7 +2531,7 @@ export function ManageUsersPage() {
                                 <AlertDialog>
                                   <AlertDialogTrigger asChild>
                                     <Button size="sm" variant="outline" className="text-red-600" title="Delete Resident">
-                                      <Trash2 className="h-4 w-4" />
+                                      <Trash2 className="h-4 w-4 text-red-600" />
                                     </Button>
                                   </AlertDialogTrigger>
                                   <AlertDialogContent>
@@ -3074,11 +3315,17 @@ export function ManageUsersPage() {
                     onValueChange={value => setEditingAdmin({ ...editingAdmin, position: value })}
                   >
                     <SelectTrigger className={showEditAdminErrors && !editingAdmin.position?.trim() ? "border-red-500" : ""}>
-                      <SelectValue />
+                      <SelectValue placeholder="Select position" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Responder">Responder</SelectItem>
-                      <SelectItem value="Rider">Rider</SelectItem>
+                      {positionOptions.length === 0 && (
+                        <div className="px-3 py-2 text-sm text-gray-500">
+                          No positions available. Add positions from the admin list.
+                        </div>
+                      )}
+                      {positionOptions.map(pos => (
+                        <SelectItem key={pos} value={pos}>{pos}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   {showEditAdminErrors && !editingAdmin.position?.trim() && <div className="text-xs text-red-600 mt-1">Position is required</div>}
