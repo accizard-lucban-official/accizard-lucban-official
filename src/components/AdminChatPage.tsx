@@ -1,16 +1,18 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Send, Loader2, User, Check, CheckCheck, Paperclip, X, Image as ImageIcon, FileText, Video, Music, File, Download } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { Send, Loader2, User, Check, CheckCheck, Paperclip, X, Image as ImageIcon, FileText, Video, Music, File, Download, Trash2 } from "lucide-react";
 import { Layout } from "./Layout";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { db, auth } from "@/lib/firebase";
-import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, doc, updateDoc, writeBatch } from "firebase/firestore";
+import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, doc, writeBatch, getDocs } from "firebase/firestore";
 import { toast } from "@/components/ui/sonner";
 import { useFileUpload } from "@/hooks/useFileUpload";
 import { formatFileSize, isImageFile, isVideoFile, isAudioFile } from "@/lib/storage";
 import { useUserRole } from "@/hooks/useUserRole";
+import { getStorage, ref, deleteObject, listAll } from "firebase/storage";
 
 interface ChatMessage {
   id: string;
@@ -48,8 +50,11 @@ export function AdminChatPage() {
   const [sendingMessage, setSendingMessage] = useState(false);
   const [attachmentPreviews, setAttachmentPreviews] = useState<AttachmentPreview[]>([]);
   const [uploadingFile, setUploadingFile] = useState(false);
+  const [clearingChat, setClearingChat] = useState(false);
+  const [showClearDialog, setShowClearDialog] = useState(false);
   const { uploadSingleFile } = useFileUpload();
-  const { role } = useUserRole();
+  const { userRole } = useUserRole();
+  const isSuperAdmin = userRole?.userType === "superadmin";
   
   const currentUser = auth.currentUser;
 
@@ -210,8 +215,19 @@ export function AdminChatPage() {
         return;
       }
 
-      const adminName = currentUser.displayName || currentUser.email || "Admin";
+      const adminName =
+        (userRole?.name && userRole.name.trim().length > 0 ? userRole.name : null) ||
+        currentUser.displayName ||
+        currentUser.email ||
+        "Admin";
       const adminId = currentUser.uid;
+      const senderRole =
+        userRole?.position ||
+        (userRole?.userType === "superadmin"
+          ? "Super Admin"
+          : userRole?.userType === "admin"
+            ? "Admin"
+            : "Administrator");
 
       // Upload all attachments
       const uploadedFiles: Array<{url: string, fileName: string, fileSize: number, fileType: string, isImage: boolean, isVideo: boolean, isAudio: boolean}> = [];
@@ -252,10 +268,11 @@ export function AdminChatPage() {
         const messageData: any = {
           senderId: adminId,
           senderName: adminName,
-          senderRole: role,
+          senderRole,
           message: message.trim() || "Message",
           timestamp: serverTimestamp(),
-          isRead: false
+          isRead: false,
+          profilePictureUrl: userRole?.profilePicture || currentUser.photoURL || ""
         };
 
         await addDoc(collection(db, "admin_chat_messages"), messageData);
@@ -271,13 +288,14 @@ export function AdminChatPage() {
         const messageData: any = {
           senderId: adminId,
           senderName: adminName,
-          senderRole: role,
+          senderRole,
           message: message.trim() || `Sent a ${attachmentType}`,
           timestamp: serverTimestamp(),
           isRead: false,
           fileName: file.fileName,
           fileSize: file.fileSize,
-          fileType: file.fileType
+          fileType: file.fileType,
+          profilePictureUrl: userRole?.profilePicture || currentUser.photoURL || ""
         };
 
         if (file.isImage) {
@@ -305,6 +323,72 @@ export function AdminChatPage() {
     }
   };
 
+  const handleClearAdminChat = async () => {
+    if (!isSuperAdmin) {
+      toast.error("Only super admins can clear the admin chat.");
+      return;
+    }
+    if (clearingChat) return;
+
+    setClearingChat(true);
+    try {
+      const messagesRef = collection(db, "admin_chat_messages");
+      const snapshot = await getDocs(messagesRef);
+      const storage = getStorage();
+
+      const attachmentUrls = new Set<string>();
+      snapshot.docs.forEach((docSnap) => {
+        const data = docSnap.data() as Partial<ChatMessage>;
+        [data.imageUrl, data.videoUrl, data.audioUrl, data.fileUrl].forEach((url) => {
+          if (typeof url === "string" && url.trim().length > 0) {
+            attachmentUrls.add(url);
+          }
+        });
+      });
+
+      await Promise.all(
+        Array.from(attachmentUrls).map(async (url) => {
+          try {
+            const fileRef = ref(storage, url);
+            await deleteObject(fileRef);
+          } catch (error) {
+            console.error("Error deleting admin chat attachment:", error);
+          }
+        })
+      );
+
+      try {
+        const folderRef = ref(storage, "admin_chat");
+        const listResult = await listAll(folderRef);
+        await Promise.all(
+          listResult.items.map(async (itemRef) => {
+            try {
+              await deleteObject(itemRef);
+            } catch (error) {
+              console.error("Error deleting file from admin_chat folder:", error);
+            }
+          })
+        );
+      } catch (error) {
+        console.warn("Admin chat storage cleanup skipped:", error);
+      }
+
+      if (!snapshot.empty) {
+        const batch = writeBatch(db);
+        snapshot.docs.forEach((docSnap) => batch.delete(docSnap.ref));
+        await batch.commit();
+      }
+
+      toast.success("Admin group chat cleared.");
+    } catch (error) {
+      console.error("Error clearing admin chat:", error);
+      toast.error("Failed to clear admin chat.");
+    } finally {
+      setClearingChat(false);
+      setShowClearDialog(false);
+    }
+  };
+
   const formatTime = (timestamp: any): string => {
     if (!timestamp) return "";
     
@@ -326,25 +410,11 @@ export function AdminChatPage() {
 
   return (
     <Layout>
-      <div className="">
-        <Card className="h-[calc(100vh-8rem)] flex flex-col border-none shadow-md">
-          <CardHeader className="border-b bg-white rounded-t-lg">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <div className="h-10 w-10 rounded-full bg-gradient-to-br from-orange-400 to-red-500 flex items-center justify-center">
-                  <User className="h-5 w-5 text-white" />
-                </div>
-                <div>
-                  <CardTitle className="text-lg">Admin Group Chat</CardTitle>
-                  <p className="text-sm text-gray-500">Communication between all administrators</p>
-                </div>
-              </div>
-            </div>
-          </CardHeader>
+      <div className="-m-6 -mb-6 flex flex-col flex-1 min-h-0 min-h-[calc(100vh-8rem)]">
+        <Card className="flex-1 min-h-0 flex flex-col border border-gray-200 shadow-none overflow-hidden">
 
-          <CardContent className="flex-1 overflow-auto p-4">
-            {/* Introduction section */}
-            <div className="flex flex-col items-center justify-center gap-6 w-full mb-6">
+          <CardContent className="flex-1 flex flex-col overflow-hidden p-0 min-h-0">
+            <div className="flex flex-col items-center justify-center gap-6 w-full px-6 pt-6 pb-4 border-b border-gray-100 bg-white flex-shrink-0">
               <img src="/accizard-uploads/accizard-logo-svg.svg" alt="AcciZard Logo" className="w-32 h-32 mx-auto" />
               <img src="/accizard-uploads/accizard-logotype-svg.svg" alt="AcciZard Logotype" className="w-64 h-auto mx-auto" />
               <div className="text-center mt-2">
@@ -353,8 +423,7 @@ export function AdminChatPage() {
               </div>
             </div>
             
-            {/* Messages */}
-            <div className="space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto px-4 py-6 pb-28 space-y-4 overscroll-contain scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent">
               {loadingMessages ? (
                 <div className="py-8 flex flex-col items-center justify-center gap-3">
                   <Loader2 className="h-8 w-8 animate-spin text-brand-orange" />
@@ -375,9 +444,20 @@ export function AdminChatPage() {
                       {/* Admin profile picture (only for other admins' messages without attachments) */}
                       {!isCurrentUser && !msg.imageUrl && !msg.videoUrl && !msg.audioUrl && !msg.fileUrl && (
                         <div className="flex-shrink-0">
-                          <div className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center">
-                            <User className="h-4 w-4 text-white" />
-                          </div>
+                          {msg.profilePictureUrl ? (
+                            <img
+                              src={msg.profilePictureUrl}
+                              alt={msg.senderName || "Admin"}
+                              className="h-8 w-8 rounded-full object-cover"
+                              onError={(e) => {
+                                e.currentTarget.style.display = "none";
+                              }}
+                            />
+                          ) : (
+                            <div className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center">
+                              <User className="h-4 w-4 text-white" />
+                            </div>
+                          )}
                         </div>
                       )}
                       
@@ -521,7 +601,7 @@ export function AdminChatPage() {
             </div>
           </CardContent>
 
-          <div className="border-t p-4 bg-white rounded-b-lg">
+          <div className="border-t p-4 bg-white rounded-b-lg sticky bottom-0 z-10">
             {/* Attachment Previews */}
             {attachmentPreviews.length > 0 && (
               <div className="mb-3 space-y-2 max-h-48 overflow-y-auto">
@@ -691,17 +771,55 @@ export function AdminChatPage() {
                   </PopoverContent>
                 </Popover>
               </div>
-              <Button
-                onClick={handleSendMessage}
-                disabled={sendingMessage || uploadingFile || (!message.trim() && attachmentPreviews.length === 0)}
-                className="bg-brand-orange hover:bg-brand-orange-400 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {sendingMessage || uploadingFile ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Send className="h-4 w-4" />
+              <div className="flex items-center gap-2">
+                {isSuperAdmin && (
+                  <AlertDialog open={showClearDialog} onOpenChange={(open) => !clearingChat && setShowClearDialog(open)}>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="destructive"
+                        size="icon"
+                        className="h-10 w-10"
+                        disabled={clearingChat}
+                      >
+                        {clearingChat ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Clear Admin Group Chat</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This will permanently delete every admin chat message and remove all related media
+                          files stored in Firebase Storage. This action cannot be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel disabled={clearingChat}>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={(event) => {
+                            event.preventDefault();
+                            handleClearAdminChat();
+                          }}
+                          className="bg-red-600 hover:bg-red-500"
+                          disabled={clearingChat}
+                        >
+                          {clearingChat ? <Loader2 className="h-4 w-4 animate-spin" /> : "Clear Chat"}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 )}
-              </Button>
+                <Button
+                  onClick={handleSendMessage}
+                  disabled={sendingMessage || uploadingFile || (!message.trim() && attachmentPreviews.length === 0)}
+                  className="bg-brand-orange hover:bg-brand-orange-400 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {sendingMessage || uploadingFile ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
             </div>
           </div>
         </Card>

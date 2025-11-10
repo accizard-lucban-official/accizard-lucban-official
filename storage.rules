@@ -60,6 +60,14 @@ service firebase.storage {
       allow delete: if isAuthenticated();
     }
 
+    match /admin_chat/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() &&
+                      (isImage() || isDocument() || isVideo() || isAudio()) &&
+                      isValidSize();
+      allow delete: if isAuthenticated();
+    }
+
     // Optional enhanced paths
     match /profile-pictures-web/{userId}/{fileName} {
       allow read: if true;

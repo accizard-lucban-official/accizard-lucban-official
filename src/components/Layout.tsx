@@ -48,6 +48,11 @@ const pageConfig: Record<string, PageConfig> = {
     icon: MessageSquare,
     subtitle: "Communicate with users"
   },
+  "/admin-chat": {
+    title: "Chat Support",
+    icon: MessageSquare,
+    subtitle: "Coordinate with the admin team"
+  },
   "/announcements": {
     title: "Announcements",
     icon: Bell,
@@ -231,7 +236,7 @@ export function Layout({ children }: LayoutProps) {
   }, []);
 
   return (
-    <div className="min-h-screen flex w-full bg-brand-orange">
+    <div className="flex w-full h-screen bg-brand-orange overflow-hidden">
       <Sidebar 
         isCollapsed={isCollapsed} 
         onCollapse={setIsCollapsed}
@@ -251,10 +256,10 @@ export function Layout({ children }: LayoutProps) {
         <Menu className="h-5 w-5" />
       </Button>
       
-      <div className={`flex-1 transition-all duration-300 ${isCollapsed ? "lg:ml-16" : "lg:ml-64"}`}>
-        <main className="pl-2 pr-2 pt-2 pb-2">
-          <div className="bg-white rounded-3xl shadow-sm">
-            <div className="border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+      <div className={`flex-1 h-full flex flex-col overflow-hidden transition-all duration-300 ${isCollapsed ? "lg:ml-16" : "lg:ml-64"}`}>
+        <main className="flex-1 h-full flex flex-col overflow-hidden pl-2 pr-2 pt-2 pb-2">
+          <div className="bg-white rounded-3xl shadow-sm flex-1 flex flex-col overflow-hidden">
+            <div className="border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-2 z-30 bg-white rounded-3xl rounded-b-none shadow-sm">
               <h1 className="text-2xl font-bold text-gray-900">{currentPage.title}</h1>
               
               {/* Profile and Notifications */}
@@ -330,7 +335,7 @@ export function Layout({ children }: LayoutProps) {
                 </DropdownMenu>
               </div>
             </div>
-            <div className="p-6">
+            <div className="flex-1 min-h-0 overflow-y-auto p-6">
               {children}
             </div>
           </div>

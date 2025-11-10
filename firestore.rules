@@ -111,6 +111,14 @@ service cloud.firestore {
       // Allow public write for chat messages (admins and users both need to send messages)
       allow write: if true;
     }
+
+    // ========================================
+    // ADMIN GROUP CHAT MESSAGES
+    // ========================================
+    match /admin_chat_messages/{messageId} {
+      // Only authenticated admins (Firebase-authenticated) can access admin group chat
+      allow read, write: if isAuthenticated();
+    }
     
     // ========================================
     // CHAT ROOM METADATA (Optional - for tracking)

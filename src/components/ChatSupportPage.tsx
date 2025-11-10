@@ -3,12 +3,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Search, Trash2, MessageSquare, Clock, User, Paperclip, Image as ImageIcon, FileText, Send, Check, CheckCheck, Loader2, X, Download, File, ChevronUp, ChevronDown, Video, Music } from "lucide-react";
+import { Search, Trash2, MessageSquare, Clock, User, Paperclip, Image as ImageIcon, FileText, Send, Check, CheckCheck, Loader2, X, Download, File, ChevronUp, ChevronDown, Video, Music, ArrowLeft } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Layout } from "./Layout";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { db, auth } from "@/lib/firebase";
 import { collection, getDocs, getDoc, query, where, orderBy, onSnapshot, addDoc, serverTimestamp, doc, updateDoc, setDoc, writeBatch, deleteDoc } from "firebase/firestore";
+import { getStorage, ref, deleteObject } from "firebase/storage";
 import { useNavigate } from "react-router-dom";
 import { toast } from "@/components/ui/sonner";
 import { useFileUpload } from "@/hooks/useFileUpload";
@@ -81,8 +82,15 @@ export function ChatSupportPage() {
   const messageRefs = useRef<{[key: string]: HTMLDivElement | null}>({});
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
   const [userLastSeen, setUserLastSeen] = useState<Record<string, Date>>({});
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [showChatOnMobile, setShowChatOnMobile] = useState(false);
+  const [deletingChat, setDeletingChat] = useState(false);
   const navigate = useNavigate();
   const { uploadSingleFile, uploadState } = useFileUpload();
+
+  const handleMobileBack = () => {
+    setShowChatOnMobile(false);
+  };
 
   // Fetch all users for search
   useEffect(() => {
@@ -113,6 +121,27 @@ export function ChatSupportPage() {
     }
     fetchUsers();
   }, []);
+
+  useEffect(() => {
+    const updateView = () => {
+      setIsMobileView(window.innerWidth < 1024);
+    };
+    updateView();
+    window.addEventListener("resize", updateView);
+    return () => window.removeEventListener("resize", updateView);
+  }, []);
+
+  useEffect(() => {
+    if (!isMobileView) {
+      setShowChatOnMobile(false);
+    }
+  }, [isMobileView]);
+
+  useEffect(() => {
+    if (!selectedSession) {
+      setShowChatOnMobile(false);
+    }
+  }, [selectedSession]);
 
   // Real-time listener for chat sessions (from chats collection)
   useEffect(() => {
@@ -665,6 +694,9 @@ export function ChatSupportPage() {
       console.log("📱 Phone number stored:", phoneNumber);
       console.log("🖼️ Profile picture stored:", profilePictureUrl);
       setSelectedSession(newSession);
+      if (isMobileView) {
+        setShowChatOnMobile(true);
+      }
     } catch (error) {
       console.error("Error starting chat:", error);
       toast.error("Failed to start chat session");
@@ -678,6 +710,9 @@ export function ChatSupportPage() {
     console.log("📌 Selecting session:", session);
     console.log("🖼️ Session profile picture:", session.profilePicture);
     setSelectedSession(session);
+    if (isMobileView) {
+      setShowChatOnMobile(true);
+    }
   };
 
   const activeSessions = users.filter(user => user.status === "active");
@@ -991,40 +1026,71 @@ export function ChatSupportPage() {
     navigate("/manage-users", { state: { tab: "residents", search: searchValue } });
   };
 
-  // Handler to delete chat session (soft delete - keeps messages)
+  // Handler to delete chat session and all related data
   const handleDeleteChat = async () => {
     if (!chatToDelete) return;
-    
+    setDeletingChat(true);
     try {
-      // Delete only the chat metadata from chats collection
-      // Messages in chat_messages collection are preserved
+      const targetUserId = chatToDelete.userId || chatToDelete.id;
+
+      const messagesRef = collection(db, "chat_messages");
+      const messagesQuery = query(messagesRef, where("userId", "==", targetUserId));
+      const messagesSnapshot = await getDocs(messagesQuery);
+
+      const storage = getStorage();
+
+      await Promise.all(
+        messagesSnapshot.docs.map(async msgDoc => {
+          const data = msgDoc.data();
+          const attachmentUrls = [data.imageUrl, data.videoUrl, data.audioUrl, data.fileUrl].filter(Boolean);
+
+          await Promise.all(
+            attachmentUrls.map(async (url: string) => {
+              try {
+                const fileRef = ref(storage, url);
+                await deleteObject(fileRef);
+              } catch (error) {
+                console.error("Error deleting attachment from storage:", error);
+              }
+            })
+          );
+        })
+      );
+
+      if (!messagesSnapshot.empty) {
+        const batch = writeBatch(db);
+        messagesSnapshot.docs.forEach(docSnap => batch.delete(docSnap.ref));
+        await batch.commit();
+      }
+
       await deleteDoc(doc(db, "chats", chatToDelete.id));
-      
-      console.log(`✅ Deleted chat session: ${chatToDelete.id}`);
-      
-      // Update local state
+
+      console.log(`✅ Permanently deleted chat session and messages: ${chatToDelete.id}`);
+
       setChatSessions(prev => prev.filter(cs => cs.id !== chatToDelete.id));
       if (selectedSession?.id === chatToDelete.id) {
         setSelectedSession(null);
       }
-      
-      toast.success("Chat session removed from admin view");
+
+      toast.success("Chat session permanently deleted");
     } catch (error) {
       console.error("Error deleting chat session:", error);
       toast.error("Failed to delete chat session");
     } finally {
       setShowDeleteDialog(false);
       setChatToDelete(null);
+      setDeletingChat(false);
     }
   };
 
   return (
     <Layout>
-      <div className="">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="-m-6 -mb-6 flex flex-col min-h-[calc(100vh-8rem)]">
+        <div className={`flex-1 grid grid-cols-1 gap-0 ${isMobileView ? "" : "lg:grid-cols-[360px_minmax(0,1fr)]"} min-h-0`}>
           {/* Chat Sessions List */}
-          <div className="lg:col-span-1">
-            <Card className="border-none shadow-md">
+          {(!isMobileView || !showChatOnMobile) && (
+            <div className="h-full min-h-0">
+              <Card className="border border-gray-200 shadow-none h-full min-h-0 flex flex-col">
               <CardHeader className="border-b bg-white rounded-t-lg">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -1041,7 +1107,8 @@ export function ChatSupportPage() {
                   />
                 </div>
               </CardHeader>
-              <CardContent className="p-0">
+              <CardContent className="flex-1 overflow-hidden p-0 min-h-0">
+                <div className="h-full min-h-0 overflow-y-auto">
                 {/* Conditional rendering: Show search results OR chat sessions, not both */}
                 {searchTerm ? (
                   // Search Results (shown when searching)
@@ -1233,18 +1300,31 @@ export function ChatSupportPage() {
                     )}
                   </div>
                 )}
+                </div>
               </CardContent>
             </Card>
           </div>
+          )}
 
           {/* Chat Window */}
-          <div className="lg:col-span-2">
-            <Card className="h-[calc(100vh-8rem)] flex flex-col border-none shadow-md">
+          {(!isMobileView || showChatOnMobile) && (
+            <div className="h-full min-h-0">
+              <Card className="h-full min-h-0 flex flex-col border border-gray-200 shadow-none">
               {selectedSession ? (
                 <>
                   <CardHeader className="border-b bg-white rounded-t-lg">
                     <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
+                      {isMobileView && showChatOnMobile && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={handleMobileBack}
+                          className="h-9 w-9 text-gray-600 hover:text-brand-orange hover:bg-orange-50"
+                        >
+                          <ArrowLeft className="h-5 w-5" />
+                        </Button>
+                      )}
                       <button
                         type="button"
                         onClick={() => {
@@ -1363,9 +1443,8 @@ export function ChatSupportPage() {
                       </div>
                     )}
                   </CardHeader>
-                  <CardContent className="flex-1 overflow-auto p-4">
-                    {/* Introduction section at the top of every chat session */}
-                    <div className="flex flex-col items-center justify-center gap-6 w-full mb-6">
+                  <CardContent className="flex-1 flex flex-col overflow-hidden p-0 min-h-0">
+                    <div className="flex flex-col items-center justify-center gap-6 w-full px-6 pt-6 pb-4 border-b border-gray-100 bg-white">
                       <img src="/accizard-uploads/accizard-logo-svg.svg" alt="Accizard Logo" className="w-32 h-32 mx-auto" />
                       <img src="/accizard-uploads/accizard-logotype-svg.svg" alt="Accizard Logotype" className="w-64 h-auto mx-auto" />
                       <div className="text-center mt-2">
@@ -1373,9 +1452,7 @@ export function ChatSupportPage() {
                         <div className="text-gray-500 text-sm">Office: 8:00 AM - 5:00 PM &bull; Emergency: 24/7</div>
                       </div>
                     </div>
-                    
-                    {/* Messages */}
-                    <div className="space-y-4">
+                    <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4 min-h-0">
                       {loadingMessages ? (
                         <div className="py-8 flex flex-col items-center justify-center gap-3">
                           <Loader2 className="h-8 w-8 animate-spin text-brand-orange" />
@@ -1590,7 +1667,7 @@ export function ChatSupportPage() {
                                     className={`rounded-lg px-4 py-2 ${
                                       isAdmin
                                         ? 'bg-brand-orange text-white rounded-br-none'
-                                        : 'bg-white text-gray-800 rounded-bl-none shadow-sm'
+                                        : 'bg-white text-gray-800 rounded-bl-none border border-gray-200'
                                     }`}
                                   >
                                     <div className="flex items-center gap-2 mb-1">
@@ -1655,7 +1732,7 @@ export function ChatSupportPage() {
                               </div>
                             )}
                           </div>
-                          <div className="bg-white text-gray-800 rounded-lg rounded-bl-none shadow-sm px-4 py-3">
+                          <div className="bg-white text-gray-800 rounded-lg rounded-bl-none border border-gray-200 px-4 py-3">
                             <div className="flex items-center gap-1">
                               <div className="flex space-x-1">
                                 <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
@@ -1873,6 +1950,7 @@ export function ChatSupportPage() {
               )}
             </Card>
           </div>
+        )}
         </div>
       </div>
 
@@ -1884,12 +1962,12 @@ export function ChatSupportPage() {
             <AlertDialogDescription>
               Are you sure you want to remove the chat session with {chatToDelete?.fullName || chatToDelete?.userName || chatToDelete?.userId}? 
               <br /><br />
-              <strong>This will:</strong>
+              <strong>This will permanently:</strong>
               <ul className="list-disc list-inside mt-2 space-y-1">
                 <li>Remove this chat from the admin chat list</li>
-                <li>Preserve all message history in the database</li>
-                <li>Keep messages visible in the user's mobile app</li>
-                <li>Allow you to restart the chat by searching for the user</li>
+                <li>Delete all associated messages from Firestore</li>
+                <li>Delete any files, photos, videos, or audio stored in Firebase Storage</li>
+                <li>Prevent recovery of the conversation history</li>
               </ul>
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -1898,8 +1976,9 @@ export function ChatSupportPage() {
             <AlertDialogAction
               onClick={handleDeleteChat}
               className="bg-red-600 hover:bg-red-700"
+              disabled={deletingChat}
             >
-              Remove Session
+              {deletingChat ? <Loader2 className="h-4 w-4 animate-spin" /> : "Remove Session"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
