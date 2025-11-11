@@ -18,29 +18,113 @@
  * - See CHAT_IMPLEMENTATION_GUIDE.md for full details
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef, ReactNode, ChangeEvent, DragEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, Plus, Edit, Trash2, Calendar, AlertTriangle, Info, X, Eye, ChevronUp, ChevronDown, Check } from "lucide-react";
+import { Search, Plus, Edit, Trash2, Calendar, AlertTriangle, Info, X, Eye, ChevronUp, ChevronDown, Check, Megaphone, Download, CloudLightning, Waves, Mountain, Activity, TrafficCone, UserSearch, ListFilter, Upload, FileIcon } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { Layout } from "./Layout";
 import { DateRange } from "react-day-picker";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { db } from "@/lib/firebase";
+import { uploadAnnouncementMedia, formatFileSize, MAX_FILE_SIZE } from "@/lib/storage";
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp } from "firebase/firestore";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "@/components/ui/use-toast";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
-  
+
+type AnnouncementMedia = {
+  url: string;
+  path: string;
+  fileName: string;
+};
+
+const urlPattern = /(https?:\/\/[^\s]+)/g;
+
+const ANNOUNCEMENT_TYPES: string[] = [
+  "Weather Warning",
+  "Flood",
+  "Landslide",
+  "Earthquake",
+  "Road Closure",
+  "Evacuation Order",
+  "Missing Person",
+  "Informational"
+];
+
+const ANNOUNCEMENT_TYPE_ICONS: Record<string, LucideIcon> = {
+  "Weather Warning": CloudLightning,
+  "Flood": Waves,
+  "Landslide": Mountain,
+  "Earthquake": Activity,
+  "Road Closure": TrafficCone,
+  "Evacuation Order": Megaphone,
+  "Missing Person": UserSearch,
+  "Informational": Info
+};
+
+const renderAnnouncementTypeOption = (type: string) => {
+  const Icon = ANNOUNCEMENT_TYPE_ICONS[type] ?? Info;
+  return (
+    <span className="flex items-center gap-2 transition-colors group-hover:text-brand-orange group-data-[highlighted]:text-brand-orange group-data-[state=checked]:text-brand-orange">
+      <Icon className="h-4 w-4 text-gray-500 transition-colors group-hover:text-brand-orange group-data-[highlighted]:text-brand-orange group-data-[state=checked]:text-brand-orange" />
+      <span>{type}</span>
+    </span>
+  );
+};
+
+const linkifyText = (text: string): ReactNode[] => {
+  if (!text) return [];
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+
+  text.replace(urlPattern, (url, offset) => {
+    if (lastIndex < offset) {
+      nodes.push(
+        <span key={`text-${lastIndex}-${offset}`}>
+          {text.slice(lastIndex, offset)}
+        </span>
+      );
+    }
+    nodes.push(
+      <a
+        key={`link-${offset}`}
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-brand-orange underline break-words"
+      >
+        {url}
+      </a>
+    );
+    lastIndex = offset + url.length;
+    return url;
+  });
+
+  if (lastIndex < text.length) {
+    nodes.push(
+      <span key={`text-${lastIndex}-end`}>
+        {text.slice(lastIndex)}
+      </span>
+    );
+  }
+
+  if (nodes.length === 0 && text) {
+    nodes.push(<span key="text-only">{text}</span>);
+  }
+
+  return nodes;
+};
+
 function formatTimeNoSeconds(time: string | number | null | undefined) {
   if (!time) return '-';
   let dateObj;
@@ -72,8 +156,9 @@ export function AnnouncementsPage() {
   const [announcementPage, setAnnouncementPage] = useState(1);
   const [announcementRowsPerPage, setAnnouncementRowsPerPage] = useState(10);
   const ANNOUNCEMENT_ROWS_OPTIONS = [10, 20, 50, 100];
-  const [announcementTypes, setAnnouncementTypes] = useState<string[]>([]);
-  const [newTypeInput, setNewTypeInput] = useState("");
+  const [newAnnouncementMedia, setNewAnnouncementMedia] = useState<File[]>([]);
+  const [mediaUploadError, setMediaUploadError] = useState<string | null>(null);
+  const [isMediaDragActive, setIsMediaDragActive] = useState(false);
   const [previewAnnouncement, setPreviewAnnouncement] = useState<any>(null);
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>("desc");
   const [editDialogOpenId, setEditDialogOpenId] = useState<string | null>(null);
@@ -85,28 +170,26 @@ export function AnnouncementsPage() {
   const [isDeletingAnnouncement, setIsDeletingAnnouncement] = useState<string | null>(null);
   const [isLoadingAnnouncements, setIsLoadingAnnouncements] = useState(true);
 
-  const today = new Date();
-  // Fetch announcement types from Firestore on mount
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const announcementMediaPreviewUrls = useMemo(
+    () => newAnnouncementMedia.map(file => URL.createObjectURL(file)),
+    [newAnnouncementMedia]
+  );
+
   useEffect(() => {
-    async function fetchTypes() {
-      try {
-        const querySnapshot = await getDocs(collection(db, "announcementTypes"));
-        const types = querySnapshot.docs
-          .map(doc => doc.data().name)
-          .filter(name => name); // Filter out undefined/null values
-        
-        setAnnouncementTypes(types);
-      } catch (error) {
-        console.error("Error fetching announcement types:", error);
-        toast({
-          title: "Error Loading Types",
-          description: "Failed to load announcement types from database.",
-          variant: "destructive",
-        });
-      }
+    return () => {
+      announcementMediaPreviewUrls.forEach(url => URL.revokeObjectURL(url));
+    };
+  }, [announcementMediaPreviewUrls]);
+
+  const getTypeOptions = (currentType?: string) => {
+    if (currentType && !ANNOUNCEMENT_TYPES.includes(currentType)) {
+      return [currentType, ...ANNOUNCEMENT_TYPES];
     }
-    fetchTypes();
-  }, []);
+    return ANNOUNCEMENT_TYPES;
+  };
+
+  const today = new Date();
 
   // Fetch announcements from Firestore on mount
   useEffect(() => {
@@ -176,7 +259,9 @@ export function AnnouncementsPage() {
   };
   const handleAddAnnouncement = async () => {
     setIsAddingAnnouncement(true);
+    setMediaUploadError(null);
     try {
+      const selectedMediaCount = newAnnouncementMedia.length;
       const newAnnouncementWithDate = {
         ...newAnnouncement,
         date: new Date().toLocaleDateString('en-US', {
@@ -185,19 +270,47 @@ export function AnnouncementsPage() {
           year: '2-digit'
         }),
         createdTime: Date.now(),
-        createdBy: 'admin' // Replace with actual user if available
+        createdBy: 'admin', // Replace with actual user if available
+        media: []
       };
-      const docRef = await addDoc(collection(db, "announcements"), newAnnouncementWithDate);
-      setAnnouncements(prev => [...prev, { ...newAnnouncementWithDate, id: docRef.id }]);
-      setNewAnnouncement({
-        type: "",
-        description: "",
-        priority: ""
-      });
+
+      const announcementsCollection = collection(db, "announcements");
+      const docRef = await addDoc(announcementsCollection, newAnnouncementWithDate);
+      let uploadedMedia: AnnouncementMedia[] = [];
+
+      if (selectedMediaCount > 0) {
+        try {
+          uploadedMedia = await Promise.all(
+            newAnnouncementMedia.map(file => uploadAnnouncementMedia(file, docRef.id))
+          );
+
+          await updateDoc(doc(db, "announcements", docRef.id), {
+            media: uploadedMedia,
+            updatedAt: serverTimestamp()
+          });
+        } catch (mediaError) {
+          console.error("Error uploading announcement media:", mediaError);
+          const errorMessage = mediaError instanceof Error ? mediaError.message : "Unknown error uploading media.";
+          setMediaUploadError(errorMessage);
+          toast({
+            title: "Media Upload Failed",
+            description: "The announcement was saved, but some media failed to upload. You can try uploading again from the edit dialog.",
+            variant: "destructive"
+          });
+        }
+      }
+
+      setAnnouncements(prev => [...prev, { ...newAnnouncementWithDate, id: docRef.id, media: uploadedMedia }]);
+      resetNewAnnouncementForm();
       setIsNewAnnouncementOpen(false);
+
       toast({
         title: "Announcement Created",
-        description: "The new announcement has been added successfully.",
+        description: selectedMediaCount
+          ? uploadedMedia.length === selectedMediaCount
+            ? `The announcement has been added with ${uploadedMedia.length} media file(s).`
+            : `The announcement has been added. ${uploadedMedia.length} of ${selectedMediaCount} media file(s) uploaded successfully.`
+          : "The new announcement has been added successfully.",
       });
     } catch (error) {
       console.error("Error adding announcement:", error);
@@ -354,6 +467,174 @@ export function AnnouncementsPage() {
     if (!desc) return '';
     return desc.length > maxLength ? desc.slice(0, maxLength) + '…' : desc;
   }
+
+  const addAnnouncementMediaFiles = (files: FileList | File[] | null) => {
+    if (!files) return;
+
+    const incomingFiles = Array.from(files);
+    if (incomingFiles.length === 0) return;
+
+    const currentSignatures = new Set(
+      newAnnouncementMedia.map(file => `${file.name}-${file.size}-${file.lastModified}`)
+    );
+
+    const oversizedFiles: File[] = [];
+    const duplicateFiles: File[] = [];
+    const validFiles: File[] = [];
+
+    incomingFiles.forEach(file => {
+      if (file.size > MAX_FILE_SIZE) {
+        oversizedFiles.push(file);
+        return;
+      }
+
+      const signature = `${file.name}-${file.size}-${file.lastModified}`;
+      if (currentSignatures.has(signature)) {
+        duplicateFiles.push(file);
+        return;
+      }
+
+      currentSignatures.add(signature);
+      validFiles.push(file);
+    });
+
+    if (validFiles.length > 0) {
+      setNewAnnouncementMedia(prev => [...prev, ...validFiles]);
+    }
+
+    if (oversizedFiles.length > 0 || duplicateFiles.length > 0) {
+      const messages: string[] = [];
+      if (oversizedFiles.length > 0) {
+        const limitInMb = Math.round((MAX_FILE_SIZE / (1024 * 1024)) * 10) / 10;
+        messages.push(
+          `Files exceeding ${limitInMb} MB were skipped: ${oversizedFiles
+            .map(file => `"${file.name}"`)
+            .join(", ")}.`
+        );
+      }
+      if (duplicateFiles.length > 0) {
+        messages.push(`${duplicateFiles.length} duplicate file${duplicateFiles.length > 1 ? "s were" : " was"} skipped.`);
+      }
+      setMediaUploadError(messages.join(" "));
+    } else if (validFiles.length > 0) {
+      setMediaUploadError(null);
+    }
+  };
+
+  const handleAnnouncementMediaChange = (event: ChangeEvent<HTMLInputElement>) => {
+    addAnnouncementMediaFiles(event.target.files);
+    event.target.value = "";
+  };
+
+  const handleMediaDragEnter = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsMediaDragActive(true);
+  };
+
+  const handleMediaDragOver = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsMediaDragActive(true);
+  };
+
+  const handleMediaDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const related = event.relatedTarget as Node | null;
+    if (related && event.currentTarget.contains(related)) {
+      return;
+    }
+    setIsMediaDragActive(false);
+  };
+
+  const handleMediaDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsMediaDragActive(false);
+    addAnnouncementMediaFiles(event.dataTransfer?.files ?? null);
+  };
+
+  const openMediaFileDialog = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleRemoveAnnouncementMedia = (index: number) => {
+    setNewAnnouncementMedia(prev => prev.filter((_, fileIndex) => fileIndex !== index));
+  };
+
+  const clearAnnouncementMediaSelection = () => {
+    setNewAnnouncementMedia([]);
+    setMediaUploadError(null);
+    setIsMediaDragActive(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const resetNewAnnouncementForm = () => {
+    setNewAnnouncement({
+      type: "",
+      description: "",
+      priority: ""
+    });
+    setNewAnnouncementMedia([]);
+    setMediaUploadError(null);
+  };
+
+  const escapeCSVValue = (value: string | number | null | undefined) => {
+    if (value === null || value === undefined) return "";
+    const stringValue = String(value);
+    if (/[",\n]/.test(stringValue)) {
+      return `"${stringValue.replace(/"/g, '""')}"`;
+    }
+    return stringValue;
+  };
+
+  const handleExportAnnouncements = () => {
+    if (sortedAnnouncements.length === 0) {
+      toast({
+        title: "No Data to Export",
+        description: "There are no announcements available to export.",
+      });
+      return;
+    }
+
+    const csvHeaders = ["Type", "Priority", "Description", "Created Date", "Created Time", "Created By", "Media URLs"];
+    const csvRows = sortedAnnouncements.map(announcement => {
+      const mediaUrls = Array.isArray(announcement.media)
+        ? announcement.media.map((mediaItem: AnnouncementMedia) => mediaItem?.url).filter(Boolean).join(" | ")
+        : "";
+
+      return [
+        escapeCSVValue(announcement.type || ""),
+        escapeCSVValue(announcement.priority || ""),
+        escapeCSVValue(announcement.description || ""),
+        escapeCSVValue(announcement.date || ""),
+        escapeCSVValue(formatTimeNoSeconds(announcement.createdTime)),
+        escapeCSVValue(announcement.createdBy || ""),
+        escapeCSVValue(mediaUrls)
+      ].join(",");
+    });
+
+    const csvContent = [csvHeaders.join(","), ...csvRows].join("\r\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const timestamp = new Date().toISOString().replace(/[:T]/g, "-").split(".")[0];
+    link.href = url;
+    link.download = `announcements-${timestamp}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    toast({
+      title: "Export Started",
+      description: `Exported ${sortedAnnouncements.length} announcement(s) to CSV.`,
+    });
+  };
+
   return <Layout>
       <div className="">
         {/* Summary Cards */}
@@ -469,9 +750,16 @@ export function AnnouncementsPage() {
                   <SelectValue placeholder="All Types" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Types</SelectItem>
-                  {announcementTypes.map(type => (
-                    <SelectItem key={type} value={type}>{type}</SelectItem>
+                  <SelectItem value="all" className="group">
+                    <span className="flex items-center gap-2">
+                      <ListFilter className="h-4 w-4 text-gray-500 transition-colors group-hover:text-brand-orange group-data-[highlighted]:text-brand-orange group-data-[state=checked]:text-brand-orange" />
+                      <span>All Types</span>
+                    </span>
+                  </SelectItem>
+                  {ANNOUNCEMENT_TYPES.map(type => (
+                    <SelectItem key={type} value={type} className="group">
+                      {renderAnnouncementTypeOption(type)}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -495,12 +783,28 @@ export function AnnouncementsPage() {
                   variant="destructive"
                   size="sm"
                   onClick={handleBatchDelete}
-                  className="ml-auto"
                 >
                   <Trash2 className="h-4 w-4 mr-2" />
                   Delete ({selectedAnnouncements.size})
                 </Button>
               )}
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={handleExportAnnouncements}
+                    size="sm"
+                    variant="outline"
+                    className="ml-auto"
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Export CSV
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Download filtered announcements as CSV</p>
+                </TooltipContent>
+              </Tooltip>
             </div>
           </div>
           
@@ -645,8 +949,10 @@ export function AnnouncementsPage() {
                                           <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
-                                          {announcementTypes.map(type => (
-                                            <SelectItem key={type} value={type}>{type}</SelectItem>
+                                          {getTypeOptions(editingAnnouncement.type).map(type => (
+                                            <SelectItem key={type} value={type} className="group">
+                                              {renderAnnouncementTypeOption(type)}
+                                            </SelectItem>
                                           ))}
                                         </SelectContent>
                                       </Select>
@@ -846,8 +1152,28 @@ export function AnnouncementsPage() {
                     </TableRow>
                     <TableRow>
                       <TableCell className="font-medium text-gray-700 align-top">Description</TableCell>
-                      <TableCell className="whitespace-pre-line break-words">{previewAnnouncement.description}</TableCell>
+                      <TableCell className="whitespace-pre-line break-words">
+                        {linkifyText(previewAnnouncement.description || "")}
+                      </TableCell>
                     </TableRow>
+                    {Array.isArray(previewAnnouncement.media) && previewAnnouncement.media.length > 0 && (
+                      <TableRow>
+                        <TableCell className="font-medium text-gray-700 align-top">Attachments</TableCell>
+                        <TableCell className="space-y-1">
+                          {previewAnnouncement.media.map((mediaItem: AnnouncementMedia, index: number) => (
+                            <a
+                              key={`${mediaItem.fileName || mediaItem.url}-${index}`}
+                              href={mediaItem.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-brand-orange underline break-all block"
+                            >
+                              {mediaItem.fileName || `Attachment ${index + 1}`}
+                            </a>
+                          ))}
+                        </TableCell>
+                      </TableRow>
+                    )}
                   </TableBody>
                 </Table>
               </div>
@@ -856,11 +1182,19 @@ export function AnnouncementsPage() {
         </Dialog>
 
         {/* New Announcement Dialog */}
-        <Dialog open={isNewAnnouncementOpen} onOpenChange={setIsNewAnnouncementOpen}>
+        <Dialog
+          open={isNewAnnouncementOpen}
+          onOpenChange={(open) => {
+            setIsNewAnnouncementOpen(open);
+            if (!open) {
+              resetNewAnnouncementForm();
+            }
+          }}
+        >
           <DialogContent>
             <DialogHeader className="border-b border-gray-200 pb-4">
               <DialogTitle className="flex items-center gap-2">
-                <Plus className="h-5 w-5 text-[#FF4F0B]" />
+                <Megaphone className="h-5 w-5 text-[#FF4F0B]" />
                 Create New Announcement
               </DialogTitle>
             </DialogHeader>
@@ -875,49 +1209,11 @@ export function AnnouncementsPage() {
                     <SelectValue placeholder="Select announcement type" />
                   </SelectTrigger>
                   <SelectContent>
-                    {announcementTypes.length === 0 ? (
-                      <div className="px-2 py-3 text-sm text-gray-500">No types available. Add one below.</div>
-                    ) : (
-                      announcementTypes.map(type => (
-                        <SelectItem key={type} value={type}>{type}</SelectItem>
-                      ))
-                    )}
-                    <div className="flex gap-2 p-2 border-t border-gray-100 mt-2">
-                      <Input
-                        value={newTypeInput}
-                        onChange={e => setNewTypeInput(e.target.value)}
-                        placeholder="Add new type"
-                        className="flex-1"
-                        onKeyDown={async e => {
-                          if (e.key === 'Enter' && newTypeInput.trim()) {
-                            if (!announcementTypes.includes(newTypeInput.trim())) {
-                              try {
-                                const docRef = await addDoc(collection(db, "announcementTypes"), { name: newTypeInput.trim() });
-                                setAnnouncementTypes([...announcementTypes, newTypeInput.trim()]);
-                                setNewAnnouncement({ ...newAnnouncement, type: newTypeInput.trim() });
-                              } catch (error) {
-                                console.error("Error adding type:", error);
-                              }
-                            }
-                            setNewTypeInput("");
-                          }
-                        }}
-                      />
-                      <Button type="button" onClick={async () => {
-                        if (newTypeInput.trim() && !announcementTypes.includes(newTypeInput.trim())) {
-                          try {
-                            const docRef = await addDoc(collection(db, "announcementTypes"), { name: newTypeInput.trim() });
-                            setAnnouncementTypes([...announcementTypes, newTypeInput.trim()]);
-                            setNewAnnouncement({ ...newAnnouncement, type: newTypeInput.trim() });
-                          } catch (error) {
-                            console.error("Error adding type:", error);
-                          }
-                        }
-                        setNewTypeInput("");
-                      }} disabled={!newTypeInput.trim()} className="bg-brand-orange hover:bg-brand-orange-400 text-white">
-                        Add
-                      </Button>
-                    </div>
+                    {ANNOUNCEMENT_TYPES.map(type => (
+                      <SelectItem key={type} value={type} className="group">
+                        {renderAnnouncementTypeOption(type)}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -951,6 +1247,134 @@ export function AnnouncementsPage() {
                   placeholder="Enter announcement description..."
                   rows={4}
                 />
+                {newAnnouncement.description && (
+                  <div className="mt-2 text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded p-3 whitespace-pre-line break-words">
+                    {linkifyText(newAnnouncement.description)}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <Label htmlFor="new-media">Media Attachments</Label>
+                <div
+                  className={cn(
+                    "mt-1 border-2 border-dashed rounded-lg p-6 text-center transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-orange focus-visible:ring-offset-2",
+                    isMediaDragActive
+                      ? "border-brand-orange bg-orange-50"
+                      : "border-gray-300 bg-white hover:border-brand-orange"
+                  )}
+                  onDragEnter={handleMediaDragEnter}
+                  onDragOver={handleMediaDragOver}
+                  onDragLeave={handleMediaDragLeave}
+                  onDrop={handleMediaDrop}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    openMediaFileDialog();
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      openMediaFileDialog();
+                    }
+                  }}
+                >
+                  <input
+                    ref={fileInputRef}
+                    id="new-media"
+                    type="file"
+                    multiple
+                    onChange={handleAnnouncementMediaChange}
+                    className="hidden"
+                  />
+                  <Upload className="h-8 w-8 mx-auto text-gray-400 mb-2" />
+                  <p className="text-sm text-gray-600">Drag & drop files here or</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-3"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openMediaFileDialog();
+                    }}
+                  >
+                    Browse Files
+                  </Button>
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  Upload images, documents, audio, or video files up to 25 MB each.
+                </p>
+                {mediaUploadError && (
+                  <p className="text-xs text-red-600 mt-2">{mediaUploadError}</p>
+                )}
+                {newAnnouncementMedia.length > 0 && (
+                  <div className="mt-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium text-gray-700">
+                        Selected file{newAnnouncementMedia.length > 1 ? "s" : ""}
+                      </p>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          clearAnnouncementMediaSelection();
+                        }}
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                      >
+                        Clear all
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-48 overflow-y-auto pr-1">
+                      {newAnnouncementMedia.map((file, index) => {
+                        const previewUrl = announcementMediaPreviewUrls[index];
+                        const isImage = file.type.startsWith("image/");
+
+                        return (
+                          <div
+                            key={`${file.name}-${file.size}-${index}`}
+                            className="relative flex items-center gap-3 border border-gray-200 rounded-lg bg-white p-3"
+                          >
+                            <div className="w-16 h-16 sm:w-20 sm:h-20 flex-shrink-0 rounded-md overflow-hidden bg-gray-100 flex items-center justify-center">
+                              {isImage ? (
+                                <img
+                                  src={previewUrl}
+                                  alt={file.name}
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <FileIcon className="h-8 w-8 text-gray-400" />
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-gray-900 truncate" title={file.name}>
+                                {file.name}
+                              </p>
+                              <p className="text-xs text-gray-500">{formatFileSize(file.size)}</p>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="absolute top-2 right-2 h-6 w-6 text-gray-500 hover:text-red-600 hover:bg-red-50"
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                handleRemoveAnnouncementMedia(index);
+                              }}
+                              aria-label={`Remove ${file.name}`}
+                            >
+                              <X className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             <DialogFooter>
@@ -959,10 +1383,25 @@ export function AnnouncementsPage() {
               </Button>
               <Button 
                 onClick={handleAddAnnouncement}
-                disabled={!newAnnouncement.type || !newAnnouncement.priority || !newAnnouncement.description.trim()}
-                className="bg-brand-orange hover:bg-brand-orange-400 text-white"
+                disabled={
+                  isAddingAnnouncement ||
+                  !newAnnouncement.type ||
+                  !newAnnouncement.priority ||
+                  !newAnnouncement.description.trim()
+                }
+                className="bg-brand-orange hover:bg-brand-orange-400 text-white disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                Create Announcement
+                {isAddingAnnouncement ? (
+                  <div className="flex items-center gap-2">
+                    <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Saving...
+                  </div>
+                ) : (
+                  "Create Announcement"
+                )}
               </Button>
             </DialogFooter>
           </DialogContent>

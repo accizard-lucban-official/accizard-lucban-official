@@ -8,7 +8,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Search, Plus, Edit, Trash2, Shield, ShieldOff, ShieldCheck, ShieldX, Eye, User, FileText, Calendar, CheckSquare, Square, UserPlus, EyeOff, ChevronUp, ChevronDown, MessageCircle, ArrowUp, ArrowDown, ArrowUpDown, Upload, X } from "lucide-react";
+import { Search, Plus, Edit, Trash2, Shield, ShieldOff, ShieldCheck, ShieldX, Eye, User, FileText, Calendar, CheckSquare, Square, UserPlus, EyeOff, ChevronUp, ChevronDown, ArrowUp, ArrowDown, ArrowUpDown, Upload, X, FileDown } from "lucide-react";
 import { Layout } from "./Layout";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -553,6 +553,7 @@ export function ManageUsersPage() {
   };
 
   const handleEditAdmin = (admin: any) => {
+    setShowEditAdminErrors(false);
     setEditingAdmin({
       ...admin
     });
@@ -586,10 +587,94 @@ export function ManageUsersPage() {
         ...admin,
         hasEditPermission: !admin.hasEditPermission
       } : admin));
+      toast({
+        title: "Permission Updated",
+        description: `${confirmPermissionChange.name || 'Admin'} now ${!confirmPermissionChange.hasEditPermission ? 'has' : 'no longer has'} edit access.`
+      });
       setConfirmPermissionChange(null);
     } catch (error) {
       console.error("Error updating permission:", error);
     }
+  };
+
+  const formatCSVValue = (value: unknown): string => {
+    if (value === null || value === undefined) return "";
+    const stringValue = String(value);
+    return `"${stringValue.replace(/"/g, '""')}"`;
+  };
+
+  const downloadCSV = (filename: string, headers: string[], rows: string[][]) => {
+    const csvRows = [
+      headers.map(formatCSVValue).join(","),
+      ...rows.map(row => row.map(formatCSVValue).join(","))
+    ];
+    const blob = new Blob([csvRows.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${filename}-${new Date().toISOString().replace(/[:T]/g, "-").split(".")[0]}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const exportAdminsToCSV = () => {
+    if (adminUsers.length === 0) {
+      toast({
+        title: "No Admin Data",
+        description: "There are no admin records to export."
+      });
+      return;
+    }
+
+    const headers = ["User ID", "Name", "Position", "ID Number", "Username", "Created Date", "Created Time", "Has Edit Permission"];
+    const rows = adminUsers.map(admin => [
+      admin.userId || "",
+      admin.name || "",
+      admin.position || "",
+      admin.idNumber || "",
+      admin.username || "",
+      admin.createdDate || "",
+      formatTimeNoSeconds(admin.createdTime) || "",
+      admin.hasEditPermission ? "Yes" : "No"
+    ]);
+
+    downloadCSV("admin-accounts", headers, rows);
+    toast({
+      title: "Export Started",
+      description: `Exported ${adminUsers.length} admin account(s) to CSV.`
+    });
+  };
+
+  const exportResidentsToCSV = () => {
+    if (residents.length === 0) {
+      toast({
+        title: "No Resident Data",
+        description: "There are no resident records to export."
+      });
+      return;
+    }
+
+    const headers = ["User ID", "Full Name", "Phone Number", "Email", "Barangay", "City/Town", "Verified", "Suspended", "Created Date", "Created Time"];
+    const rows = residents.map(resident => [
+      resident.userId || "",
+      resident.fullName || "",
+      resident.phoneNumber || "",
+      resident.email || "",
+      resident.barangay || "",
+      resident.cityTown || "",
+      resident.verified ? "Yes" : "No",
+      resident.suspended ? "Yes" : "No",
+      resident.createdDate || "",
+      formatTimeNoSeconds(resident.createdTime) || ""
+    ]);
+
+    downloadCSV("resident-accounts", headers, rows);
+    toast({
+      title: "Export Started",
+      description: `Exported ${residents.length} resident account(s) to CSV.`
+    });
   };
 
   const handleDeleteAdmin = async (adminId: string) => {
@@ -1174,11 +1259,6 @@ export function ManageUsersPage() {
   const newResidentsCount = useMemo(() => residents.filter(r => Number(r.createdTime) > lastSeenResidents).length, [residents, lastSeenResidents, badgeResetKey]);
   const manageUsersBadge = newResidentsCount;
 
-  const handleChatUser = (user: any) => {
-    console.log('Chat with user:', user);
-    // You can replace this with navigation or chat modal logic
-  };
-
   // Manage active tab state
   const [activeTab, setActiveTab] = useState(() => {
     // Determine initial tab based on navigation state and user role
@@ -1483,6 +1563,23 @@ export function ManageUsersPage() {
                     )}
                   </div>
 
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={exportAdminsToCSV}
+                        className="flex items-center gap-2"
+                      >
+                        <FileDown className="h-4 w-4" />
+                        Export CSV
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Download admin accounts as CSV</p>
+                    </TooltipContent>
+                  </Tooltip>
+
                   {/* Position Filter */}
                   <Select value={positionFilter} onValueChange={setPositionFilter}>
                     <SelectTrigger className="w-auto">
@@ -1732,95 +1829,13 @@ export function ManageUsersPage() {
                             </TableCell>
                             <TableCell>
                               <div className="flex items-center gap-2">
-                                <Dialog>
-                                  <DialogTrigger asChild>
-                                <Button size="sm" variant="outline" onClick={() => handleEditAdmin(admin)}>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleEditAdmin(admin)}
+                                >
                                   <Edit className="h-4 w-4" />
                                 </Button>
-                                  </DialogTrigger>
-                                  <DialogContent>
-                                    <DialogHeader className="border-b border-gray-200 pb-4">
-                                      <DialogTitle className="flex items-center gap-2">
-                                        <Edit className="h-5 w-5 text-[#FF4F0B]" />
-                                        Edit Admin Account
-                                      </DialogTitle>
-                                    </DialogHeader>
-                                    {editingAdmin && (
-                                      <div className="space-y-4">
-                                        <div>
-                                          <Label>Name{showEditAdminErrors && !editingAdmin.name?.trim() && <span className="text-red-500"> *</span>}</Label>
-                                          <Input
-                                            value={editingAdmin.name}
-                                            onChange={e => setEditingAdmin({ ...editingAdmin, name: e.target.value })}
-                                            className={showEditAdminErrors && !editingAdmin.name?.trim() ? "border-red-500" : ""}
-                                          />
-                                          {showEditAdminErrors && !editingAdmin.name?.trim() && <div className="text-xs text-red-600 mt-1">Name is required</div>}
-                                        </div>
-                                        <div>
-                                          <Label>Position{showEditAdminErrors && !editingAdmin.position?.trim() && <span className="text-red-500"> *</span>}</Label>
-                                          <Select
-                                            value={editingAdmin.position}
-                                            onValueChange={value => setEditingAdmin({ ...editingAdmin, position: value })}
-                                          >
-                                            <SelectTrigger className={showEditAdminErrors && !editingAdmin.position?.trim() ? "border-red-500" : ""}>
-                                              <SelectValue placeholder="Select position" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                              {positionOptions.length === 0 && (
-                                                <div className="px-3 py-2 text-sm text-gray-500">
-                                                  No positions available. Add positions from the admin list.
-                                                </div>
-                                              )}
-                                              {positionOptions.map(pos => (
-                                                <SelectItem key={pos} value={pos}>{pos}</SelectItem>
-                                              ))}
-                                            </SelectContent>
-                                          </Select>
-                                          {showEditAdminErrors && !editingAdmin.position?.trim() && <div className="text-xs text-red-600 mt-1">Position is required</div>}
-                                        </div>
-                                        <div>
-                                          <Label>ID Number{showEditAdminErrors && !editingAdmin.idNumber?.trim() && <span className="text-red-500"> *</span>}</Label>
-                                          <Input
-                                            value={editingAdmin.idNumber}
-                                            onChange={e => setEditingAdmin({ ...editingAdmin, idNumber: e.target.value })}
-                                            className={showEditAdminErrors && !editingAdmin.idNumber?.trim() ? "border-red-500" : ""}
-                                          />
-                                          {showEditAdminErrors && !editingAdmin.idNumber?.trim() && <div className="text-xs text-red-600 mt-1">ID number is required</div>}
-                                        </div>
-                                        <div>
-                                          <Label>Username{showEditAdminErrors && !editingAdmin.username?.trim() && <span className="text-red-500"> *</span>}</Label>
-                                          <Input
-                                            value={editingAdmin.username}
-                                            onChange={e => setEditingAdmin({ ...editingAdmin, username: e.target.value })}
-                                            className={showEditAdminErrors && !editingAdmin.username?.trim() ? "border-red-500" : ""}
-                                          />
-                                          {showEditAdminErrors && !editingAdmin.username?.trim() && <div className="text-xs text-red-600 mt-1">Username is required</div>}
-                                        </div>
-                                      </div>
-                                    )}
-                                    <DialogFooter>
-                                      <Button
-                                        onClick={async () => {
-                                          setShowEditAdminErrors(true);
-                                          if (
-                                            editingAdmin.name?.trim() &&
-                                            editingAdmin.position?.trim() &&
-                                            editingAdmin.idNumber?.trim() &&
-                                            editingAdmin.username?.trim()
-                                          ) {
-                                            await handleSaveAdminEdit();
-                                            setEditingAdmin(null);
-                                            setShowEditAdminErrors(false);
-                                          }
-                                        }}
-                                        disabled={!(editingAdmin && editingAdmin.name?.trim() && editingAdmin.position?.trim() && editingAdmin.idNumber?.trim() && editingAdmin.username?.trim())}
-                                      >
-                                        Save Changes
-                                      </Button>
-                                      <Button variant="secondary" onClick={() => { setEditingAdmin(null); setShowEditAdminErrors(false); }}>Cancel</Button>
-                                    </DialogFooter>
-                                  </DialogContent>
-                                </Dialog>
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -1876,15 +1891,6 @@ export function ManageUsersPage() {
                                     </AlertDialogFooter>
                                   </AlertDialogContent>
                                 </AlertDialog>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handleChatUser(admin)}
-                                  title="Chat"
-                                  className="text-blue-600"
-                                >
-                                  <MessageCircle className="h-4 w-4" />
-                                </Button>
                               </div>
                             </TableCell>
                           </TableRow>
@@ -2238,6 +2244,23 @@ export function ManageUsersPage() {
                     )}
                   </div>
 
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={exportResidentsToCSV}
+                        className="flex items-center gap-2"
+                      >
+                        <FileDown className="h-4 w-4" />
+                        Export CSV
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Download resident accounts as CSV</p>
+                    </TooltipContent>
+                  </Tooltip>
+
                   {/* Barangay Filter */}
                     <Select value={barangayFilter} onValueChange={setBarangayFilter}>
                     <SelectTrigger className="w-auto">
@@ -2578,15 +2601,6 @@ export function ManageUsersPage() {
                                   title="Account Status"
                                 >
                                   {resident.suspended ? <ShieldOff className="h-4 w-4" /> : resident.verified ? <ShieldCheck className="h-4 w-4" /> : <ShieldX className="h-4 w-4" />}
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handleChatUser(resident)}
-                                  title="Chat"
-                                  className="text-blue-600"
-                                >
-                                  <MessageCircle className="h-4 w-4" />
                                 </Button>
                               </div>
                             </TableCell>
@@ -3289,7 +3303,15 @@ export function ManageUsersPage() {
         </AlertDialog>
 
         {/* Edit Admin Account Modal */}
-        <Dialog open={!!editingAdmin} onOpenChange={() => {}}>
+        <Dialog
+          open={!!editingAdmin}
+          onOpenChange={(open) => {
+            if (!open) {
+              setEditingAdmin(null);
+              setShowEditAdminErrors(false);
+            }
+          }}
+        >
           <DialogContent>
             <DialogHeader className="border-b border-gray-200 pb-4">
               <DialogTitle className="flex items-center gap-2">

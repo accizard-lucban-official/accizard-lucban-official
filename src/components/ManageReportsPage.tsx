@@ -52,6 +52,41 @@ const getReportTypeIcon = (type: string) => {
   return iconMap[type] || FileText;
 };
 
+const REPORT_TYPE_OPTIONS = [
+  { value: 'road-crash', label: 'Road Crash' },
+  { value: 'medical-emergency', label: 'Medical Emergency' },
+  { value: 'flooding', label: 'Flooding' },
+  { value: 'volcanic-activity', label: 'Volcanic Activity' },
+  { value: 'landslide', label: 'Landslide' },
+  { value: 'earthquake', label: 'Earthquake' },
+  { value: 'civil-disturbance', label: 'Civil Disturbance' },
+  { value: 'armed-conflict', label: 'Armed Conflict' },
+  { value: 'infectious-disease', label: 'Infectious Disease' },
+  { value: 'poor-infrastructure', label: 'Poor Infrastructure' },
+  { value: 'obstructions', label: 'Obstructions' },
+  { value: 'electrical-hazard', label: 'Electrical Hazard' },
+  { value: 'environmental-hazard', label: 'Environmental Hazard' },
+  { value: 'others', label: 'Others' },
+];
+
+const REPORT_TYPE_LABELS = REPORT_TYPE_OPTIONS.reduce<Record<string, string>>(
+  (acc, option) => {
+    acc[option.value] = option.label;
+    return acc;
+  },
+  {}
+);
+
+const renderReportTypeOption = (label: string) => {
+  const Icon = getReportTypeIcon(label);
+  return (
+    <span className="flex items-center gap-2 transition-colors group-hover:text-brand-orange group-data-[highlighted]:text-brand-orange group-data-[state=checked]:text-brand-orange">
+      <Icon className="h-4 w-4 text-gray-500 transition-colors group-hover:text-brand-orange group-data-[highlighted]:text-brand-orange group-data-[state=checked]:text-brand-orange" />
+      <span>{label}</span>
+    </span>
+  );
+};
+
 type AgencyOption = {
   id: string;
   name: string;
@@ -784,23 +819,7 @@ export function ManageReportsPage() {
       }
       
       // Convert report type from kebab-case to Title Case for Firestore
-      const reportTypeMap: Record<string, string> = {
-        'road-crash': 'Road Crash',
-        'medical-emergency': 'Medical Emergency',
-        'flooding': 'Flooding',
-        'volcanic-activity': 'Volcanic Activity',
-        'landslide': 'Landslide',
-        'earthquake': 'Earthquake',
-        'civil-disturbance': 'Civil Disturbance',
-        'armed-conflict': 'Armed Conflict',
-        'infectious-disease': 'Infectious Disease',
-        'poor-infrastructure': 'Poor Infrastructure',
-        'obstructions': 'Obstructions',
-        'electrical-hazard': 'Electrical Hazard',
-        'environmental-hazard': 'Environmental Hazard',
-        'others': 'Others'
-      };
-      const reportType = reportTypeMap[formData.type] || formData.type;
+      const reportType = REPORT_TYPE_LABELS[formData.type] || formData.type;
       
       // Create report document in Firestore
       const reportData = {
@@ -3977,26 +3996,23 @@ useEffect(() => {
 
               {/* Type Filter */}
               <Select value={typeFilter} onValueChange={setTypeFilter}>
-                <SelectTrigger className="w-auto">
-                  <SelectValue placeholder="All Types" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Types</SelectItem>
-                  <SelectItem value="road-crash">Road Crash</SelectItem>
-                  <SelectItem value="medical-emergency">Medical Emergency</SelectItem>
-                  <SelectItem value="flooding">Flooding</SelectItem>
-                  <SelectItem value="volcanic-activity">Volcanic Activity</SelectItem>
-                  <SelectItem value="landslide">Landslide</SelectItem>
-                  <SelectItem value="earthquake">Earthquake</SelectItem>
-                  <SelectItem value="civil-disturbance">Civil Disturbance</SelectItem>
-                  <SelectItem value="armed-conflict">Armed Conflict</SelectItem>
-                  <SelectItem value="infectious-disease">Infectious Disease</SelectItem>
-                  <SelectItem value="poor-infrastructure">Poor Infrastructure</SelectItem>
-                  <SelectItem value="obstructions">Obstructions</SelectItem>
-                  <SelectItem value="electrical-hazard">Electrical Hazard</SelectItem>
-                  <SelectItem value="environmental-hazard">Environmental Hazard</SelectItem>
-                </SelectContent>
-              </Select>
+              <SelectTrigger className="w-auto">
+                <SelectValue placeholder="All Types" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all" className="group">
+                  <span className="flex items-center gap-2 transition-colors group-hover:text-brand-orange group-data-[highlighted]:text-brand-orange group-data-[state=checked]:text-brand-orange">
+                    <Layers className="h-4 w-4 text-gray-500 transition-colors group-hover:text-brand-orange group-data-[highlighted]:text-brand-orange group-data-[state=checked]:text-brand-orange" />
+                    <span>All Types</span>
+                  </span>
+                </SelectItem>
+                {REPORT_TYPE_OPTIONS.map(option => (
+                  <SelectItem key={option.value} value={option.value} className="group">
+                    {renderReportTypeOption(option.label)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
               {/* Status Filter */}
               <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -4447,27 +4463,18 @@ useEffect(() => {
                 <div>
                   <Label htmlFor="report-type">Report Type</Label>
                   <Select value={formData.type} onValueChange={value => setFormData({
-                  ...formData,
-                  type: value
-                })}>
+                    ...formData,
+                    type: value
+                  })}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select type" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="road-crash">Road Crash</SelectItem>
-                      <SelectItem value="medical-emergency">Medical Emergency</SelectItem>
-                      <SelectItem value="flooding">Flooding</SelectItem>
-                      <SelectItem value="volcanic-activity">Volcanic Activity</SelectItem>
-                      <SelectItem value="landslide">Landslide</SelectItem>
-                      <SelectItem value="earthquake">Earthquake</SelectItem>
-                      <SelectItem value="civil-disturbance">Civil Disturbance</SelectItem>
-                      <SelectItem value="armed-conflict">Armed Conflict</SelectItem>
-                      <SelectItem value="infectious-disease">Infectious Disease</SelectItem>
-                      <SelectItem value="poor-infrastructure">Poor Infrastructure</SelectItem>
-                      <SelectItem value="obstructions">Obstructions</SelectItem>
-                      <SelectItem value="electrical-hazard">Electrical Hazard</SelectItem>
-                      <SelectItem value="environmental-hazard">Environmental Hazard</SelectItem>
-                      <SelectItem value="others">Others</SelectItem>
+                      {REPORT_TYPE_OPTIONS.map(option => (
+                        <SelectItem key={option.value} value={option.value} className="group">
+                          {renderReportTypeOption(option.label)}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>

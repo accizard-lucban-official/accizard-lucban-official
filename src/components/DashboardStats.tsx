@@ -72,7 +72,12 @@ export function DashboardStats() {
     'Earthquake': true,
     'Civil Disturbance': true,
     'Armed Conflict': true,
-    'Infectious Disease': true
+    'Infectious Disease': true,
+    'Poor Infrastructure': true,
+    'Obstructions': true,
+    'Electrical Hazard': true,
+    'Environmental Hazard': true,
+    'Others': true
   });
   const [selectedChartsForExport, setSelectedChartsForExport] = useState<Record<string, boolean>>({
     'Reports Over Time': true,
@@ -88,16 +93,21 @@ export function DashboardStats() {
 
   // Hazard colors using brand-orange to brand-red spectrum
   const hazardColors = useMemo(() => ({
-    'Road Crash': '#ff4e3a',      // bright red-orange
-    'Fire': '#ff703d',            // orange
-    'Medical Emergency': '#fcad3e', // golden orange/amber
-    'Flooding': '#439693',        // muted teal
-    'Volcanic Activity': '#027a6a', // deep teal
-    'Landslide': '#439693',       // muted teal
-    'Earthquake': '#fcad3e',      // golden orange/amber
-    'Civil Disturbance': '#ff703d', // orange
-    'Armed Conflict': '#ff4e3a',  // bright red-orange
-    'Infectious Disease': '#439693' // muted teal
+    'Road Crash': '#ff4e3a',          // bright red-orange
+    'Fire': '#ff703d',                // orange
+    'Medical Emergency': '#fcad3e',   // golden orange/amber
+    'Flooding': '#439693',            // muted teal
+    'Volcanic Activity': '#027a6a',   // deep teal
+    'Landslide': '#439693',           // muted teal
+    'Earthquake': '#fcad3e',          // golden orange/amber
+    'Civil Disturbance': '#ff703d',   // orange
+    'Armed Conflict': '#ff4e3a',      // bright red-orange
+    'Infectious Disease': '#439693',  // muted teal
+    'Poor Infrastructure': '#fb923c', // soft orange
+    'Obstructions': '#facc15',        // warm yellow
+    'Electrical Hazard': '#f87171',   // coral red
+    'Environmental Hazard': '#34d399',// fresh green
+    'Others': '#fcd34d'               // golden yellow
   }), []);
 
   // Sample data for visualizations with all 32 barangays
@@ -173,8 +183,17 @@ export function DashboardStats() {
       { barangay: "Tinamnan", "Road Crash": 3, "Fire": 2, "Medical Emergency": 2, "Flooding": 1, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 0, "Civil Disturbance": 1 }
     ];
     
+    const dataWithExpandedTypes = data.map((item, index) => ({
+      ...item,
+      'Poor Infrastructure': item['Poor Infrastructure'] ?? ((index % 3) + 1),
+      'Obstructions': item['Obstructions'] ?? (((index + 1) % 3) + 1),
+      'Electrical Hazard': item['Electrical Hazard'] ?? ((index % 2) + 1),
+      'Environmental Hazard': item['Environmental Hazard'] ?? (((index + 2) % 4) + 1),
+      'Others': item['Others'] ?? (((index + 1) % 2) + 1)
+    }));
+    
     // Sort by total reports in descending order
-    return data.sort((a, b) => {
+    return dataWithExpandedTypes.sort((a, b) => {
       const totalA = Object.values(a).slice(1).reduce((sum: number, val: any) => sum + val, 0);
       const totalB = Object.values(b).slice(1).reduce((sum: number, val: any) => sum + val, 0);
       return totalB - totalA;
@@ -222,7 +241,8 @@ export function DashboardStats() {
     const reportTypes = [
       'Road Crash', 'Fire', 'Medical Emergency', 'Flooding', 
       'Volcanic Activity', 'Landslide', 'Earthquake', 'Civil Disturbance',
-      'Armed Conflict', 'Infectious Disease'
+      'Armed Conflict', 'Infectious Disease', 'Poor Infrastructure',
+      'Obstructions', 'Electrical Hazard', 'Environmental Hazard', 'Others'
     ];
     
     const months = [
@@ -266,6 +286,21 @@ export function DashboardStats() {
           case 'Infectious Disease':
             baseValue = 7 + Math.floor(Math.sin(index * 0.5) * 4) + (index % 3);
             break;
+          case 'Poor Infrastructure':
+            baseValue = 5 + Math.floor(Math.sin(index * 0.35) * 3) + (index % 2);
+            break;
+          case 'Obstructions':
+            baseValue = 4 + Math.floor(Math.sin(index * 0.45) * 2) + (index % 3);
+            break;
+          case 'Electrical Hazard':
+            baseValue = 3 + Math.floor(Math.sin(index * 0.25) * 2) + (index % 2);
+            break;
+          case 'Environmental Hazard':
+            baseValue = 6 + Math.floor(Math.sin(index * 0.4) * 3) + (index % 2);
+            break;
+          case 'Others':
+            baseValue = 2 + Math.floor(Math.sin(index * 0.3) * 2) + (index % 3);
+            break;
           default:
             baseValue = 5;
         }
@@ -280,45 +315,65 @@ export function DashboardStats() {
 
   const reportTypeData = useMemo(() => [{
     name: "Road Crash",
-    value: 25,
-    color: "#ff4e3a"
+    value: 22,
+    color: hazardColors['Road Crash']
   }, {
     name: "Fire",
-    value: 18,
-    color: "#ff703d"
+    value: 16,
+    color: hazardColors['Fire']
   }, {
     name: "Medical Emergency",
-    value: 15,
-    color: "#fcad3e"
+    value: 14,
+    color: hazardColors['Medical Emergency']
   }, {
     name: "Flooding",
-    value: 12,
-    color: "#439693"
+    value: 11,
+    color: hazardColors['Flooding']
   }, {
     name: "Earthquake",
-    value: 10,
-    color: "#027a6a"
+    value: 9,
+    color: hazardColors['Earthquake']
   }, {
     name: "Landslide",
-    value: 8,
-    color: "#439693"
+    value: 7,
+    color: hazardColors['Landslide']
   }, {
     name: "Volcanic Activity",
     value: 5,
-    color: "#027a6a"
+    color: hazardColors['Volcanic Activity']
   }, {
     name: "Civil Disturbance",
     value: 4,
-    color: "#ff703d"
+    color: hazardColors['Civil Disturbance']
   }, {
     name: "Armed Conflict",
-    value: 2,
-    color: "#ff4e3a"
+    value: 3,
+    color: hazardColors['Armed Conflict']
   }, {
     name: "Infectious Disease",
-    value: 1,
-    color: "#fcad3e"
-  }], []);
+    value: 3,
+    color: hazardColors['Infectious Disease']
+  }, {
+    name: "Poor Infrastructure",
+    value: 6,
+    color: hazardColors['Poor Infrastructure']
+  }, {
+    name: "Obstructions",
+    value: 5,
+    color: hazardColors['Obstructions']
+  }, {
+    name: "Electrical Hazard",
+    value: 4,
+    color: hazardColors['Electrical Hazard']
+  }, {
+    name: "Environmental Hazard",
+    value: 6,
+    color: hazardColors['Environmental Hazard']
+  }, {
+    name: "Others",
+    value: 3,
+    color: hazardColors['Others']
+  }], [hazardColors]);
   const peakHoursData = [{
     hour: "6AM",
     reports: 2
@@ -1754,7 +1809,8 @@ ${calendarChart ? `
     const allKeys = [
       'Road Crash', 'Fire', 'Medical Emergency', 'Flooding', 
       'Volcanic Activity', 'Landslide', 'Earthquake', 'Civil Disturbance',
-      'Armed Conflict', 'Infectious Disease'
+      'Armed Conflict', 'Infectious Disease', 'Poor Infrastructure',
+      'Obstructions', 'Electrical Hazard', 'Environmental Hazard', 'Others'
     ];
     return allKeys.filter(key => enabledReportTypes[key]);
   }, [enabledReportTypes]);

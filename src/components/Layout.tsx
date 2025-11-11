@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Sidebar } from "./Sidebar";
 import { useLocation } from "react-router-dom";
 import { Home, ClipboardList, BarChart3, MessageSquare, Bell, Users, User, LucideIcon, Menu, Activity, ChevronDown } from "lucide-react";
@@ -85,6 +85,7 @@ export function Layout({ children }: LayoutProps) {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [unseenReportsCount, setUnseenReportsCount] = useState(0);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
+  const [residentChatBadge, setResidentChatBadge] = useState(0);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [user, setUser] = useState({
     name: "",
@@ -97,6 +98,38 @@ export function Layout({ children }: LayoutProps) {
     subtitle: "Page not found"
   };
   const { userRole, loading: roleLoading } = useUserRole();
+  const unreadSessionIdsRef = useRef<Set<string>>(new Set());
+  const unopenedSessionIdsRef = useRef<Set<string>>(new Set());
+
+  const toMillis = (value: any): number | null => {
+    if (!value) return null;
+    if (typeof value.toDate === "function") {
+      try {
+        return value.toDate().getTime();
+      } catch {
+        return null;
+      }
+    }
+    if (value instanceof Date) {
+      return value.getTime();
+    }
+    if (typeof value === "number") {
+      return value;
+    }
+    if (typeof value === "string") {
+      const parsed = Date.parse(value);
+      return Number.isNaN(parsed) ? null : parsed;
+    }
+    return null;
+  };
+
+  const updateResidentChatBadge = () => {
+    const combined = new Set<string>([
+      ...unreadSessionIdsRef.current,
+      ...unopenedSessionIdsRef.current
+    ]);
+    setResidentChatBadge(combined.size);
+  };
 
   // Fetch user data
   useEffect(() => {
@@ -216,22 +249,82 @@ export function Layout({ children }: LayoutProps) {
       
       const unsubscribe = onSnapshot(q, (snapshot) => {
         let totalUnread = 0;
+        const unreadSessions = new Set<string>();
         
         snapshot.docs.forEach(msgDoc => {
           const data = msgDoc.data();
-          const userId = data.userId;
+          const identifiers = Array.from(
+            new Set(
+              [data.userId, data.userID].filter(Boolean)
+            )
+          );
+          const residentSenderId = data.userId || data.userID;
           // Only count messages from users (not admin messages)
-          if (userId && data.senderId === userId) {
+          if (identifiers.length > 0 && residentSenderId && data.senderId === residentSenderId) {
             totalUnread++;
+            identifiers.forEach((identifier) => unreadSessions.add(identifier));
           }
         });
         
         setUnreadChatCount(totalUnread);
+        unreadSessionIdsRef.current = unreadSessions;
+        updateResidentChatBadge();
       });
 
       return () => unsubscribe();
     } catch (error) {
       console.error("Error fetching unread chat messages:", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const chatsRef = collection(db, "chats");
+      const unsubscribe = onSnapshot(chatsRef, (snapshot) => {
+        const unopenedSessions = new Set<string>();
+
+        snapshot.docs.forEach((chatDoc) => {
+          const data = chatDoc.data();
+
+          // Skip admin/internal chats if flagged
+          if (data.chatType === "admin" || data.isAdminChat) {
+            return;
+          }
+
+          const identifiers = Array.from(
+            new Set(
+              [data.userId, chatDoc.id].filter(Boolean)
+            )
+          );
+
+          if (identifiers.length === 0) {
+            return;
+          }
+
+          const lastAccessMillis = toMillis(data.lastAccessTime);
+          const lastMessageMillis =
+            toMillis(data.lastMessageTime) ??
+            toMillis(data.updatedAt) ??
+            toMillis(data.createdAt);
+
+          const isUnopened = lastAccessMillis === null;
+          const hasNewerMessage =
+            lastAccessMillis !== null &&
+            lastMessageMillis !== null &&
+            lastMessageMillis > lastAccessMillis;
+
+          if (isUnopened || hasNewerMessage) {
+            identifiers.forEach((identifier) => unopenedSessions.add(identifier));
+          }
+        });
+
+        unopenedSessionIdsRef.current = unopenedSessions;
+        updateResidentChatBadge();
+      });
+
+      return () => unsubscribe();
+    } catch (error) {
+      console.error("Error tracking chat sessions:", error);
     }
   }, []);
 
@@ -244,6 +337,7 @@ export function Layout({ children }: LayoutProps) {
         onMobileClose={() => setIsMobileOpen(false)}
         manageReportsBadge={unseenReportsCount}
         chatSupportBadge={unreadChatCount}
+        residentChatBadge={residentChatBadge}
       />
       
       {/* Mobile hamburger button */}

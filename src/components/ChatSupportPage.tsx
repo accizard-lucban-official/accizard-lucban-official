@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -87,6 +87,35 @@ export function ChatSupportPage() {
   const [deletingChat, setDeletingChat] = useState(false);
   const navigate = useNavigate();
   const { uploadSingleFile, uploadState } = useFileUpload();
+
+  const getSessionIdentifiers = (session: any) =>
+    Array.from(
+      new Set(
+        [session?.userId, session?.id, session?.firebaseUid, session?.userID].filter(Boolean)
+      )
+    );
+
+  const getUnreadCountForSession = (session: any) => {
+    const identifiers = getSessionIdentifiers(session);
+    for (const identifier of identifiers) {
+      const count = unreadCounts[identifier];
+      if (count && count > 0) {
+        return count;
+      }
+    }
+    return 0;
+  };
+
+  const totalUnreadSessions = useMemo(() => {
+    const ids = new Set<string>();
+    chatSessions.forEach((session) => {
+      const count = getUnreadCountForSession(session);
+      if (count > 0) {
+        getSessionIdentifiers(session).forEach((id) => ids.add(id));
+      }
+    });
+    return ids.size;
+  }, [chatSessions, unreadCounts]);
 
   const handleMobileBack = () => {
     setShowChatOnMobile(false);
@@ -339,10 +368,17 @@ export function ChatSupportPage() {
         
         snapshot.docs.forEach(msgDoc => {
           const data = msgDoc.data();
-          const userId = data.userId;
+          const identifiers = Array.from(
+            new Set(
+              [data.userId, data.userID].filter(Boolean)
+            )
+          );
+          const residentSenderId = data.userId || data.userID;
           // Only count messages from users (not admin messages)
-          if (userId && data.senderId === userId) {
-            counts[userId] = (counts[userId] || 0) + 1;
+          if (identifiers.length > 0 && residentSenderId && data.senderId === residentSenderId) {
+            identifiers.forEach((identifier) => {
+              counts[identifier] = (counts[identifier] || 0) + 1;
+            });
           }
         });
         
@@ -403,13 +439,14 @@ export function ChatSupportPage() {
 
   // Real-time listener for user typing status
   useEffect(() => {
-    if (!selectedSession?.userId) {
+    const primaryUserId = selectedSession?.userId || selectedSession?.id || selectedSession?.firebaseUid;
+    if (!primaryUserId) {
       setIsUserTyping(false);
       return;
     }
 
     try {
-      const chatRef = doc(db, "chats", selectedSession.userId);
+      const chatRef = doc(db, "chats", primaryUserId);
       
       const unsubscribe = onSnapshot(chatRef, (docSnapshot) => {
         if (docSnapshot.exists()) {
@@ -432,14 +469,15 @@ export function ChatSupportPage() {
     } catch (error) {
       console.error("Error setting up typing listener:", error);
     }
-  }, [selectedSession?.userId]);
+  }, [selectedSession?.userId, selectedSession?.id, selectedSession?.firebaseUid]);
 
   // Update admin typing status
   const updateAdminTypingStatus = async (isTyping: boolean) => {
-    if (!selectedSession?.userId) return;
+    const primaryUserId = selectedSession?.userId || selectedSession?.id || selectedSession?.firebaseUid;
+    if (!primaryUserId) return;
     
     try {
-      const chatRef = doc(db, "chats", selectedSession.userId);
+      const chatRef = doc(db, "chats", primaryUserId);
       await updateDoc(chatRef, {
         adminTyping: isTyping,
         adminTypingTimestamp: serverTimestamp()
@@ -455,9 +493,17 @@ export function ChatSupportPage() {
       const currentUser = auth.currentUser;
       if (!currentUser) return;
 
+      const sessionUserIds = Array.from(
+        new Set(
+          [selectedSession?.userId, selectedSession?.id, selectedSession?.firebaseUid, selectedSession?.userID].filter(Boolean)
+        )
+      );
+
+      if (sessionUserIds.length === 0) return;
+
       // Filter messages that are from the user (not admin) and not already read
       const unreadMessages = messagesToMark.filter(
-        msg => msg.senderId === selectedSession?.userId && !msg.isRead
+        msg => sessionUserIds.includes(msg.senderId) && !msg.isRead
       );
 
       if (unreadMessages.length === 0) return;
@@ -479,73 +525,92 @@ export function ChatSupportPage() {
 
   // Real-time listener for messages when a session is selected
   useEffect(() => {
-    if (!selectedSession?.userId) {
+    const primaryUserId = selectedSession?.userId || selectedSession?.id || selectedSession?.firebaseUid;
+    if (!primaryUserId) {
       setMessages([]);
+      setLoadingMessages(false);
       return;
     }
 
     setLoadingMessages(true);
-    
+
     try {
       const messagesRef = collection(db, "chat_messages");
-      
-      // Query with userId and orderBy timestamp (Firestore index enabled)
-      const q = query(
-        messagesRef,
-        where("userId", "==", selectedSession.userId),
-        orderBy("timestamp", "asc")
-      );
+      const idsToCheck = Array.from(new Set([
+        selectedSession?.userId,
+        selectedSession?.id,
+        selectedSession?.firebaseUid
+      ].filter(Boolean)));
 
-      const unsubscribe = onSnapshot(q, async (snapshot) => {
-        console.log("📨 Raw snapshot data:", snapshot.docs.map(msgDoc => ({ id: msgDoc.id, data: msgDoc.data() })));
-        
-        const messagesData = snapshot.docs.map(msgDoc => ({
-          id: msgDoc.id,
-          ...msgDoc.data()
-        })) as ChatMessage[];
-        
-        // CLIENT-SIDE SORTING: Ensure messages are properly sorted by timestamp
-        // This handles cases where Firestore's orderBy might not work correctly
-        // due to serverTimestamp() being null initially or different timestamp formats
-        messagesData.sort((a, b) => {
-          // Convert timestamps to comparable Date objects
-          const getTimestamp = (msg: ChatMessage): number => {
-            if (!msg.timestamp) return 0; // Put messages without timestamp at the start
-            
-            if (msg.timestamp?.toDate && typeof msg.timestamp.toDate === 'function') {
-              return msg.timestamp.toDate().getTime();
-            } else if (msg.timestamp instanceof Date) {
-              return msg.timestamp.getTime();
-            } else if (typeof msg.timestamp === 'number') {
-              return msg.timestamp;
-            } else if (typeof msg.timestamp === 'string') {
-              return new Date(msg.timestamp).getTime();
-            }
-            return 0;
-          };
-          
-          const timeA = getTimestamp(a);
-          const timeB = getTimestamp(b);
-          
-          return timeA - timeB; // Sort ascending (oldest first)
+      if (idsToCheck.length === 0) {
+        setMessages([]);
+        setLoadingMessages(false);
+        return;
+      }
+
+      const querySignatures = new Set<string>();
+      const queries = [];
+
+      idsToCheck.forEach((id) => {
+        const lowerKey = `userId:${id}`;
+        if (!querySignatures.has(lowerKey)) {
+          querySignatures.add(lowerKey);
+          queries.push(query(messagesRef, where("userId", "==", id), orderBy("timestamp", "asc")));
+        }
+
+        const upperKey = `userID:${id}`;
+        if (!querySignatures.has(upperKey)) {
+          querySignatures.add(upperKey);
+          queries.push(query(messagesRef, where("userID", "==", id), orderBy("timestamp", "asc")));
+        }
+      });
+
+      const messageStore = new Map<string, ChatMessage>();
+      let isMounted = true;
+
+      const getTimestampValue = (msg: ChatMessage): number => {
+        if (!msg.timestamp) return 0;
+
+        if (msg.timestamp?.toDate && typeof msg.timestamp.toDate === "function") {
+          return msg.timestamp.toDate().getTime();
+        } else if (msg.timestamp instanceof Date) {
+          return msg.timestamp.getTime();
+        } else if (typeof msg.timestamp === "number") {
+          return msg.timestamp;
+        } else if (typeof msg.timestamp === "string") {
+          return new Date(msg.timestamp).getTime();
+        }
+        return 0;
+      };
+
+      const handleSnapshot = async (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          const docId = change.doc.id;
+          if (change.type === "removed") {
+            messageStore.delete(docId);
+          } else {
+            messageStore.set(docId, { id: docId, ...change.doc.data() } as ChatMessage);
+          }
         });
-        
-        console.log("💬 Processed and sorted messages:", messagesData.map(m => ({
+
+        const mergedMessages = Array.from(messageStore.values()).sort((a, b) => getTimestampValue(a) - getTimestampValue(b));
+
+        if (!isMounted) return;
+
+        console.log("💬 Aggregated messages:", mergedMessages.map(m => ({
           id: m.id,
           sender: m.senderName,
           timestamp: m.timestamp,
           message: m.message?.substring(0, 30)
         })));
-        
-        setMessages(messagesData);
+
+        setMessages(mergedMessages);
         setLoadingMessages(false);
-        
-        // Update chat metadata with the actual latest message
-        if (messagesData.length > 0) {
-          const latestMessage = messagesData[messagesData.length - 1];
-          const chatRef = doc(db, "chats", selectedSession.userId);
-          
-          // Determine the preview text
+
+        if (mergedMessages.length > 0) {
+          const latestMessage = mergedMessages[mergedMessages.length - 1];
+          const chatRef = doc(db, "chats", primaryUserId);
+
           let previewText = latestMessage.message || "Message";
           if (latestMessage.imageUrl && !latestMessage.message) {
             previewText = "📷 Photo";
@@ -556,7 +621,7 @@ export function ChatSupportPage() {
           } else if (latestMessage.fileUrl && !latestMessage.message) {
             previewText = `📎 ${latestMessage.fileName || "File"}`;
           }
-          
+
           try {
             await updateDoc(chatRef, {
               lastMessage: previewText,
@@ -569,25 +634,30 @@ export function ChatSupportPage() {
             console.error("❌ Error updating chat metadata:", error);
           }
         }
-        
-        // Mark messages as read after loading
-        markMessagesAsRead(messagesData);
-        
-        // Scroll to bottom after messages load
+
+        markMessagesAsRead(mergedMessages);
+
         setTimeout(() => {
           messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
         }, 100);
-      }, (error) => {
-        console.error("Error loading messages:", error);
-        setLoadingMessages(false);
-      });
+      };
 
-      return () => unsubscribe();
+      const unsubscribers = queries.map((q) =>
+        onSnapshot(q, handleSnapshot, (error) => {
+          console.error("Error loading messages:", error);
+          setLoadingMessages(false);
+        })
+      );
+
+      return () => {
+        isMounted = false;
+        unsubscribers.forEach((unsub) => unsub());
+      };
     } catch (error) {
       console.error("❌ Error setting up messages listener:", error);
       setLoadingMessages(false);
     }
-  }, [selectedSession?.userId]);
+  }, [selectedSession?.userId, selectedSession?.id, selectedSession?.firebaseUid]);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -694,6 +764,7 @@ export function ChatSupportPage() {
       console.log("📱 Phone number stored:", phoneNumber);
       console.log("🖼️ Profile picture stored:", profilePictureUrl);
       setSelectedSession(newSession);
+      setSearchTerm("");
       if (isMobileView) {
         setShowChatOnMobile(true);
       }
@@ -1085,16 +1156,20 @@ export function ChatSupportPage() {
 
   return (
     <Layout>
-      <div className="-m-6 -mb-6 flex flex-col min-h-[calc(100vh-8rem)]">
-        <div className={`flex-1 grid grid-cols-1 gap-0 ${isMobileView ? "" : "lg:grid-cols-[360px_minmax(0,1fr)]"} min-h-0`}>
+      <div className="-m-6 -mb-6 flex-1 flex flex-col">
+        <div className={`grid grid-cols-1 gap-0 ${isMobileView ? "" : "lg:grid-cols-[360px_minmax(0,1fr)]"} flex-1 min-h-[calc(100vh-8rem)]`}>
           {/* Chat Sessions List */}
           {(!isMobileView || !showChatOnMobile) && (
-            <div className="h-full min-h-0">
-              <Card className="border border-gray-200 shadow-none h-full min-h-0 flex flex-col">
-              <CardHeader className="border-b bg-white rounded-t-lg">
+            <Card className="border border-gray-200 shadow-none h-full flex flex-col overflow-hidden">
+              <CardHeader className="border-b bg-white rounded-t-lg sticky top-0 z-10">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <CardTitle>Chat Sessions</CardTitle>
+                    {totalUnreadSessions > 0 && (
+                      <Badge className="bg-brand-orange hover:bg-brand-orange-400 text-white text-xs px-2 py-0 h-5">
+                        {totalUnreadSessions}
+                      </Badge>
+                    )}
                   </div>
                 </div>
                 <div className="relative pt-2">
@@ -1107,8 +1182,8 @@ export function ChatSupportPage() {
                   />
                 </div>
               </CardHeader>
-              <CardContent className="flex-1 overflow-hidden p-0 min-h-0">
-                <div className="h-full min-h-0 overflow-y-auto">
+              <CardContent className="flex-1 p-0 overflow-hidden min-h-0">
+                <div className="h-full overflow-y-auto min-h-0">
                 {/* Conditional rendering: Show search results OR chat sessions, not both */}
                 {searchTerm ? (
                   // Search Results (shown when searching)
@@ -1197,10 +1272,19 @@ export function ChatSupportPage() {
                     ) : chatSessions.length === 0 ? (
                       <div className="p-4 text-center text-gray-500">No active chat sessions.</div>
                     ) : (
-                      chatSessions.map(user => (
+                      chatSessions.map(user => {
+                        const unreadCount = getUnreadCountForSession(user);
+                        const hasUnread = unreadCount > 0;
+                        return (
                         <div
                           key={user.id}
-                          className={`p-4 border-b cursor-pointer hover:bg-gray-50 transition-colors ${selectedSession?.id === user.id ? 'bg-orange-50 border-l-4 border-l-brand-orange' : ''}`}
+                          className={`p-4 border-b cursor-pointer hover:bg-gray-50 transition-colors ${
+                            selectedSession?.id === user.id
+                              ? 'bg-orange-50 border-l-4 border-l-brand-orange'
+                              : hasUnread
+                                ? 'bg-orange-50/40'
+                                : ''
+                          }`}
                           onClick={() => handleSelectSession(user)}
                         >
                           <div className="flex items-start justify-between">
@@ -1245,11 +1329,13 @@ export function ChatSupportPage() {
                               </button>
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center space-x-2">
-                                  <span className="font-medium text-sm truncate">{user.fullName || user.userName || user.name || user.userId}</span>
+                                  <span className={`font-medium text-sm truncate ${hasUnread ? 'text-gray-900' : ''}`}>
+                                    {user.fullName || user.userName || user.name || user.userId}
+                                  </span>
                                   {/* Unread count badge */}
-                                  {unreadCounts[user.userId] > 0 && (
+                                  {hasUnread && (
                                     <Badge className="bg-brand-orange hover:bg-brand-orange-400 text-white text-xs px-2 py-0 h-5">
-                                      {unreadCounts[user.userId]}
+                                      {unreadCount}
                                     </Badge>
                                   )}
                                 </div>
@@ -1296,23 +1382,22 @@ export function ChatSupportPage() {
                             </Button>
                           </div>
                         </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                 )}
                 </div>
               </CardContent>
             </Card>
-          </div>
           )}
 
           {/* Chat Window */}
           {(!isMobileView || showChatOnMobile) && (
-            <div className="h-full min-h-0">
-              <Card className="h-full min-h-0 flex flex-col border border-gray-200 shadow-none">
+            <Card className="h-full flex flex-col border border-gray-200 shadow-none overflow-hidden">
               {selectedSession ? (
                 <>
-                  <CardHeader className="border-b bg-white rounded-t-lg">
+                  <CardHeader className="border-b bg-white rounded-t-lg sticky top-0 z-10">
                     <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
                       {isMobileView && showChatOnMobile && (
@@ -1443,7 +1528,7 @@ export function ChatSupportPage() {
                       </div>
                     )}
                   </CardHeader>
-                  <CardContent className="flex-1 flex flex-col overflow-hidden p-0 min-h-0">
+                  <CardContent className="flex-1 flex flex-col p-0 overflow-hidden min-h-0">
                     <div className="flex flex-col items-center justify-center gap-6 w-full px-6 pt-6 pb-4 border-b border-gray-100 bg-white">
                       <img src="/accizard-uploads/accizard-logo-svg.svg" alt="Accizard Logo" className="w-32 h-32 mx-auto" />
                       <img src="/accizard-uploads/accizard-logotype-svg.svg" alt="Accizard Logotype" className="w-64 h-auto mx-auto" />
@@ -1747,7 +1832,7 @@ export function ChatSupportPage() {
                       <div ref={messagesEndRef} />
                     </div>
                   </CardContent>
-                  <div className="border-t p-4 bg-white rounded-b-lg">
+                  <div className="border-t p-4 bg-white rounded-b-lg sticky bottom-0">
                     {/* Attachment Previews */}
                     {attachmentPreviews.length > 0 && (
                       <div className="mb-3 space-y-2 max-h-48 overflow-y-auto">
@@ -1949,8 +2034,7 @@ export function ChatSupportPage() {
                 </CardContent>
               )}
             </Card>
-          </div>
-        )}
+          )}
         </div>
       </div>
 
