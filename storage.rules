@@ -73,7 +73,22 @@ service firebase.storage {
     }
 
     // Optional enhanced paths
+    // Profile pictures with folder structure: profile-pictures-web/{userId}/{fileName}
     match /profile-pictures-web/{userId}/{fileName} {
+      allow read: if true;
+      allow write: if isAuthenticated() && isImage() && isValidSize();
+      allow delete: if isAuthenticated();
+    }
+
+    // Profile pictures with flat structure: profile-pictures-web/{fileName}
+    match /profile-pictures-web/{fileName} {
+      allow read: if true;
+      allow write: if isAuthenticated() && isImage() && isValidSize();
+      allow delete: if isAuthenticated();
+    }
+
+    // Cover images: cover-images-web/{fileName}
+    match /cover-images-web/{fileName} {
       allow read: if true;
       allow write: if isAuthenticated() && isImage() && isValidSize();
       allow delete: if isAuthenticated();

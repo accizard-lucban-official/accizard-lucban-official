@@ -41,6 +41,8 @@ export function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadingCover, setUploadingCover] = useState(false);
+  const [pendingProfilePicture, setPendingProfilePicture] = useState<string | null>(null);
+  const [pendingCoverImage, setPendingCoverImage] = useState<string | null>(null);
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [notes, setNotes] = useState<any[]>([]);
@@ -131,6 +133,120 @@ export function ProfilePage() {
     navigate('/login');
   };
 
+  // Confirm profile picture change
+  const confirmProfilePicture = async () => {
+    if (!pendingProfilePicture || !userRole) return;
+
+    setSaving(true);
+    try {
+      const adminLoggedIn = localStorage.getItem("adminLoggedIn") === "true";
+      if (adminLoggedIn) {
+        const username = localStorage.getItem("adminUsername");
+        if (username) {
+          const q = query(collection(db, "admins"), where("username", "==", username));
+          const querySnapshot = await getDocs(q);
+          if (!querySnapshot.empty) {
+            const docRef = doc(db, "admins", querySnapshot.docs[0].id);
+            await updateDoc(docRef, {
+              profilePicture: pendingProfilePicture
+            });
+            setProfile(prev => ({ ...prev, profilePicture: pendingProfilePicture }));
+            setPendingProfilePicture(null);
+            toast.success("Profile picture saved successfully!");
+          }
+        }
+      } else {
+        // Super admin user - update superAdmin collection by email
+        const user = auth.currentUser;
+        if (user && user.email) {
+          const q = query(collection(db, "superAdmin"), where("email", "==", user.email));
+          const querySnapshot = await getDocs(q);
+          if (!querySnapshot.empty) {
+            const docRef = doc(db, "superAdmin", querySnapshot.docs[0].id);
+            await updateDoc(docRef, {
+              profilePicture: pendingProfilePicture
+            });
+            setProfile(prev => ({ ...prev, profilePicture: pendingProfilePicture }));
+            setPendingProfilePicture(null);
+            toast.success("Profile picture saved successfully!");
+          } else {
+            toast.error("Super admin profile not found in database.");
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error saving profile picture:", error);
+      toast.error("Failed to save profile picture.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Cancel profile picture change
+  const cancelProfilePicture = () => {
+    const originalPicture = userRole?.profilePicture || "/accizard-uploads/login-signup-cover.png";
+    setProfile(prev => ({ ...prev, profilePicture: originalPicture }));
+    setPendingProfilePicture(null);
+    toast.info("Profile picture change cancelled.");
+  };
+
+  // Confirm cover image change
+  const confirmCoverImage = async () => {
+    if (!pendingCoverImage || !userRole) return;
+
+    setSaving(true);
+    try {
+      const adminLoggedIn = localStorage.getItem("adminLoggedIn") === "true";
+      if (adminLoggedIn) {
+        const username = localStorage.getItem("adminUsername");
+        if (username) {
+          const q = query(collection(db, "admins"), where("username", "==", username));
+          const querySnapshot = await getDocs(q);
+          if (!querySnapshot.empty) {
+            const docRef = doc(db, "admins", querySnapshot.docs[0].id);
+            await updateDoc(docRef, {
+              coverImage: pendingCoverImage
+            });
+            setProfile(prev => ({ ...prev, coverImage: pendingCoverImage }));
+            setPendingCoverImage(null);
+            toast.success("Cover image saved successfully!");
+          }
+        }
+      } else {
+        // Super admin user - update superAdmin collection by email
+        const user = auth.currentUser;
+        if (user && user.email) {
+          const q = query(collection(db, "superAdmin"), where("email", "==", user.email));
+          const querySnapshot = await getDocs(q);
+          if (!querySnapshot.empty) {
+            const docRef = doc(db, "superAdmin", querySnapshot.docs[0].id);
+            await updateDoc(docRef, {
+              coverImage: pendingCoverImage
+            });
+            setProfile(prev => ({ ...prev, coverImage: pendingCoverImage }));
+            setPendingCoverImage(null);
+            toast.success("Cover image saved successfully!");
+          } else {
+            toast.error("Super admin profile not found in database.");
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error saving cover image:", error);
+      toast.error("Failed to save cover image.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Cancel cover image change
+  const cancelCoverImage = () => {
+    const originalCover = userRole?.coverImage || "";
+    setProfile(prev => ({ ...prev, coverImage: originalCover }));
+    setPendingCoverImage(null);
+    toast.info("Cover image change cancelled.");
+  };
+
   const handleProfilePictureUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -159,8 +275,9 @@ export function ProfilePage() {
         const snapshot = await uploadBytes(storageRef, file);
         const downloadURL = await getDownloadURL(snapshot.ref);
 
+        setPendingProfilePicture(downloadURL);
         setProfile(prev => ({ ...prev, profilePicture: downloadURL }));
-        toast.success("Profile picture uploaded successfully!");
+        toast.success("Profile picture uploaded! Click the checkmark to confirm.");
       } catch (error: any) {
         console.error("Error uploading profile picture:", error);
           toast.error(`Failed to upload profile picture: ${error.message || 'Unknown error'}`);
@@ -198,8 +315,9 @@ export function ProfilePage() {
         const snapshot = await uploadBytes(storageRef, file);
         const downloadURL = await getDownloadURL(snapshot.ref);
 
+        setPendingCoverImage(downloadURL);
         setProfile(prev => ({ ...prev, coverImage: downloadURL }));
-        toast.success("Cover image uploaded successfully!");
+        toast.success("Cover image uploaded! Click the checkmark to confirm.");
       } catch (error: any) {
         console.error("Error uploading cover image:", error);
         toast.error(`Failed to upload cover image: ${error.message || 'Unknown error'}`);
@@ -218,8 +336,11 @@ export function ProfilePage() {
         username: userRole.username || "",
         email: userRole.email || "",
         profilePicture: userRole.profilePicture || "/accizard-uploads/login-signup-cover.png",
-        coverImage: ""
+        coverImage: userRole.coverImage || ""
       });
+      // Clear any pending changes when userRole changes
+      setPendingProfilePicture(null);
+      setPendingCoverImage(null);
     }
   }, [userRole, roleLoading]);
 
@@ -399,13 +520,57 @@ export function ProfilePage() {
       <div className="max-w-6xl mx-auto p-6">
         {/* Cover Image Section */}
         <div className="relative mb-6">
-          <div className="h-48 bg-gray-200 rounded-lg overflow-hidden">
+          <div className="h-48 bg-gray-200 rounded-lg overflow-hidden relative">
             {profile.coverImage ? (
-              <img 
-                src={profile.coverImage} 
-                alt="Cover" 
-                className="w-full h-full object-cover"
-              />
+              <>
+                <img 
+                  src={profile.coverImage} 
+                  alt="Cover" 
+                  className="w-full h-full object-cover"
+                />
+                {pendingCoverImage && (
+                  <div className="absolute top-2 right-2 flex gap-2 z-10">
+                    <Button
+                      size="sm"
+                      onClick={confirmCoverImage}
+                      disabled={saving}
+                      className="h-8 w-8 p-0 bg-green-500 hover:bg-green-600 text-white rounded-full shadow-lg"
+                      title="Confirm cover image"
+                    >
+                      <Check className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={cancelCoverImage}
+                      disabled={saving}
+                      className="h-8 w-8 p-0 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-lg"
+                      title="Cancel cover image change"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
+                {!pendingCoverImage && (
+                  <Button
+                    variant="outline"
+                    onClick={() => document.getElementById('cover-image')?.click()}
+                    disabled={uploadingCover || saving}
+                    className="absolute top-2 right-2 bg-white/90 hover:bg-white shadow-lg"
+                    size="sm"
+                  >
+                    <Camera className="h-4 w-4 mr-2" />
+                    Change
+                  </Button>
+                )}
+                <input
+                  id="cover-image"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleCoverImageUpload}
+                  className="hidden"
+                  disabled={uploadingCover || saving}
+                />
+              </>
             ) : (
               <div className="w-full h-full bg-gradient-to-r from-gray-200 to-gray-300 flex items-center justify-center">
                 <Button
@@ -431,37 +596,60 @@ export function ProfilePage() {
           
           {/* Profile Picture */}
           <div className="absolute -bottom-8 left-6">
-                    <div className="relative">
+            <div className="relative">
               <Avatar className="w-24 h-24 border-4 border-white shadow-lg">
-                        <AvatarImage src={profile.profilePicture} alt={profile.name} />
+                <AvatarImage src={profile.profilePicture} alt={profile.name} />
                 <AvatarFallback className="bg-gray-100 text-gray-600 text-lg">
-                          {profile.name.split(' ').map(n => n[0]).join('')}
-                        </AvatarFallback>
-                      </Avatar>
-              <label 
-                htmlFor="profile-picture" 
-                className={`absolute bottom-0 right-0 bg-brand-orange hover:bg-brand-orange/90 text-white p-2 rounded-full cursor-pointer shadow-lg ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}
-              >
-                        {uploading ? (
-                          <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
-                        ) : (
-                          <Camera className="h-4 w-4" />
-                        )}
-                <input 
-                  id="profile-picture" 
-                  type="file" 
-                  accept="image/*" 
-                  onChange={handleProfilePictureUpload} 
-                  className="hidden" 
-                  disabled={uploading} 
-                />
-                      </label>
-                    </div>
-                    </div>
-                  </div>
+                  {profile.name.split(' ').map(n => n[0]).join('')}
+                </AvatarFallback>
+              </Avatar>
+              {pendingProfilePicture ? (
+                <div className="absolute -top-2 -right-2 flex gap-1 z-10">
+                  <Button
+                    size="sm"
+                    onClick={confirmProfilePicture}
+                    disabled={saving}
+                    className="h-7 w-7 p-0 bg-green-500 hover:bg-green-600 text-white rounded-full shadow-lg"
+                    title="Confirm profile picture"
+                  >
+                    <Check className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={cancelProfilePicture}
+                    disabled={saving}
+                    className="h-7 w-7 p-0 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-lg"
+                    title="Cancel profile picture change"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ) : (
+                <label 
+                  htmlFor="profile-picture" 
+                  className={`absolute bottom-0 right-0 bg-brand-orange hover:bg-brand-orange/90 text-white p-2 rounded-full cursor-pointer shadow-lg ${uploading || saving ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {uploading ? (
+                    <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  ) : (
+                    <Camera className="h-4 w-4" />
+                  )}
+                  <input 
+                    id="profile-picture" 
+                    type="file" 
+                    accept="image/*" 
+                    onChange={handleProfilePictureUpload} 
+                    className="hidden" 
+                    disabled={uploading || saving} 
+                  />
+                </label>
+              )}
+            </div>
+          </div>
+        </div>
 
         {/* Two Column Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 mt-12">
@@ -518,43 +706,6 @@ export function ProfilePage() {
 
           {/* Right Column - Activity Logs and Notes */}
           <div className="lg:col-span-3 space-y-6">
-            {/* Personal Activity Log */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg font-semibold">Personal Activity Log</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {logsLoading ? (
-                  <div className="text-center text-gray-500 py-8">Loading activity logs...</div>
-                ) : activityLogs.length === 0 ? (
-                  <div className="text-center text-gray-500 py-8">No activity logs found.</div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Created Date</TableHead>
-                          <TableHead>Action Type</TableHead>
-                          <TableHead>Action</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {activityLogs.map((log, idx) => (
-                          <TableRow key={idx}>
-                            <TableCell className="text-sm">
-                              {log.timestamp ? new Date(log.timestamp).toLocaleDateString() : '-'}
-                            </TableCell>
-                            <TableCell className="text-sm font-medium">{log.action || '-'}</TableCell>
-                            <TableCell className="text-sm">{log.details || log.description || '-'}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
             {/* Personal Notes */}
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
@@ -649,6 +800,43 @@ export function ProfilePage() {
                         </div>
                       </div>
                     ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Personal Activity Log */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg font-semibold">Personal Activity Log</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {logsLoading ? (
+                  <div className="text-center text-gray-500 py-8">Loading activity logs...</div>
+                ) : activityLogs.length === 0 ? (
+                  <div className="text-center text-gray-500 py-8">No activity logs found.</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Created Date</TableHead>
+                          <TableHead>Action Type</TableHead>
+                          <TableHead>Action</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {activityLogs.map((log, idx) => (
+                          <TableRow key={idx}>
+                            <TableCell className="text-sm">
+                              {log.timestamp ? new Date(log.timestamp).toLocaleDateString() : '-'}
+                            </TableCell>
+                            <TableCell className="text-sm font-medium">{log.action || '-'}</TableCell>
+                            <TableCell className="text-sm">{log.details || log.description || '-'}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
                   </div>
                 )}
               </CardContent>

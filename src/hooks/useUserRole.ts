@@ -11,6 +11,7 @@ export interface UserRole {
   position?: string;
   idNumber?: string;
   profilePicture?: string;
+  coverImage?: string;
   permissions?: string[];
 }
 
@@ -41,6 +42,7 @@ export function useUserRole() {
                 position: data.position || "Admin",
                 idNumber: data.idNumber || "", // Add idNumber field
                 profilePicture: data.profilePicture || "/accizard-uploads/login-signup-cover.png", // Add profilePicture field with default
+                coverImage: data.coverImage || "", // Add coverImage field
                 permissions: data.permissions || ["view_reports", "manage_residents"]
               });
               setLoading(false);
@@ -64,6 +66,7 @@ export function useUserRole() {
                 position: data.position || "Super Admin",
                 idNumber: data.idNumber || "", // Add idNumber field
                 profilePicture: data.profilePicture || "/accizard-uploads/login-signup-cover.png", // Add profilePicture field with default
+                coverImage: data.coverImage || "", // Add coverImage field
                 permissions: data.permissions || ["all"] // Super admins have all permissions
               });
               setLoading(false);
@@ -79,6 +82,7 @@ export function useUserRole() {
               position: "Super Admin",
               idNumber: "", // No idNumber for fallback
               profilePicture: authUser.photoURL || "/accizard-uploads/login-signup-cover.png", // Use Firebase Auth photoURL or default
+              coverImage: "", // No coverImage for fallback
               permissions: ["all"]
             });
           }
