@@ -1,6 +1,6 @@
 import * as React from "react"
 import { format } from "date-fns"
-import { Calendar as CalendarIcon, ChevronDown } from "lucide-react"
+import { Calendar as CalendarIcon, ChevronDown, X } from "lucide-react"
 import { DateRange } from "react-day-picker"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -33,6 +33,11 @@ export function DateRangePicker({
     }
   }
 
+  const handleClear = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onChange(undefined);
+  };
+
   return (
     <div className={cn("grid gap-2", className)}>
       <Popover open={open} onOpenChange={setOpen}>
@@ -41,7 +46,7 @@ export function DateRangePicker({
             id="date"
             variant={"outline"}
             className={cn(
-              "w-full justify-start text-left font-normal",
+              "w-full justify-start text-left font-normal relative",
               !value && "text-muted-foreground"
             )}
           >
@@ -49,16 +54,26 @@ export function DateRangePicker({
             {value?.from ? (
               value.to ? (
                 <>
-                  {format(value.from, "LLL dd, y")} -{" "}
-                  {format(value.to, "LLL dd, y")}
+                  {format(value.from, "MM/dd/yy")} -{" "}
+                  {format(value.to, "MM/dd/yy")}
                 </>
               ) : (
-                format(value.from, "LLL dd, y")
+                format(value.from, "MM/dd/yy")
               )
             ) : (
               <span>Pick a date range</span>
             )}
-            <ChevronDown className="ml-auto h-4 w-4 text-muted-foreground" />
+            {value?.from && value?.to && (
+              <button
+                type="button"
+                onClick={handleClear}
+                className="ml-auto mr-2 h-4 w-4 flex items-center justify-center rounded-sm hover:bg-gray-200 text-muted-foreground hover:text-foreground"
+                onMouseDown={(e) => e.preventDefault()}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+            <ChevronDown className={cn("h-4 w-4 text-muted-foreground", value?.from && value?.to && "hidden")} />
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-auto p-0" align="start">

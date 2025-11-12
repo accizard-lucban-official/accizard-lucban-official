@@ -766,23 +766,11 @@ export function AnnouncementsPage() {
               </div>
 
               {/* Date Range Filter */}
-              <div className="flex items-end gap-3">
-                <DateRangePicker
-                  value={dateRange}
-                  onChange={setDateRange}
-                  className="w-[260px]"
-                />
-                {(dateRange?.from || dateRange?.to) && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setDateRange(undefined)}
-                    className="h-9"
-                  >
-                    Clear
-                  </Button>
-                )}
-              </div>
+              <DateRangePicker
+                value={dateRange}
+                onChange={setDateRange}
+                className="w-auto"
+              />
 
               {/* Type Filter */}
               <Select value={typeFilter} onValueChange={setTypeFilter}>

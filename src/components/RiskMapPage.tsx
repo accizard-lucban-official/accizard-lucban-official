@@ -19,6 +19,7 @@ import { cn, ensureOk } from "@/lib/utils";
 import { Layout } from "./Layout";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { DateRange } from "react-day-picker";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { MapboxMap } from "./MapboxMap";
 import { usePins } from "@/hooks/usePins";
 import { Pin, PinType } from "@/types/pin";
@@ -1319,76 +1320,11 @@ ${placemarks}
                           <div className="flex flex-col space-y-2">
                             <div>
                               <label className="text-xs font-semibold text-gray-700 mb-1.5 block">Date Range</label>
-                              <div className="grid grid-cols-2 gap-2">
-                                <div>
-                                  <Popover>
-                                    <PopoverTrigger asChild>
-                                      <Button
-                                        variant="outline"
-                                        className={cn(
-                                          "w-full justify-start text-left font-normal h-10 border-gray-300 hover:border-gray-300 hover:bg-gray-100",
-                                          !date?.from && "text-muted-foreground"
-                                        )}
-                                      >
-                                        <CalendarIcon className="mr-2 h-4 w-4" />
-                                        {date?.from ? (
-                                          format(date.from, "LLL dd, y")
-                                        ) : (
-                                          <span>Start date</span>
-                                        )}
-                                      </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-auto p-0" align="start">
-                                      <Calendar
-                                        initialFocus
-                                        mode="single"
-                                        defaultMonth={date?.from}
-                                        selected={date?.from}
-                                        onSelect={(selectedDate) => {
-                                          setDate(prev => ({
-                                            from: selectedDate,
-                                            to: prev?.to
-                                          }));
-                                        }}
-                                      />
-                                    </PopoverContent>
-                                  </Popover>
-                                </div>
-                                <div>
-                                  <Popover>
-                                    <PopoverTrigger asChild>
-                                      <Button
-                                        variant="outline"
-                                        className={cn(
-                                          "w-full justify-start text-left font-normal h-10 border-gray-300 hover:border-gray-300 hover:bg-gray-100",
-                                          !date?.to && "text-muted-foreground"
-                                        )}
-                                      >
-                                        <CalendarIcon className="mr-2 h-4 w-4" />
-                                        {date?.to ? (
-                                          format(date.to, "LLL dd, y")
-                                        ) : (
-                                          <span>End date</span>
-                                        )}
-                                      </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-auto p-0" align="start">
-                                      <Calendar
-                                        initialFocus
-                                        mode="single"
-                                        defaultMonth={date?.to || date?.from}
-                                        selected={date?.to}
-                                        onSelect={(selectedDate) => {
-                                          setDate(prev => ({
-                                            from: prev?.from,
-                                            to: selectedDate
-                                          }));
-                                        }}
-                                      />
-                                    </PopoverContent>
-                                  </Popover>
-                                </div>
-                              </div>
+                              <DateRangePicker
+                                value={date}
+                                onChange={setDate}
+                                className="w-auto"
+                              />
                             </div>
                             <div>
                               <label className="text-xs font-semibold text-gray-700 mb-1.5 block">Quick Filters</label>

@@ -29,7 +29,7 @@ function Calendar({
         caption_label: "sr-only",
         caption_dropdowns: "flex items-center gap-1",
         dropdown:
-          "rounded-md border border-input bg-background py-0.5 px-2 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&>label]:inline-flex [&>label]:items-center [&>label>span]:sr-only",
+          "rounded-md border border-input bg-background py-2 px-3 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&>label]:inline-flex [&>label]:items-center [&>label>span]:sr-only",
         dropdown_month: "capitalize min-w-[6.5rem]",
         dropdown_year: "min-w-[3.75rem]",
         nav: "flex items-center space-x-1",

@@ -3974,25 +3974,11 @@ useEffect(() => {
               </div>
 
           {/* Date Range Filter */}
-          <div className="flex items-end gap-3">
-            <div>
-              <DateRangePicker
-                value={date}
-                onChange={setDate}
-                className="w-[260px]"
-              />
-            </div>
-            {(date?.from || date?.to) && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setDate(undefined)}
-                className="h-9"
-              >
-                Clear
-              </Button>
-            )}
-          </div>
+          <DateRangePicker
+            value={date}
+            onChange={setDate}
+            className="w-auto"
+          />
 
               {/* Type Filter */}
               <Select value={typeFilter} onValueChange={setTypeFilter}>

@@ -33,22 +33,26 @@ service firebase.storage {
 
     match /profile-picture/{allPaths=**} {
       allow read: if true;
-      allow write: if isAuthenticated();
+      allow write: if isAuthenticated() && isImage() && isValidSize();
+      allow delete: if isAuthenticated();
     }
 
     match /profile_pictures/{allPaths=**} {
       allow read: if true;
-      allow write: if isAuthenticated();
+      allow write: if isAuthenticated() && isImage() && isValidSize();
+      allow delete: if isAuthenticated();
     }
 
     match /report_images/{allPaths=**} {
       allow read: if true;
-      allow write: if isAuthenticated();
+      allow write: if isAuthenticated() && (isImage() || isVideo()) && isValidSize();
+      allow delete: if isAuthenticated();
     }
 
     match /valid_ids/{allPaths=**} {
       allow read: if true;
-      allow write: if isAuthenticated();
+      allow write: if isAuthenticated() && isImage() && isValidSize();
+      allow delete: if isAuthenticated();
     }
 
     // Chat attachments
@@ -72,11 +76,13 @@ service firebase.storage {
     match /profile-pictures-web/{userId}/{fileName} {
       allow read: if true;
       allow write: if isAuthenticated() && isImage() && isValidSize();
+      allow delete: if isAuthenticated();
     }
 
     match /validIds/{userId}/{fileName} {
       allow read: if isAuthenticated();
       allow write: if isAuthenticated() && isImage() && isValidSize();
+      allow delete: if isAuthenticated();
     }
 
     match /announcements/{announcementId}/{fileName} {
@@ -85,9 +91,27 @@ service firebase.storage {
       allow delete: if isAuthenticated();
     }
 
+    match /announcements/{announcementId}/media/{fileName} {
+      allow read: if true;
+      allow write: if isAuthenticated() && (isImage() || isDocument() || isVideo() || isAudio()) && isValidSize();
+      allow delete: if isAuthenticated();
+    }
+
     match /reports/{reportId}/{fileName} {
       allow read: if isAuthenticated();
       allow write: if isAuthenticated() && (isImage() || isDocument()) && isValidSize();
+      allow delete: if isAuthenticated();
+    }
+
+    match /reports/{reportId}/documents/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isDocument() && isValidSize();
+      allow delete: if isAuthenticated();
+    }
+
+    match /reports/{reportId}/media/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && (isImage() || isDocument() || isVideo() || isAudio()) && isValidSize();
       allow delete: if isAuthenticated();
     }
 

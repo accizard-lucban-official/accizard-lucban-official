@@ -9,13 +9,15 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Search, Plus, Edit, Trash2, Shield, ShieldOff, ShieldCheck, ShieldX, Eye, User, FileText, Calendar, CheckSquare, Square, UserPlus, EyeOff, ChevronUp, ChevronDown, ArrowUp, ArrowDown, ArrowUpDown, Upload, X, FileDown, Camera, Check } from "lucide-react";
+import { Search, Plus, Edit, Trash2, Shield, ShieldOff, ShieldCheck, ShieldX, Eye, User, FileText, Calendar as CalendarIcon, CheckSquare, Square, UserPlus, EyeOff, ChevronUp, ChevronDown, ArrowUp, ArrowDown, ArrowUpDown, Upload, X, FileDown, Camera, Check } from "lucide-react";
 import { Layout } from "./Layout";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
-import { db, deleteResidentUserFunction, storage } from "@/lib/firebase";
+import { db, deleteResidentUserFunction, storage, auth } from "@/lib/firebase";
 import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
 import { ref, getDownloadURL } from "firebase/storage";
+import { createUserWithEmailAndPassword, sendEmailVerification } from "firebase/auth";
+import { uploadProfilePicture, uploadValidIdImage } from "@/lib/storage";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/components/ui/use-toast";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -24,6 +26,9 @@ import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DateRange } from "react-day-picker";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { format } from "date-fns";
 
 // Add this helper at the top (after imports):
 function formatTimeNoSeconds(time: string | number | null | undefined) {
@@ -39,6 +44,52 @@ function formatTimeNoSeconds(time: string | number | null | undefined) {
   }
   if (isNaN(dateObj.getTime())) return '-';
   return dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+}
+
+// Helper function to parse MM/DD/YYYY format and convert to yyyy-MM-dd
+function parseMMDDYYYY(input: string): string {
+  if (!input) return "";
+  
+  // Check if input matches MM/DD/YYYY format
+  const mmddyyyyPattern = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
+  const match = input.match(mmddyyyyPattern);
+  
+  if (match) {
+    const month = parseInt(match[1], 10);
+    const day = parseInt(match[2], 10);
+    const year = parseInt(match[3], 10);
+    
+    // Validate date
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31 && year >= 1900 && year <= new Date().getFullYear()) {
+      const date = new Date(year, month - 1, day);
+      if (date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day) {
+        return format(date, "yyyy-MM-dd");
+      }
+    }
+  }
+  
+  // If not MM/DD/YYYY format, try to parse as is
+  const date = new Date(input);
+  if (!isNaN(date.getTime())) {
+    return format(date, "yyyy-MM-dd");
+  }
+  
+  return input; // Return as is if can't parse
+}
+
+// Helper function to format yyyy-MM-dd to MM/DD/YYYY for display in input
+function formatToMMDDYYYY(dateString: string): string {
+  if (!dateString) return "";
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return dateString;
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+    const year = date.getFullYear();
+    return `${month}/${day}/${year}`;
+  } catch {
+    return dateString;
+  }
 }
 
 const ADMIN_POSITIONS_COLLECTION = "adminPositions";
@@ -89,16 +140,66 @@ export function ManageUsersPage() {
     profilePicture: ""
   });
   const [newResident, setNewResident] = useState({
-    fullName: "",
+    firstName: "",
+    lastName: "",
     phoneNumber: "",
     email: "",
-    barangay: "",
+    password: "",
+    province: "",
     cityTown: "",
-    homeAddress: "",
-    validId: "",
-    validIdUrl: "",
-    additionalInfo: ""
+    houseNumberStreetSubdivision: "",
+    barangay: "",
+    birthday: "",
+    gender: "",
+    civilStatus: "",
+    religion: "",
+    bloodType: "",
+    pwdStatus: "",
+    profilePicture: "",
+    validIdType: "",
+    validIdImage: "",
+    validIdUrl: ""
   });
+  const [residentFormStep, setResidentFormStep] = useState(1);
+  const [birthdayInput, setBirthdayInput] = useState("");
+  const [previewBirthdayInput, setPreviewBirthdayInput] = useState("");
+  const [barangaySuggestions, setBarangaySuggestions] = useState<string[]>([]);
+  const [showBarangaySuggestions, setShowBarangaySuggestions] = useState(false);
+  
+  const barangayOptions = [
+    "Abang",
+    "Aliliw",
+    "Atulinao",
+    "Ayuti",
+    "Barangay 1",
+    "Barangay 2",
+    "Barangay 3",
+    "Barangay 4",
+    "Barangay 5",
+    "Barangay 6",
+    "Barangay 7",
+    "Barangay 8",
+    "Barangay 9",
+    "Barangay 10",
+    "Igang",
+    "Kabatete",
+    "Kakawit",
+    "Kalangay",
+    "Kalyaat",
+    "Kilib",
+    "Kulapi",
+    "Mahabang Parang",
+    "Malupak",
+    "Manasa",
+    "May-it",
+    "Nagsinamo",
+    "Nalunao",
+    "Palola",
+    "Piis",
+    "Samil",
+    "Tiawe",
+    "Tinamnan"
+  ];
   const [adminUsers, setAdminUsers] = useState<any[]>([]);
   const [residents, setResidents] = useState<any[]>([]);
 
@@ -248,13 +349,47 @@ export function ManageUsersPage() {
            passwordError === "";
   };
 
-  // Validation function for new resident
-  const isNewResidentValid = () => {
-    return newResident.fullName.trim() !== "" && 
+  // Step-specific validation functions
+  const isStep1Valid = () => {
+    return newResident.firstName.trim() !== "" && 
+           newResident.lastName.trim() !== "" && 
            newResident.phoneNumber.trim() !== "" && 
            newResident.email.trim() !== "" && 
-           newResident.barangay.trim() !== "" && 
-           newResident.cityTown.trim() !== "";
+           newResident.password.trim() !== "" &&
+           passwordError === "";
+  };
+
+  const isStep2Valid = () => {
+    return newResident.birthday.trim() !== "" && 
+           newResident.gender.trim() !== "" && 
+           newResident.civilStatus.trim() !== "" && 
+           newResident.religion.trim() !== "" && 
+           newResident.bloodType.trim() !== "" && 
+           newResident.pwdStatus.trim() !== "";
+  };
+
+  const isStep3Valid = () => {
+    return newResident.barangay.trim() !== "" && 
+           newResident.cityTown.trim() !== "" &&
+           newResident.province.trim() !== "";
+  };
+
+  const isStep4Valid = () => {
+    return newResident.profilePicture.trim() !== "";
+  };
+
+  const isStep5Valid = () => {
+    return newResident.validIdType.trim() !== "" && 
+           newResident.validIdImage.trim() !== "";
+  };
+
+  // Validation function for new resident (overall)
+  const isNewResidentValid = () => {
+    return isStep1Valid() && 
+           isStep2Valid() && 
+           isStep3Valid() && 
+           isStep4Valid() && 
+           isStep5Valid();
   };
 
   // Add state for residentReportsCount
@@ -360,8 +495,10 @@ export function ManageUsersPage() {
             userId: userId || `RID-${docSnap.id.slice(-6)}`,
             fullName: data.fullName || data.name || "Unknown",
             phoneNumber: data.phoneNumber || data.phone || "N/A",
-            barangay: data.barangay || "Unknown",
+            province: data.province || "",
             cityTown: data.cityTown || data.city || "Unknown",
+            houseNumberStreetSubdivision: data.houseNumberStreetSubdivision || "",
+            barangay: data.barangay || "Unknown",
             profilePicture: profilePicture,  // Use the resolved value
             validIdImage: validIdImage,  // Use the resolved value (now a download URL if it was a path)
             validIdUrl: validIdImage,  // Also set validIdUrl for backward compatibility
@@ -745,6 +882,7 @@ export function ManageUsersPage() {
     console.log("📋 All resident fields:", Object.keys(resident));
     
     setSelectedResident(resident);
+    setPreviewBirthdayInput(resident?.birthday ? formatToMMDDYYYY(resident.birthday) : "");
     setShowResidentPreview(true);
   };
 
@@ -794,8 +932,10 @@ export function ManageUsersPage() {
       const updateData: any = {
         fullName: selectedResident.fullName,
         phoneNumber: selectedResident.phoneNumber,
-        barangay: selectedResident.barangay,
+        province: selectedResident.province,
         cityTown: selectedResident.cityTown,
+        houseNumberStreetSubdivision: selectedResident.houseNumberStreetSubdivision,
+        barangay: selectedResident.barangay,
         homeAddress: selectedResident.homeAddress,
         email: selectedResident.email,
         validIdUrl: selectedResident.validIdUrl || selectedResident.validIdImage || "",
@@ -853,26 +993,24 @@ export function ManageUsersPage() {
       }
 
       try {
-        // Convert to base64
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const result = e.target?.result as string;
-          setSelectedResident({
-            ...selectedResident,
-            validIdUrl: result,
-            validIdImage: result
-          });
-          
-          toast({
-            title: 'Success',
-            description: 'ID image uploaded successfully'
-          });
-        };
-        reader.readAsDataURL(file);
-      } catch (error) {
+        // Use resident's firebaseUid, userId, or email as identifier
+        const userId = selectedResident.firebaseUid || selectedResident.userId || selectedResident.email || `resident-${selectedResident.id}`;
+        const result = await uploadValidIdImage(file, userId);
+        setSelectedResident({
+          ...selectedResident,
+          validIdUrl: result.url,
+          validIdImage: result.url
+        });
+        
+        toast({
+          title: 'Success',
+          description: 'ID image uploaded successfully'
+        });
+      } catch (error: any) {
+        console.error('Error uploading valid ID image:', error);
         toast({
           title: 'Upload failed',
-          description: 'Failed to upload image. Please try again.',
+          description: error.message || 'Failed to upload image. Please try again.',
           variant: 'destructive'
         });
       }
@@ -1097,8 +1235,43 @@ export function ManageUsersPage() {
   // Add resident with auto-incremented userId
   const handleAddResident = async (newResident: any) => {
     setIsAddingResident(true);
+    let firebaseUser: any = null;
+    
     try {
-      // Fetch all userIds and find the max number
+      // Step 1: Create Firebase Authentication account
+      try {
+        firebaseUser = await createUserWithEmailAndPassword(
+          auth,
+          newResident.email,
+          newResident.password
+        );
+        
+        // Step 2: Send verification email
+        await sendEmailVerification(firebaseUser.user);
+        console.log("✅ Verification email sent to:", newResident.email);
+      } catch (authError: any) {
+        console.error("Firebase Auth error:", authError);
+        let errorMessage = 'Failed to create authentication account. ';
+        
+        if (authError.code === 'auth/email-already-in-use') {
+          errorMessage = 'This email is already registered. Please use a different email.';
+        } else if (authError.code === 'auth/invalid-email') {
+          errorMessage = 'Invalid email address. Please check and try again.';
+        } else if (authError.code === 'auth/weak-password') {
+          errorMessage = 'Password is too weak. Please use a stronger password.';
+        } else {
+          errorMessage += authError.message || 'Please try again.';
+        }
+        
+        toast({
+          title: 'Authentication Error',
+          description: errorMessage,
+          variant: 'destructive'
+        });
+        throw authError; // Stop execution if Auth fails
+      }
+
+      // Step 3: Fetch all userIds and find the max number
       const querySnapshot = await getDocs(collection(db, "users"));
       // Extract the number from userId if it matches 'RID-[Number]'
       const userIds = querySnapshot.docs.map(doc => {
@@ -1114,33 +1287,73 @@ export function ManageUsersPage() {
       const nextUserId = maxUserId + 1;
       const formattedUserId = `RID-${nextUserId}`;
       const now = new Date();
-      const docRef = await addDoc(collection(db, "users"), {
-        ...newResident,
+      
+      // Step 4: Map form fields to Firestore field names
+      const fullName = `${newResident.firstName.trim()} ${newResident.lastName.trim()}`.trim();
+      const residentData: any = {
+        fullName: fullName,
+        firstName: newResident.firstName,
+        lastName: newResident.lastName,
+        phoneNumber: newResident.phoneNumber,
+        email: newResident.email,
+        // Don't store password in Firestore - it's in Firebase Auth
+        firebaseUid: firebaseUser.user.uid, // Store Firebase Auth UID
+        province: newResident.province || "",
+        cityTown: newResident.cityTown,
+        houseNumberStreetSubdivision: newResident.houseNumberStreetSubdivision || "",
+        barangay: newResident.barangay,
+        birthday: newResident.birthday || "",
+        gender: newResident.gender || "",
+        civil_status: newResident.civilStatus || "",
+        religion: newResident.religion || "",
+        blood_type: newResident.bloodType || "",
+        pwd: newResident.pwdStatus === "Yes",
+        profilePicture: newResident.profilePicture || "",
+        validIdType: newResident.validIdType || "",
+        validIdUrl: newResident.validIdImage || newResident.validIdUrl || "",
+        validIdImage: newResident.validIdImage || newResident.validIdUrl || "",
         userId: formattedUserId,
         verified: false,
         suspended: false,
         createdDate: now.toLocaleDateString(),
         createdTime: now.getTime()
-      });
+      };
+      
+      // Step 5: Create Firestore document
+      const docRef = await addDoc(collection(db, "users"), residentData);
       setResidents(prev => [
         ...prev,
         {
           id: docRef.id,
-          ...newResident,
-          userId: formattedUserId,
-          verified: false,
-          suspended: false,
-          createdDate: now.toLocaleDateString(),
-          createdTime: now.getTime()
+          ...residentData,
+          civilStatus: residentData.civil_status,
+          bloodType: residentData.blood_type,
+          pwdStatus: residentData.pwd ? "Yes" : "No",
+          isPWD: residentData.pwd
         }
       ]);
-    } catch (error) {
+      
+      toast({
+        title: 'Success',
+        description: 'Resident account created successfully! A verification email has been sent to their email address.'
+      });
+    } catch (error: any) {
       console.error("Error adding resident:", error);
+      
+      // If Firestore creation failed but Auth succeeded, we could clean up the Auth user
+      // However, it's better to let admins handle this manually or use a Cloud Function
+      
+      if (!error.code || !error.code.startsWith('auth/')) {
+        // This is a Firestore or other error (not Auth)
       toast({
         title: 'Error',
         description: 'Failed to add resident account. Please try again.',
         variant: 'destructive'
       });
+      }
+      // Auth errors are already handled above
+      // Re-throw error so handleAddResidentClick can handle dialog closing
+      throw error;
     } finally {
       setIsAddingResident(false);
     }
@@ -1255,25 +1468,39 @@ export function ManageUsersPage() {
   };
 
   // Add New Resident confirmation
-  const handleAddResidentClick = () => {
+  const handleAddResidentClick = async () => {
     if (isNewResidentValid()) {
-      handleAddResident(newResident);
+      try {
+        await handleAddResident(newResident);
+        // Only close dialog and reset form on success
       setIsAddResidentOpen(false);
+        setResidentFormStep(1);
+        setBirthdayInput("");
       setNewResident({
-        fullName: "",
+          firstName: "",
+          lastName: "",
         phoneNumber: "",
         email: "",
-        barangay: "",
+          password: "",
+          province: "",
         cityTown: "",
-        homeAddress: "",
-        validId: "",
-        validIdUrl: "",
-        additionalInfo: ""
-      });
-      toast({
-        title: 'Success',
-        description: 'Resident account added successfully!'
-      });
+          houseNumberStreetSubdivision: "",
+          barangay: "",
+          birthday: "",
+          gender: "",
+          civilStatus: "",
+          religion: "",
+          bloodType: "",
+          pwdStatus: "",
+          profilePicture: "",
+          validIdType: "",
+          validIdImage: "",
+          validIdUrl: ""
+        });
+      } catch (error) {
+        // Error is already handled in handleAddResident
+        // Keep dialog open so user can fix errors
+      }
     }
   };
 
@@ -1620,7 +1847,7 @@ export function ManageUsersPage() {
                         <input
                           type="file"
                           accept="image/*"
-                          onChange={(e) => {
+                          onChange={async (e) => {
                             const file = e.target.files?.[0];
                             if (file) {
                               // Validate file type
@@ -1641,17 +1868,23 @@ export function ManageUsersPage() {
                                 });
                                 return;
                               }
-                              // Convert to base64
-                              const reader = new FileReader();
-                              reader.onload = (event) => {
-                                const result = event.target?.result as string;
-                                setNewAdmin({ ...newAdmin, profilePicture: result });
+                              try {
+                                // Use temporary ID based on email or timestamp
+                                const tempUserId = newAdmin.email || `temp-${Date.now()}`;
+                                const result = await uploadProfilePicture(file, tempUserId);
+                                setNewAdmin({ ...newAdmin, profilePicture: result.url });
                                 toast({
                                   title: 'Success',
                                   description: 'Profile picture uploaded successfully'
                                 });
-                              };
-                              reader.readAsDataURL(file);
+                              } catch (error: any) {
+                                console.error('Error uploading profile picture:', error);
+                                toast({
+                                  title: 'Upload failed',
+                                  description: error.message || 'Failed to upload profile picture. Please try again.',
+                                  variant: 'destructive'
+                                });
+                              }
                             }
                           }}
                           className="hidden"
@@ -1761,23 +1994,11 @@ export function ManageUsersPage() {
                     />
                   </div>
 
-                  <div className="flex items-end gap-3">
                     <DateRangePicker
                       value={adminDateRange}
                       onChange={setAdminDateRange}
-                      className="w-[260px]"
-                    />
-                    {(adminDateRange?.from || adminDateRange?.to) && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setAdminDateRange(undefined)}
-                        className="h-9"
-                      >
-                        Clear
-                      </Button>
-                    )}
-                  </div>
+                    className="w-auto"
+                  />
 
                   {/* Position Filter */}
                   <Select value={positionFilter} onValueChange={setPositionFilter}>
@@ -2267,7 +2488,35 @@ export function ManageUsersPage() {
                   {/* Add New Resident Button */}
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Dialog open={isAddResidentOpen} onOpenChange={setIsAddResidentOpen}>
+                      <Dialog open={isAddResidentOpen} onOpenChange={(open) => {
+                        setIsAddResidentOpen(open);
+                        if (!open) {
+                          // Reset form when dialog closes
+                          setResidentFormStep(1);
+                          setBirthdayInput("");
+                          setNewResident({
+                            firstName: "",
+                            lastName: "",
+                            phoneNumber: "",
+                            email: "",
+                            password: "",
+                            province: "",
+                            cityTown: "",
+                            houseNumberStreetSubdivision: "",
+                            barangay: "",
+                            birthday: "",
+                            gender: "",
+                            civilStatus: "",
+                            religion: "",
+                            bloodType: "",
+                            pwdStatus: "",
+                            profilePicture: "",
+                            validIdType: "",
+                            validIdImage: "",
+                            validIdUrl: ""
+                          });
+                        }
+                      }}>
                         <DialogTrigger asChild>
                           <Button size="sm" className="bg-brand-orange hover:bg-brand-orange-400 text-white">
                             <UserPlus className="h-4 w-4 mr-2" />
@@ -2281,18 +2530,81 @@ export function ManageUsersPage() {
                               Add New Resident Account
                             </DialogTitle>
                           </DialogHeader>
+                          
+                          {/* Progress Indicator */}
+                          <div className="px-6 pt-4 pb-2">
+                            <div className="flex items-center justify-center">
+                              {[1, 2, 3, 4, 5].map((step, index) => {
+                                const isStepCompleted = 
+                                  (step === 1 && isStep1Valid()) ||
+                                  (step === 2 && isStep2Valid()) ||
+                                  (step === 3 && isStep3Valid()) ||
+                                  (step === 4 && isStep4Valid()) ||
+                                  (step === 5 && isStep5Valid());
+                                
+                                return (
+                                  <div key={step} className="flex items-center">
+                                    <div
+                                      className={cn(
+                                        "h-10 w-10 rounded-full border-2 bg-white flex items-center justify-center transition-all duration-300",
+                                        residentFormStep === step
+                                          ? "border-green-500"
+                                          : isStepCompleted
+                                          ? "border-green-500"
+                                          : "border-gray-300"
+                                      )}
+                                    >
+                                      {isStepCompleted ? (
+                                        <Check className="h-5 w-5 text-green-500" />
+                                      ) : (
+                                        <span className={cn(
+                                          "text-sm font-medium",
+                                          residentFormStep === step ? "text-green-500" : "text-gray-400"
+                                        )}>
+                                          {step}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {index < 4 && (
+                                      <div
+                                        className={cn(
+                                          "h-0.5 w-12 transition-all duration-300",
+                                          isStepCompleted ? "bg-green-500" : "bg-gray-300"
+                                        )}
+                                      />
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                          
+                          <div className="space-y-4 py-4">
+                            {/* Step 1: Account Information */}
+                            {residentFormStep === 1 && (
                           <div className="space-y-4">
+                                <h3 className="text-lg font-semibold text-gray-900 border-b border-gray-200 pb-2">
+                                  I. Account Information
+                                </h3>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                               <div>
-                                <Label>Full Name *</Label>
+                                    <Label>First Name</Label>
                                 <Input 
-                                  value={newResident.fullName} 
-                                  onChange={e => setNewResident({...newResident, fullName: e.target.value})} 
-                                  placeholder="Enter full name"
+                                      value={newResident.firstName} 
+                                      onChange={e => setNewResident({...newResident, firstName: e.target.value})} 
+                                      placeholder="Enter first name"
                                 />
                               </div>
                               <div>
-                                <Label>Phone Number *</Label>
+                                    <Label>Last Name</Label>
+                                    <Input 
+                                      value={newResident.lastName} 
+                                      onChange={e => setNewResident({...newResident, lastName: e.target.value})} 
+                                      placeholder="Enter last name"
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label>Phone Number</Label>
                                 <Input 
                                   value={newResident.phoneNumber} 
                                   onChange={e => setNewResident({...newResident, phoneNumber: e.target.value})} 
@@ -2300,7 +2612,7 @@ export function ManageUsersPage() {
                                 />
                               </div>
                               <div>
-                                <Label>Email Address *</Label>
+                                    <Label>Email Address</Label>
                                 <Input 
                                   value={newResident.email} 
                                   onChange={e => setNewResident({...newResident, email: e.target.value})} 
@@ -2308,50 +2620,251 @@ export function ManageUsersPage() {
                                   type="email"
                                 />
                               </div>
+                                  <div className="md:col-span-2">
+                                    <Label>Password</Label>
+                                    <div className="relative flex items-center">
+                                      <Input
+                                        type={showPassword ? "text" : "password"}
+                                        value={newResident.password}
+                                        onChange={e => {
+                                          setNewResident({ ...newResident, password: e.target.value });
+                                          setPasswordError(validatePassword(e.target.value));
+                                        }}
+                                        className={`pr-10 ${passwordError ? "border-red-500" : ""}`}
+                                        placeholder="Enter password"
+                                      />
+                                      <button
+                                        type="button"
+                                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                                        onClick={() => setShowPassword(v => !v)}
+                                        tabIndex={-1}
+                                      >
+                                        {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                                      </button>
+                                    </div>
+                                    {passwordError && <div className="text-xs text-red-600 mt-1">{passwordError}</div>}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Step 2: Personal Information */}
+                            {residentFormStep === 2 && (
+                              <div className="space-y-4">
+                                <h3 className="text-lg font-semibold text-gray-900 border-b border-gray-200 pb-2">
+                                  II. Personal Information
+                                </h3>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                               <div>
-                                <Label>Barangay *</Label>
-                                <Select value={newResident.barangay} onValueChange={value => setNewResident({ ...newResident, barangay: value })}>
+                                    <Label>Birthday</Label>
+                                    <Popover>
+                                      <div className="relative">
+                                        <Input
+                                          placeholder="MM/DD/YYYY"
+                                          value={birthdayInput || (newResident.birthday ? formatToMMDDYYYY(newResident.birthday) : "")}
+                                          onChange={(e) => {
+                                            const inputValue = e.target.value;
+                                            setBirthdayInput(inputValue);
+                                            
+                                            // Parse MM/DD/YYYY format
+                                            const parsed = parseMMDDYYYY(inputValue);
+                                            if (parsed && parsed !== inputValue) {
+                                              // Successfully parsed, update the birthday
+                                              setNewResident({
+                                                ...newResident,
+                                                birthday: parsed
+                                              });
+                                            } else if (!inputValue) {
+                                              // Empty input, clear birthday
+                                              setNewResident({
+                                                ...newResident,
+                                                birthday: ""
+                                              });
+                                            }
+                                          }}
+                                          onBlur={(e) => {
+                                            // On blur, try to parse and format the input
+                                            const parsed = parseMMDDYYYY(e.target.value);
+                                            if (parsed && parsed !== e.target.value) {
+                                              setBirthdayInput(formatToMMDDYYYY(parsed));
+                                              setNewResident({
+                                                ...newResident,
+                                                birthday: parsed
+                                              });
+                                            } else if (e.target.value && !newResident.birthday) {
+                                              // Invalid format, show error
+                                              toast({
+                                                title: 'Invalid Date Format',
+                                                description: 'Please enter date in MM/DD/YYYY format (e.g., 01/15/1990)',
+                                                variant: 'destructive'
+                                              });
+                                            }
+                                          }}
+                                          className="pr-10"
+                                        />
+                                        <PopoverTrigger asChild>
+                                          <button
+                                            type="button"
+                                            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                                          >
+                                            <CalendarIcon className="h-4 w-4" />
+                                          </button>
+                                        </PopoverTrigger>
+                                      </div>
+                                      <PopoverContent className="w-auto p-0" align="start">
+                                        <Calendar
+                                          mode="single"
+                                          selected={newResident.birthday ? new Date(newResident.birthday) : undefined}
+                                          onSelect={(date) => {
+                                            if (date) {
+                                              const formatted = format(date, "yyyy-MM-dd");
+                                              const displayFormat = formatToMMDDYYYY(formatted);
+                                              setNewResident({
+                                                ...newResident,
+                                                birthday: formatted
+                                              });
+                                              setBirthdayInput(displayFormat);
+                                            } else {
+                                              setNewResident({
+                                                ...newResident,
+                                                birthday: ""
+                                              });
+                                              setBirthdayInput("");
+                                            }
+                                          }}
+                                          initialFocus
+                                          captionLayout="dropdown"
+                                          fromYear={1900}
+                                          toYear={new Date().getFullYear()}
+                                        />
+                                      </PopoverContent>
+                                    </Popover>
+                                  </div>
+                                  <div>
+                                    <Label>Gender</Label>
+                                    <Select value={newResident.gender} onValueChange={value => setNewResident({ ...newResident, gender: value })}>
                                   <SelectTrigger>
-                                    <SelectValue placeholder="Select barangay" />
+                                        <SelectValue placeholder="Select gender" />
                                   </SelectTrigger>
                                   <SelectContent>
-                                    <SelectItem value="Abang">Abang</SelectItem>
-                                    <SelectItem value="Aliliw">Aliliw</SelectItem>
-                                    <SelectItem value="Atulinao">Atulinao</SelectItem>
-                                    <SelectItem value="Ayuti">Ayuti</SelectItem>
-                                    <SelectItem value="Barangay 1">Barangay 1</SelectItem>
-                                    <SelectItem value="Barangay 2">Barangay 2</SelectItem>
-                                    <SelectItem value="Barangay 3">Barangay 3</SelectItem>
-                                    <SelectItem value="Barangay 4">Barangay 4</SelectItem>
-                                    <SelectItem value="Barangay 5">Barangay 5</SelectItem>
-                                    <SelectItem value="Barangay 6">Barangay 6</SelectItem>
-                                    <SelectItem value="Barangay 7">Barangay 7</SelectItem>
-                                    <SelectItem value="Barangay 8">Barangay 8</SelectItem>
-                                    <SelectItem value="Barangay 9">Barangay 9</SelectItem>
-                                    <SelectItem value="Barangay 10">Barangay 10</SelectItem>
-                                    <SelectItem value="Igang">Igang</SelectItem>
-                                    <SelectItem value="Kabatete">Kabatete</SelectItem>
-                                    <SelectItem value="Kakawit">Kakawit</SelectItem>
-                                    <SelectItem value="Kalangay">Kalangay</SelectItem>
-                                    <SelectItem value="Kalyaat">Kalyaat</SelectItem>
-                                    <SelectItem value="Kilib">Kilib</SelectItem>
-                                    <SelectItem value="Kulapi">Kulapi</SelectItem>
-                                    <SelectItem value="Mahabang Parang">Mahabang Parang</SelectItem>
-                                    <SelectItem value="Malupak">Malupak</SelectItem>
-                                    <SelectItem value="Manasa">Manasa</SelectItem>
-                                    <SelectItem value="May-it">May-it</SelectItem>
-                                    <SelectItem value="Nagsinamo">Nagsinamo</SelectItem>
-                                    <SelectItem value="Nalunao">Nalunao</SelectItem>
-                                    <SelectItem value="Palola">Palola</SelectItem>
-                                    <SelectItem value="Piis">Piis</SelectItem>
-                                    <SelectItem value="Samil">Samil</SelectItem>
-                                    <SelectItem value="Tiawe">Tiawe</SelectItem>
-                                    <SelectItem value="Tinamnan">Tinamnan</SelectItem>
+                                        <SelectItem value="Male">Male</SelectItem>
+                                        <SelectItem value="Female">Female</SelectItem>
+                                        <SelectItem value="Other">Other</SelectItem>
+                                        <SelectItem value="Prefer not to say">Prefer not to say</SelectItem>
                                   </SelectContent>
                                 </Select>
                               </div>
                               <div>
-                                <Label>City/Town *</Label>
+                                    <Label>Civil Status</Label>
+                                    <Select value={newResident.civilStatus} onValueChange={value => setNewResident({ ...newResident, civilStatus: value })}>
+                                      <SelectTrigger>
+                                        <SelectValue placeholder="Select civil status" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="Single">Single</SelectItem>
+                                        <SelectItem value="Married">Married</SelectItem>
+                                        <SelectItem value="Divorced">Divorced</SelectItem>
+                                        <SelectItem value="Widowed">Widowed</SelectItem>
+                                        <SelectItem value="Separated">Separated</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <div>
+                                    <Label>Religion</Label>
+                                    <Select value={newResident.religion} onValueChange={value => setNewResident({ ...newResident, religion: value })}>
+                                      <SelectTrigger>
+                                        <SelectValue placeholder="Select religion" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="Roman Catholic">Roman Catholic</SelectItem>
+                                        <SelectItem value="Christian">Christian</SelectItem>
+                                        <SelectItem value="Iglesia ni Christo">Iglesia ni Christo</SelectItem>
+                                        <SelectItem value="Islam">Islam</SelectItem>
+                                        <SelectItem value="Buddhism">Buddhism</SelectItem>
+                                        <SelectItem value="Hinduism">Hinduism</SelectItem>
+                                        <SelectItem value="Others">Others</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <div>
+                                    <Label>Blood Type</Label>
+                                    <Select value={newResident.bloodType} onValueChange={value => setNewResident({ ...newResident, bloodType: value })}>
+                                      <SelectTrigger>
+                                        <SelectValue placeholder="Select blood type" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="A+">A+</SelectItem>
+                                        <SelectItem value="A-">A-</SelectItem>
+                                        <SelectItem value="B+">B+</SelectItem>
+                                        <SelectItem value="B-">B-</SelectItem>
+                                        <SelectItem value="AB+">AB+</SelectItem>
+                                        <SelectItem value="AB-">AB-</SelectItem>
+                                        <SelectItem value="O+">O+</SelectItem>
+                                        <SelectItem value="O-">O-</SelectItem>
+                                        <SelectItem value="Unknown">Unknown</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <div>
+                                    <Label className="block mb-2">PWD Status</Label>
+                                    <div className="inline-flex rounded-md border border-gray-200 bg-white p-1">
+                                      <button
+                                        type="button"
+                                        className={cn(
+                                          "px-3 py-1 text-sm font-medium rounded-md transition-colors",
+                                          newResident.pwdStatus === "Yes"
+                                            ? "bg-brand-orange text-white shadow-sm"
+                                            : "text-gray-600 hover:bg-gray-50"
+                                        )}
+                                        onClick={() => {
+                                          setNewResident({
+                                            ...newResident,
+                                            pwdStatus: "Yes"
+                                          });
+                                        }}
+                                      >
+                                        Yes
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className={cn(
+                                          "px-3 py-1 text-sm font-medium rounded-md transition-colors",
+                                          newResident.pwdStatus !== "Yes"
+                                            ? "bg-brand-orange text-white shadow-sm"
+                                            : "text-gray-600 hover:bg-gray-50"
+                                        )}
+                                        onClick={() => {
+                                          setNewResident({
+                                            ...newResident,
+                                            pwdStatus: "No"
+                                          });
+                                        }}
+                                      >
+                                        No
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Step 3: Address */}
+                            {residentFormStep === 3 && (
+                              <div className="space-y-4">
+                                <h3 className="text-lg font-semibold text-gray-900 border-b border-gray-200 pb-2">
+                                  III. Address
+                                </h3>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                  <div>
+                                    <Label>Province</Label>
+                                    <Input 
+                                      value={newResident.province} 
+                                      onChange={e => setNewResident({...newResident, province: e.target.value})} 
+                                      placeholder="Enter province"
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label>City/Town</Label>
                                 <Input 
                                   value={newResident.cityTown} 
                                   onChange={e => setNewResident({...newResident, cityTown: e.target.value})} 
@@ -2359,40 +2872,302 @@ export function ManageUsersPage() {
                                 />
                               </div>
                               <div className="md:col-span-2">
-                                <Label>Home Address</Label>
+                                    <Label>House Number/Street/Subdivision (Optional)</Label>
                                 <Input 
-                                  value={newResident.homeAddress} 
-                                  onChange={e => setNewResident({...newResident, homeAddress: e.target.value})} 
-                                  placeholder="Enter home address"
+                                      value={newResident.houseNumberStreetSubdivision} 
+                                      onChange={e => setNewResident({...newResident, houseNumberStreetSubdivision: e.target.value})} 
+                                      placeholder="Enter house number, street, or subdivision"
                                 />
                               </div>
+                                  <div className="md:col-span-2 relative">
+                                    <Label>Barangay</Label>
+                                <Input 
+                                      value={newResident.barangay} 
+                                      onChange={(e) => {
+                                        const value = e.target.value;
+                                        setNewResident({...newResident, barangay: value});
+                                        if (value.trim() === "") {
+                                          setBarangaySuggestions([]);
+                                          setShowBarangaySuggestions(false);
+                                        } else {
+                                          const filtered = barangayOptions.filter(option =>
+                                            option.toLowerCase().includes(value.toLowerCase())
+                                          );
+                                          setBarangaySuggestions(filtered);
+                                          setShowBarangaySuggestions(filtered.length > 0);
+                                        }
+                                      }}
+                                      onFocus={(e) => {
+                                        if (e.target.value.trim() !== "") {
+                                          const filtered = barangayOptions.filter(option =>
+                                            option.toLowerCase().includes(e.target.value.toLowerCase())
+                                          );
+                                          setBarangaySuggestions(filtered);
+                                          setShowBarangaySuggestions(filtered.length > 0);
+                                        }
+                                      }}
+                                      onBlur={() => {
+                                        // Delay hiding suggestions to allow click events
+                                        setTimeout(() => setShowBarangaySuggestions(false), 200);
+                                      }}
+                                      placeholder="Type to search barangay"
+                                    />
+                                    {showBarangaySuggestions && barangaySuggestions.length > 0 && (
+                                      <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-auto">
+                                        {barangaySuggestions.map((barangay, index) => (
+                                          <button
+                                            key={index}
+                                            type="button"
+                                            className="w-full text-left px-4 py-2 hover:bg-gray-100 text-sm"
+                                            onClick={() => {
+                                              setNewResident({...newResident, barangay});
+                                              setBarangaySuggestions([]);
+                                              setShowBarangaySuggestions(false);
+                                            }}
+                                          >
+                                            {barangay}
+                                          </button>
+                                        ))}
+                              </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Step 4: Profile Picture */}
+                            {residentFormStep === 4 && (
+                              <div className="space-y-4">
+                                <h3 className="text-lg font-semibold text-gray-900 border-b border-gray-200 pb-2">
+                                  IV. Profile Picture
+                                </h3>
                               <div>
-                                <Label>Valid ID Type</Label>
-                                <Input 
-                                  value={newResident.validId} 
-                                  onChange={e => setNewResident({...newResident, validId: e.target.value})} 
-                                  placeholder="e.g., Driver's License, Passport"
-                                />
+                                  <Label className="text-base font-medium mb-4 block text-center">Profile Picture</Label>
+                                </div>
+                                <div className="flex flex-col items-center justify-center py-8">
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={async (e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) {
+                                        if (!file.type.startsWith('image/')) {
+                                          toast({
+                                            title: 'Invalid file type',
+                                            description: 'Please upload an image file',
+                                            variant: 'destructive'
+                                          });
+                                          return;
+                                        }
+                                        if (file.size > 5 * 1024 * 1024) {
+                                          toast({
+                                            title: 'File too large',
+                                            description: 'Please upload an image smaller than 5MB',
+                                            variant: 'destructive'
+                                          });
+                                          return;
+                                        }
+                                        try {
+                                          // Use temporary ID based on email or timestamp
+                                          const tempUserId = newResident.email || `temp-${Date.now()}`;
+                                          const result = await uploadProfilePicture(file, tempUserId);
+                                          setNewResident({ ...newResident, profilePicture: result.url });
+                                          toast({
+                                            title: 'Success',
+                                            description: 'Profile picture uploaded successfully'
+                                          });
+                                        } catch (error: any) {
+                                          console.error('Error uploading profile picture:', error);
+                                          toast({
+                                            title: 'Upload failed',
+                                            description: error.message || 'Failed to upload profile picture. Please try again.',
+                                            variant: 'destructive'
+                                          });
+                                        }
+                                      }
+                                    }}
+                                    className="hidden"
+                                    id="resident-profile-picture-upload"
+                                  />
+                                  {newResident.profilePicture ? (
+                                    <div className="relative">
+                                      <img
+                                        src={newResident.profilePicture}
+                                        alt="Profile preview"
+                                        className="w-32 h-32 rounded-full object-cover border-4 border-gray-200 shadow-lg"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => setNewResident({ ...newResident, profilePicture: "" })}
+                                        className="absolute -top-2 -right-2 h-6 w-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center"
+                                      >
+                                        <X className="h-4 w-4" />
+                                      </button>
+                                      <label
+                                        htmlFor="resident-profile-picture-upload"
+                                        className="absolute bottom-0 left-0 bg-brand-orange hover:bg-brand-orange/90 text-white p-2 rounded-full cursor-pointer shadow-lg"
+                                      >
+                                        <Camera className="h-4 w-4" />
+                                      </label>
                               </div>
-                              <div>
-                                <Label>Valid ID Image URL</Label>
-                                <Input 
-                                  value={newResident.validIdUrl} 
-                                  onChange={e => setNewResident({...newResident, validIdUrl: e.target.value})} 
-                                  placeholder="Enter image URL"
-                                />
+                                  ) : (
+                                    <label
+                                      htmlFor="resident-profile-picture-upload"
+                                      className="w-32 h-32 rounded-full bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center cursor-pointer hover:border-brand-orange transition-colors relative"
+                                    >
+                                      <User className="h-12 w-12 text-gray-400" />
+                                      <div className="absolute bottom-0 left-0 bg-brand-orange hover:bg-brand-orange/90 text-white p-2 rounded-full shadow-lg">
+                                        <Camera className="h-4 w-4" />
+                                      </div>
+                                    </label>
+                                  )}
+                                  <p className="text-xs text-gray-500 mt-4 text-center">
+                                    Upload a profile picture (max 5MB, JPG/PNG)
+                                  </p>
+                                </div>
                               </div>
-                              <div className="md:col-span-2">
-                                <Label>Additional Information</Label>
-                                <Input 
-                                  value={newResident.additionalInfo} 
-                                  onChange={e => setNewResident({...newResident, additionalInfo: e.target.value})} 
-                                  placeholder="Any additional information"
-                                />
+                            )}
+
+                            {/* Step 5: Valid ID */}
+                            {residentFormStep === 5 && (
+                              <div className="space-y-4">
+                                <h3 className="text-lg font-semibold text-gray-900 border-b border-gray-200 pb-2">
+                                  V. Valid ID
+                                </h3>
+                                <div className="grid grid-cols-1 gap-4">
+                                  <div>
+                                    <Label>Valid ID Type</Label>
+                                    <Select value={newResident.validIdType} onValueChange={value => setNewResident({ ...newResident, validIdType: value })}>
+                                      <SelectTrigger>
+                                        <SelectValue placeholder="Select valid ID type" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="National ID">National ID</SelectItem>
+                                        <SelectItem value="Driver's License">Driver's License</SelectItem>
+                                        <SelectItem value="Passport">Passport</SelectItem>
+                                        <SelectItem value="UMID">UMID</SelectItem>
+                                        <SelectItem value="SSS">SSS</SelectItem>
+                                        <SelectItem value="PhilHealth">PhilHealth</SelectItem>
+                                        <SelectItem value="Voter's ID">Voter's ID</SelectItem>
+                                        <SelectItem value="Postal ID">Postal ID</SelectItem>
+                                        <SelectItem value="Student ID">Student ID</SelectItem>
+                                        <SelectItem value="Others">Others</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <div>
+                                    <div className="flex flex-col items-center justify-center pt-2 pb-8 w-full">
+                                      <input
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={async (e) => {
+                                          const file = e.target.files?.[0];
+                                          if (file) {
+                                            if (!file.type.startsWith('image/')) {
+                                              toast({
+                                                title: 'Invalid file type',
+                                                description: 'Please upload an image file',
+                                                variant: 'destructive'
+                                              });
+                                              return;
+                                            }
+                                            if (file.size > 5 * 1024 * 1024) {
+                                              toast({
+                                                title: 'File too large',
+                                                description: 'Please upload an image smaller than 5MB',
+                                                variant: 'destructive'
+                                              });
+                                              return;
+                                            }
+                                            try {
+                                              // Use temporary ID based on email or timestamp
+                                              const tempUserId = newResident.email || `temp-${Date.now()}`;
+                                              const result = await uploadValidIdImage(file, tempUserId);
+                                              setNewResident({ ...newResident, validIdImage: result.url, validIdUrl: result.url });
+                                              toast({
+                                                title: 'Success',
+                                                description: 'Valid ID image uploaded successfully'
+                                              });
+                                            } catch (error: any) {
+                                              console.error('Error uploading valid ID image:', error);
+                                              toast({
+                                                title: 'Upload failed',
+                                                description: error.message || 'Failed to upload valid ID image. Please try again.',
+                                                variant: 'destructive'
+                                              });
+                                            }
+                                          }
+                                        }}
+                                        className="hidden"
+                                        id="resident-valid-id-upload"
+                                      />
+                                      {newResident.validIdImage ? (
+                                        <div className="relative w-full max-w-2xl">
+                                          <img
+                                            src={newResident.validIdImage}
+                                            alt="Valid ID preview"
+                                            className="w-full h-auto max-h-96 rounded-lg object-contain border-4 border-gray-200 shadow-lg"
+                                          />
+                                          <button
+                                            type="button"
+                                            onClick={() => setNewResident({ ...newResident, validIdImage: "", validIdUrl: "" })}
+                                            className="absolute -top-2 -right-2 h-6 w-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center"
+                                          >
+                                            <X className="h-4 w-4" />
+                                          </button>
+                                          <label
+                                            htmlFor="resident-valid-id-upload"
+                                            className="absolute bottom-0 left-0 bg-brand-orange hover:bg-brand-orange/90 text-white p-2 rounded-full cursor-pointer shadow-lg"
+                                          >
+                                            <Camera className="h-4 w-4" />
+                                          </label>
                               </div>
+                                      ) : (
+                                        <label
+                                          htmlFor="resident-valid-id-upload"
+                                          className="w-full max-w-2xl h-48 rounded-lg bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center cursor-pointer hover:border-brand-orange transition-colors relative"
+                                        >
+                                          <div className="flex flex-col items-center">
+                                            <Upload className="h-12 w-12 text-gray-400 mb-2" />
+                                            <span className="text-sm text-gray-500 text-center px-2">Upload Valid ID</span>
                             </div>
+                                        </label>
+                                      )}
+                                      <p className="text-xs text-gray-500 mt-4 text-center">
+                                        Upload a valid ID image (max 5MB, JPG/PNG)
+                                      </p>
                           </div>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
                           <DialogFooter>
+                            <div className="flex items-center justify-between w-full">
+                              <div>
+                                {residentFormStep > 1 && (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => setResidentFormStep(residentFormStep - 1)}
+                                  >
+                                    Previous
+                                  </Button>
+                                )}
+                              </div>
+                              <div>
+                                {residentFormStep < 5 ? (
+                                  <Button
+                                    type="button"
+                                    onClick={() => {
+                                      setResidentFormStep(residentFormStep + 1);
+                                    }}
+                                    className="bg-brand-orange hover:bg-brand-orange-400 text-white"
+                                  >
+                                    Next
+                                  </Button>
+                                ) : (
                             <Button 
                               onClick={handleAddResidentClick} 
                               disabled={isAddingResident || !isNewResidentValid()}
@@ -2410,7 +3185,9 @@ export function ManageUsersPage() {
                                 "Add New Resident"
                               )}
                             </Button>
-                            <Button variant="secondary" onClick={() => setIsAddResidentOpen(false)}>Cancel</Button>
+                                )}
+                              </div>
+                            </div>
                           </DialogFooter>
                         </DialogContent>
                       </Dialog>
@@ -2431,23 +3208,11 @@ export function ManageUsersPage() {
                     />
                   </div>
 
-                  <div className="flex items-end gap-3">
                     <DateRangePicker
                       value={residentDateRange}
                       onChange={setResidentDateRange}
-                      className="w-[260px]"
-                    />
-                    {(residentDateRange?.from || residentDateRange?.to) && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setResidentDateRange(undefined)}
-                        className="h-9"
-                      >
-                        Clear
-                      </Button>
-                    )}
-                  </div>
+                    className="w-auto"
+                  />
 
                   {/* Barangay Filter */}
                     <Select value={barangayFilter} onValueChange={setBarangayFilter}>
@@ -3012,6 +3777,7 @@ export function ManageUsersPage() {
           setShowResidentPreview(open);
           if (!open) {
             setIsEditingResidentPreview(false);
+            setPreviewBirthdayInput("");
           }
         }}>
           <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
@@ -3222,56 +3988,37 @@ export function ManageUsersPage() {
                     </TableCell>
                   </TableRow>
                   <TableRow>
-                    <TableCell className="font-medium text-gray-700 align-top">Barangay</TableCell>
+                    <TableCell className="font-medium text-gray-700 align-top">House Number/Street/Subdivision</TableCell>
                     <TableCell>
                       {isEditingResidentPreview ? (
-                        <Select 
-                          value={selectedResident?.barangay || ''} 
-                          onValueChange={value => setSelectedResident({
+                        <Input 
+                          value={selectedResident?.houseNumberStreetSubdivision || ''} 
+                          onChange={e => setSelectedResident({
                             ...selectedResident,
-                            barangay: value
+                            houseNumberStreetSubdivision: e.target.value
                           })}
-                        >
-                          <SelectTrigger className="border-gray-300">
-                            <SelectValue placeholder="Select barangay" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="Abang">Abang</SelectItem>
-                            <SelectItem value="Aliliw">Aliliw</SelectItem>
-                            <SelectItem value="Atulinao">Atulinao</SelectItem>
-                            <SelectItem value="Ayuti">Ayuti</SelectItem>
-                            <SelectItem value="Barangay 1">Barangay 1</SelectItem>
-                            <SelectItem value="Barangay 2">Barangay 2</SelectItem>
-                            <SelectItem value="Barangay 3">Barangay 3</SelectItem>
-                            <SelectItem value="Barangay 4">Barangay 4</SelectItem>
-                            <SelectItem value="Barangay 5">Barangay 5</SelectItem>
-                            <SelectItem value="Barangay 6">Barangay 6</SelectItem>
-                            <SelectItem value="Barangay 7">Barangay 7</SelectItem>
-                            <SelectItem value="Barangay 8">Barangay 8</SelectItem>
-                            <SelectItem value="Barangay 9">Barangay 9</SelectItem>
-                            <SelectItem value="Barangay 10">Barangay 10</SelectItem>
-                            <SelectItem value="Igang">Igang</SelectItem>
-                            <SelectItem value="Kabatete">Kabatete</SelectItem>
-                            <SelectItem value="Kakawit">Kakawit</SelectItem>
-                            <SelectItem value="Kalangay">Kalangay</SelectItem>
-                            <SelectItem value="Kalyaat">Kalyaat</SelectItem>
-                            <SelectItem value="Kilib">Kilib</SelectItem>
-                            <SelectItem value="Kulapi">Kulapi</SelectItem>
-                            <SelectItem value="Mahabang Parang">Mahabang Parang</SelectItem>
-                            <SelectItem value="Malupak">Malupak</SelectItem>
-                            <SelectItem value="Manasa">Manasa</SelectItem>
-                            <SelectItem value="May-it">May-it</SelectItem>
-                            <SelectItem value="Nagsinamo">Nagsinamo</SelectItem>
-                            <SelectItem value="Nalunao">Nalunao</SelectItem>
-                            <SelectItem value="Palola">Palola</SelectItem>
-                            <SelectItem value="Piis">Piis</SelectItem>
-                            <SelectItem value="Samil">Samil</SelectItem>
-                            <SelectItem value="Tiawe">Tiawe</SelectItem>
-                            <SelectItem value="Tinamnan">Tinamnan</SelectItem>
-                          </SelectContent>
-                        </Select>
+                          className="border-gray-300"
+                          placeholder="Optional"
+                        />
                       ) : (
-                        <span>{selectedResident?.barangay || '-'}</span>
+                        <span>{selectedResident?.houseNumberStreetSubdivision || '-'}</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell className="font-medium text-gray-700 align-top">Province</TableCell>
+                    <TableCell>
+                      {isEditingResidentPreview ? (
+                        <Input 
+                          value={selectedResident?.province || ''} 
+                          onChange={e => setSelectedResident({
+                            ...selectedResident,
+                            province: e.target.value
+                          })}
+                          className="border-gray-300"
+                        />
+                      ) : (
+                        <span>{selectedResident?.province || '-'}</span>
                       )}
                     </TableCell>
                   </TableRow>
@@ -3293,24 +4040,153 @@ export function ManageUsersPage() {
                     </TableCell>
                   </TableRow>
                   <TableRow>
-                    <TableCell className="font-medium text-gray-700 align-top">Province</TableCell>
-                    <TableCell>{selectedResident?.province || '-'}</TableCell>
+                    <TableCell className="font-medium text-gray-700 align-top">Barangay</TableCell>
+                    <TableCell>
+                      {isEditingResidentPreview ? (
+                        <div className="relative">
+                          <Input 
+                            value={selectedResident?.barangay || ''} 
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setSelectedResident({...selectedResident, barangay: value});
+                              if (value.trim() === "") {
+                                setBarangaySuggestions([]);
+                                setShowBarangaySuggestions(false);
+                              } else {
+                                const filtered = barangayOptions.filter(option =>
+                                  option.toLowerCase().includes(value.toLowerCase())
+                                );
+                                setBarangaySuggestions(filtered);
+                                setShowBarangaySuggestions(filtered.length > 0);
+                              }
+                            }}
+                            onFocus={(e) => {
+                              if (e.target.value.trim() !== "") {
+                                const filtered = barangayOptions.filter(option =>
+                                  option.toLowerCase().includes(e.target.value.toLowerCase())
+                                );
+                                setBarangaySuggestions(filtered);
+                                setShowBarangaySuggestions(filtered.length > 0);
+                              }
+                            }}
+                            onBlur={() => {
+                              setTimeout(() => setShowBarangaySuggestions(false), 200);
+                            }}
+                            className="border-gray-300"
+                            placeholder="Type to search barangay"
+                          />
+                          {showBarangaySuggestions && barangaySuggestions.length > 0 && (
+                            <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-auto">
+                              {barangaySuggestions.map((barangay, index) => (
+                                <button
+                                  key={index}
+                                  type="button"
+                                  className="w-full text-left px-4 py-2 hover:bg-gray-100 text-sm"
+                                  onClick={() => {
+                                    setSelectedResident({...selectedResident, barangay});
+                                    setBarangaySuggestions([]);
+                                    setShowBarangaySuggestions(false);
+                                  }}
+                                >
+                                  {barangay}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span>{selectedResident?.barangay || '-'}</span>
+                      )}
+                    </TableCell>
                   </TableRow>
                   <TableRow>
                     <TableCell className="font-medium text-gray-700 align-top">Birthday</TableCell>
                     <TableCell>
                       {isEditingResidentPreview ? (
+                        <Popover>
+                          <div className="relative">
                         <Input 
-                          value={selectedResident?.birthday || ''} 
-                          onChange={e => setSelectedResident({
+                              placeholder="MM/DD/YYYY"
+                              value={previewBirthdayInput || (selectedResident?.birthday ? formatToMMDDYYYY(selectedResident.birthday) : "")}
+                              onChange={(e) => {
+                                const inputValue = e.target.value;
+                                setPreviewBirthdayInput(inputValue);
+                                
+                                // Parse MM/DD/YYYY format
+                                const parsed = parseMMDDYYYY(inputValue);
+                                if (parsed && parsed !== inputValue) {
+                                  // Successfully parsed, update the birthday
+                                  setSelectedResident({
                             ...selectedResident,
-                            birthday: e.target.value
-                          })}
-                          className="border-gray-300"
-                          type="date"
-                        />
+                                    birthday: parsed
+                                  });
+                                } else if (!inputValue) {
+                                  // Empty input, clear birthday
+                                  setSelectedResident({
+                                    ...selectedResident,
+                                    birthday: ""
+                                  });
+                                }
+                              }}
+                              onBlur={(e) => {
+                                // On blur, try to parse and format the input
+                                const parsed = parseMMDDYYYY(e.target.value);
+                                if (parsed && parsed !== e.target.value) {
+                                  setPreviewBirthdayInput(formatToMMDDYYYY(parsed));
+                                  setSelectedResident({
+                                    ...selectedResident,
+                                    birthday: parsed
+                                  });
+                                } else if (e.target.value && !selectedResident?.birthday) {
+                                  // Invalid format, show error
+                                  toast({
+                                    title: 'Invalid Date Format',
+                                    description: 'Please enter date in MM/DD/YYYY format (e.g., 01/15/1990)',
+                                    variant: 'destructive'
+                                  });
+                                }
+                              }}
+                              className="pr-10 border-gray-300"
+                            />
+                            <PopoverTrigger asChild>
+                              <button
+                                type="button"
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                              >
+                                <CalendarIcon className="h-4 w-4" />
+                              </button>
+                            </PopoverTrigger>
+                          </div>
+                          <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar
+                              mode="single"
+                              selected={selectedResident?.birthday ? new Date(selectedResident.birthday) : undefined}
+                              onSelect={(date) => {
+                                if (date) {
+                                  const formatted = format(date, "yyyy-MM-dd");
+                                  const displayFormat = formatToMMDDYYYY(formatted);
+                                  setSelectedResident({
+                                    ...selectedResident,
+                                    birthday: formatted
+                                  });
+                                  setPreviewBirthdayInput(displayFormat);
+                                } else {
+                                  setSelectedResident({
+                                    ...selectedResident,
+                                    birthday: ""
+                                  });
+                                  setPreviewBirthdayInput("");
+                                }
+                              }}
+                              initialFocus
+                              captionLayout="dropdown"
+                              fromYear={1900}
+                              toYear={new Date().getFullYear()}
+                            />
+                          </PopoverContent>
+                        </Popover>
                       ) : (
-                        <span>{selectedResident?.birthday ? new Date(selectedResident.birthday).toLocaleDateString() : '-'}</span>
+                        <span>{selectedResident?.birthday ? format(new Date(selectedResident.birthday), "PPP") : '-'}</span>
                       )}
                     </TableCell>
                   </TableRow>
@@ -3372,15 +4248,26 @@ export function ManageUsersPage() {
                     <TableCell className="font-medium text-gray-700 align-top">Religion</TableCell>
                     <TableCell>
                       {isEditingResidentPreview ? (
-                        <Input 
+                        <Select 
                           value={selectedResident?.religion || ''} 
-                          onChange={e => setSelectedResident({
+                          onValueChange={value => setSelectedResident({
                             ...selectedResident,
-                            religion: e.target.value
+                            religion: value
                           })}
-                          className="border-gray-300"
-                          placeholder="e.g., Catholic, Muslim, Protestant"
-                        />
+                        >
+                          <SelectTrigger className="border-gray-300">
+                            <SelectValue placeholder="Select religion" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Roman Catholic">Roman Catholic</SelectItem>
+                            <SelectItem value="Christian">Christian</SelectItem>
+                            <SelectItem value="Iglesia ni Christo">Iglesia ni Christo</SelectItem>
+                            <SelectItem value="Islam">Islam</SelectItem>
+                            <SelectItem value="Buddhism">Buddhism</SelectItem>
+                            <SelectItem value="Hinduism">Hinduism</SelectItem>
+                            <SelectItem value="Others">Others</SelectItem>
+                          </SelectContent>
+                        </Select>
                       ) : (
                         <span>{selectedResident?.religion || '-'}</span>
                       )}
@@ -3422,23 +4309,46 @@ export function ManageUsersPage() {
                     <TableCell className="font-medium text-gray-700 align-top">PWD Status</TableCell>
                     <TableCell>
                       {isEditingResidentPreview ? (
-                        <Select 
-                          value={selectedResident?.pwd === true || selectedResident?.pwd === 'Yes' || selectedResident?.pwdStatus === 'Yes' || selectedResident?.isPWD ? 'Yes' : selectedResident?.pwd === false || selectedResident?.pwd === 'No' || selectedResident?.pwdStatus === 'No' ? 'No' : ''} 
-                          onValueChange={value => setSelectedResident({
+                        <div className="inline-flex rounded-md border border-gray-200 bg-white p-1">
+                          <button
+                            type="button"
+                            className={cn(
+                              "px-3 py-1 text-sm font-medium rounded-md transition-colors",
+                              (selectedResident?.pwd === true || selectedResident?.pwd === 'Yes' || selectedResident?.pwdStatus === 'Yes' || selectedResident?.isPWD)
+                                ? "bg-brand-orange text-white shadow-sm"
+                                : "text-gray-600 hover:bg-gray-50"
+                            )}
+                            onClick={() => {
+                              setSelectedResident({
                             ...selectedResident,
-                            pwd: value === 'Yes',
-                            pwdStatus: value,
-                            isPWD: value === 'Yes'
-                          })}
-                        >
-                          <SelectTrigger className="border-gray-300">
-                            <SelectValue placeholder="Select PWD status" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="Yes">Yes</SelectItem>
-                            <SelectItem value="No">No</SelectItem>
-                          </SelectContent>
-                        </Select>
+                                pwd: true,
+                                pwdStatus: 'Yes',
+                                isPWD: true
+                              });
+                            }}
+                          >
+                            Yes
+                          </button>
+                          <button
+                            type="button"
+                            className={cn(
+                              "px-3 py-1 text-sm font-medium rounded-md transition-colors",
+                              !(selectedResident?.pwd === true || selectedResident?.pwd === 'Yes' || selectedResident?.pwdStatus === 'Yes' || selectedResident?.isPWD)
+                                ? "bg-brand-orange text-white shadow-sm"
+                                : "text-gray-600 hover:bg-gray-50"
+                            )}
+                            onClick={() => {
+                              setSelectedResident({
+                                ...selectedResident,
+                                pwd: false,
+                                pwdStatus: 'No',
+                                isPWD: false
+                              });
+                            }}
+                          >
+                            No
+                          </button>
+                        </div>
                       ) : (
                         <span>{selectedResident?.pwd === true || selectedResident?.pwd === 'Yes' || selectedResident?.pwdStatus === 'Yes' || selectedResident?.isPWD ? 'Yes' : selectedResident?.pwd === false || selectedResident?.pwd === 'No' || selectedResident?.pwdStatus === 'No' ? 'No' : '-'}</span>
                       )}
@@ -3450,16 +4360,30 @@ export function ManageUsersPage() {
                       <div className="space-y-3">
                         <div className="mb-2">
                           {isEditingResidentPreview ? (
-                            <Input 
+                            <Select 
                               value={selectedResident?.validIdType || selectedResident?.validId || ''} 
-                              onChange={e => setSelectedResident({
+                              onValueChange={value => setSelectedResident({
                                 ...selectedResident,
-                                validIdType: e.target.value,
-                                validId: e.target.value
+                                validIdType: value,
+                                validId: value
                               })}
-                              className="border-gray-300 mb-2"
-                              placeholder="e.g., Driver's License, Passport"
-                            />
+                            >
+                              <SelectTrigger className="border-gray-300">
+                                <SelectValue placeholder="Select valid ID type" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="National ID">National ID</SelectItem>
+                                <SelectItem value="Driver's License">Driver's License</SelectItem>
+                                <SelectItem value="Passport">Passport</SelectItem>
+                                <SelectItem value="UMID">UMID</SelectItem>
+                                <SelectItem value="SSS">SSS</SelectItem>
+                                <SelectItem value="PhilHealth">PhilHealth</SelectItem>
+                                <SelectItem value="Voter's ID">Voter's ID</SelectItem>
+                                <SelectItem value="Postal ID">Postal ID</SelectItem>
+                                <SelectItem value="Student ID">Student ID</SelectItem>
+                                <SelectItem value="Others">Others</SelectItem>
+                              </SelectContent>
+                            </Select>
                           ) : (
                             <span className="text-sm text-gray-600">{selectedResident?.validIdType || selectedResident?.validId || 'No ID type specified'}</span>
                           )}
@@ -3635,7 +4559,10 @@ export function ManageUsersPage() {
                 <Button
                   type="button"
                   variant="secondary"
-                  onClick={() => setIsEditingResidentPreview(false)}
+                  onClick={() => {
+                    setIsEditingResidentPreview(false);
+                    setPreviewBirthdayInput(selectedResident?.birthday ? formatToMMDDYYYY(selectedResident.birthday) : "");
+                  }}
                 >
                   Cancel
                 </Button>
@@ -3664,7 +4591,7 @@ export function ManageUsersPage() {
                 <input
                   type="file"
                   accept="image/*"
-                  onChange={(e) => {
+                  onChange={async (e) => {
                     const file = e.target.files?.[0];
                     if (file && isEditingPreviewAdmin) {
                       // Validate file type
@@ -3685,17 +4612,23 @@ export function ManageUsersPage() {
                         });
                         return;
                       }
-                      // Convert to base64
-                      const reader = new FileReader();
-                      reader.onload = (event) => {
-                        const result = event.target?.result as string;
-                        setEditingPreviewAdmin({ ...editingPreviewAdmin, profilePicture: result });
+                      try {
+                        // Use admin's userId or email as identifier
+                        const userId = editingPreviewAdmin.userId || editingPreviewAdmin.email || `admin-${editingPreviewAdmin.id}`;
+                        const result = await uploadProfilePicture(file, userId);
+                        setEditingPreviewAdmin({ ...editingPreviewAdmin, profilePicture: result.url });
                         toast({
                           title: 'Success',
                           description: 'Profile picture uploaded successfully'
                         });
-                      };
-                      reader.readAsDataURL(file);
+                      } catch (error: any) {
+                        console.error('Error uploading profile picture:', error);
+                        toast({
+                          title: 'Upload failed',
+                          description: error.message || 'Failed to upload profile picture. Please try again.',
+                          variant: 'destructive'
+                        });
+                      }
                     }
                   }}
                   className="hidden"
@@ -4298,10 +5231,27 @@ export function ManageUsersPage() {
                   </div>
                   <div>
                     <Label>Valid ID Type</Label>
-                    <Input value={selectedResident.validId} onChange={e => setSelectedResident({
+                    <Select value={selectedResident.validId || selectedResident.validIdType || ''} onValueChange={value => setSelectedResident({
                       ...selectedResident,
-                      validId: e.target.value
-                    })} />
+                      validId: value,
+                      validIdType: value
+                    })}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select valid ID type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="National ID">National ID</SelectItem>
+                        <SelectItem value="Driver's License">Driver's License</SelectItem>
+                        <SelectItem value="Passport">Passport</SelectItem>
+                        <SelectItem value="UMID">UMID</SelectItem>
+                        <SelectItem value="SSS">SSS</SelectItem>
+                        <SelectItem value="PhilHealth">PhilHealth</SelectItem>
+                        <SelectItem value="Voter's ID">Voter's ID</SelectItem>
+                        <SelectItem value="Postal ID">Postal ID</SelectItem>
+                        <SelectItem value="Student ID">Student ID</SelectItem>
+                        <SelectItem value="Others">Others</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div>
                     <Label>Valid ID Image URL</Label>
