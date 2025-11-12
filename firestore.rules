@@ -34,6 +34,13 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
     
+    // Check if user is suspended
+    function isSuspended() {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.suspended == true;
+    }
+    
     // ========================================
     // COLLECTIONS
     // ========================================
@@ -63,8 +70,11 @@ service cloud.firestore {
       allow read: if true;
       
       // Users can create/update their own profile, admins can modify any
-      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.firebaseUid;
-      allow update: if isOwner(resource.data.firebaseUid) || isAdmin();
+      // Suspended users cannot create or update their profile
+      allow create: if isAuthenticated() && 
+                       !isSuspended() &&
+                       request.auth.uid == request.resource.data.firebaseUid;
+      allow update: if (!isSuspended() && isOwner(resource.data.firebaseUid)) || isAdmin();
       
       // Users can delete their own account, admins can delete any
       allow delete: if isOwner(resource.data.firebaseUid) || isAdmin();
@@ -76,7 +86,9 @@ service cloud.firestore {
       allow read: if true;
       
       // Authenticated users can create reports with their own userId
+      // Suspended users cannot create reports
       allow create: if isAuthenticated() && 
+                       !isSuspended() &&
                        request.resource.data.userId == request.auth.uid;
       
       // Allow public update and delete (for regular admins to manage reports)
@@ -109,7 +121,8 @@ service cloud.firestore {
       allow read: if true;
       
       // Allow public write for chat messages (admins and users both need to send messages)
-      allow write: if true;
+      // Suspended users cannot send chat messages
+      allow write: if !isSuspended() || isAdmin();
     }
 
     // ========================================
@@ -131,7 +144,10 @@ service cloud.firestore {
       allow write: if isAdmin();
       
       // Users can write their own chat room metadata
-      allow write: if isAuthenticated() && chatRoomId == request.auth.uid;
+      // Suspended users cannot write chat room metadata
+      allow write: if isAuthenticated() && 
+                      !isSuspended() &&
+                      chatRoomId == request.auth.uid;
     }
     
     // Report counter (for auto-incrementing report IDs)
@@ -190,16 +206,22 @@ service cloud.firestore {
     // USER-SCOPED EMERGENCY CONTACTS (PER-ACCOUNT)
     // ========================================
     match /users/{userId}/emergency_contacts/{contactId} {
-      // Only the owner can read
-      allow read: if isAuthenticated() && request.auth.uid == userId;
+      // Only the owner can read (suspended users cannot read)
+      allow read: if isAuthenticated() && 
+                     !isSuspended() &&
+                     request.auth.uid == userId;
 
       // Owner creates their own record; must set createdBy to their uid
+      // Suspended users cannot create contacts
       allow create: if isAuthenticated()
+                    && !isSuspended()
                     && request.auth.uid == userId
                     && request.resource.data.createdBy == request.auth.uid;
 
       // Only the owner can update/delete their own contact
+      // Suspended users cannot update/delete contacts
       allow update, delete: if isAuthenticated()
+                            && !isSuspended()
                             && request.auth.uid == userId
                             && resource.data.createdBy == request.auth.uid;
     }

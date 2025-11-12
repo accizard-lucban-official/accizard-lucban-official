@@ -1394,7 +1394,7 @@ export function ChatSupportPage() {
 
           {/* Chat Window */}
           {(!isMobileView || showChatOnMobile) && (
-            <Card className="h-full flex flex-col border border-gray-200 shadow-none overflow-hidden">
+            <Card className="h-full flex flex-col border border-gray-200 shadow-none">
               {selectedSession ? (
                 <>
                   <CardHeader className="border-b bg-white rounded-t-lg sticky top-0 z-10">
@@ -1528,8 +1528,8 @@ export function ChatSupportPage() {
                       </div>
                     )}
                   </CardHeader>
-                  <CardContent className="flex-1 flex flex-col p-0 overflow-hidden min-h-0">
-                    <div className="flex flex-col items-center justify-center gap-6 w-full px-6 pt-6 pb-4 border-b border-gray-100 bg-white">
+                  <CardContent className="flex-1 flex flex-col p-0 min-h-0">
+                    <div className="flex flex-col items-center justify-center gap-6 w-full px-6 pt-6 pb-4 border-b border-gray-100 bg-white flex-shrink-0">
                       <img src="/accizard-uploads/accizard-logo-svg.svg" alt="Accizard Logo" className="w-32 h-32 mx-auto" />
                       <img src="/accizard-uploads/accizard-logotype-svg.svg" alt="Accizard Logotype" className="w-64 h-auto mx-auto" />
                       <div className="text-center mt-2">
@@ -1828,11 +1828,10 @@ export function ChatSupportPage() {
                           </div>
                         </div>
                       )}
-                      
                       <div ref={messagesEndRef} />
                     </div>
                   </CardContent>
-                  <div className="border-t p-4 bg-white rounded-b-lg sticky bottom-0">
+                  <div className="border-t p-4 bg-white rounded-b-lg">
                     {/* Attachment Previews */}
                     {attachmentPreviews.length > 0 && (
                       <div className="mb-3 space-y-2 max-h-48 overflow-y-auto">

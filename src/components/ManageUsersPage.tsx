@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
@@ -8,7 +9,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Search, Plus, Edit, Trash2, Shield, ShieldOff, ShieldCheck, ShieldX, Eye, User, FileText, Calendar, CheckSquare, Square, UserPlus, EyeOff, ChevronUp, ChevronDown, ArrowUp, ArrowDown, ArrowUpDown, Upload, X, FileDown } from "lucide-react";
+import { Search, Plus, Edit, Trash2, Shield, ShieldOff, ShieldCheck, ShieldX, Eye, User, FileText, Calendar, CheckSquare, Square, UserPlus, EyeOff, ChevronUp, ChevronDown, ArrowUp, ArrowDown, ArrowUpDown, Upload, X, FileDown, Camera, Check } from "lucide-react";
 import { Layout } from "./Layout";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -17,7 +18,7 @@ import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, serverTimestamp
 import { ref, getDownloadURL } from "firebase/storage";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/components/ui/use-toast";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useUserRole } from "@/hooks/useUserRole";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -43,6 +44,7 @@ function formatTimeNoSeconds(time: string | number | null | undefined) {
 const ADMIN_POSITIONS_COLLECTION = "adminPositions";
 
 export function ManageUsersPage() {
+  const navigate = useNavigate();
   const { userRole, loading: roleLoading, canManageAdmins } = useUserRole();
   const [searchTerm, setSearchTerm] = useState("");
   const [positionFilter, setPositionFilter] = useState("all");
@@ -57,12 +59,17 @@ export function ManageUsersPage() {
   const [showResidentPreview, setShowResidentPreview] = useState(false);
   const [showAdminPreview, setShowAdminPreview] = useState(false);
   const [previewAdmin, setPreviewAdmin] = useState<any>(null);
+  const [isEditingPreviewAdmin, setIsEditingPreviewAdmin] = useState(false);
+  const [editingPreviewAdmin, setEditingPreviewAdmin] = useState<any>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<boolean>(false);
   const [activeResidentTab, setActiveResidentTab] = useState<'profile' | 'reports'>('profile');
   const [residentReports, setResidentReports] = useState<any[]>([]);
   const [loadingReports, setLoadingReports] = useState(false);
   const [confirmPermissionChange, setConfirmPermissionChange] = useState<any>(null);
+  const [confirmSuspendResident, setConfirmSuspendResident] = useState<any>(null);
+  const [suspensionReason, setSuspensionReason] = useState<string>("");
+  const [isEditingResidentPreview, setIsEditingResidentPreview] = useState(false);
   const [selectedAdmins, setSelectedAdmins] = useState<string[]>([]);
   const [selectedResidents, setSelectedResidents] = useState<string[]>([]);
   const [adminDateRange, setAdminDateRange] = useState<DateRange | undefined>();
@@ -77,6 +84,7 @@ export function ManageUsersPage() {
     position: "",
     idNumber: "",
     username: "",
+    email: "",
     password: "",
     profilePicture: ""
   });
@@ -356,7 +364,17 @@ export function ManageUsersPage() {
             cityTown: data.cityTown || data.city || "Unknown",
             profilePicture: profilePicture,  // Use the resolved value
             validIdImage: validIdImage,  // Use the resolved value (now a download URL if it was a path)
-            validIdUrl: validIdImage  // Also set validIdUrl for backward compatibility
+            validIdUrl: validIdImage,  // Also set validIdUrl for backward compatibility
+            // Map Firestore field names to component state
+            civil_status: data.civil_status || data.civilStatus,
+            civilStatus: data.civil_status || data.civilStatus,
+            blood_type: data.blood_type || data.bloodType,
+            bloodType: data.blood_type || data.bloodType,
+            pwd: data.pwd,
+            pwdStatus: data.pwd === true || data.pwd === 'Yes' ? 'Yes' : data.pwd === false || data.pwd === 'No' ? 'No' : undefined,
+            isPWD: data.pwd === true || data.pwd === 'Yes',
+            validIdType: data.validIdType || data.validId,
+            validId: data.validIdType || data.validId
           };
         });
         
@@ -509,6 +527,7 @@ export function ManageUsersPage() {
         position: newAdmin.position,
         idNumber: newAdmin.idNumber,
         username: newAdmin.username,
+        email: newAdmin.email || "",
         password: newAdmin.password,
         profilePicture: newAdmin.profilePicture || "",
         hasEditPermission: false,
@@ -525,6 +544,7 @@ export function ManageUsersPage() {
           position: newAdmin.position,
           idNumber: newAdmin.idNumber,
           username: newAdmin.username,
+          email: newAdmin.email || "",
           password: newAdmin.password,
           profilePicture: newAdmin.profilePicture || "",
           hasEditPermission: false,
@@ -539,6 +559,7 @@ export function ManageUsersPage() {
         position: "",
         idNumber: "",
         username: "",
+        email: "",
         password: "",
         profilePicture: ""
       });
@@ -571,7 +592,8 @@ export function ManageUsersPage() {
         name: editingAdmin.name,
         position: editingAdmin.position,
         idNumber: editingAdmin.idNumber,
-        username: editingAdmin.username
+        username: editingAdmin.username,
+        email: editingAdmin.email || ""
       });
       setAdminUsers(adminUsers.map(a => a.id === editingAdmin.id ? editingAdmin : a));
       setEditingAdmin(null);
@@ -728,22 +750,76 @@ export function ManageUsersPage() {
 
   const handlePreviewAdmin = (admin: any) => {
     setPreviewAdmin(admin);
+    setEditingPreviewAdmin({ ...admin });
+    setIsEditingPreviewAdmin(false);
     setShowAdminPreview(true);
+  };
+
+  const handleSavePreviewAdminEdit = async () => {
+    if (!editingPreviewAdmin) return;
+    try {
+      await updateDoc(doc(db, "admins", editingPreviewAdmin.id), {
+        name: editingPreviewAdmin.name,
+        position: editingPreviewAdmin.position,
+        idNumber: editingPreviewAdmin.idNumber,
+        username: editingPreviewAdmin.username,
+        email: editingPreviewAdmin.email || "",
+        password: editingPreviewAdmin.password || "",
+        profilePicture: editingPreviewAdmin.profilePicture || ""
+      });
+      setAdminUsers(adminUsers.map(a => a.id === editingPreviewAdmin.id ? editingPreviewAdmin : a));
+      setPreviewAdmin(editingPreviewAdmin);
+      setIsEditingPreviewAdmin(false);
+      toast({
+        title: 'Success',
+        description: 'Admin account updated successfully!'
+      });
+    } catch (error) {
+      console.error("Error updating admin:", error);
+      toast({
+        title: 'Error',
+        description: 'Failed to update admin account. Please try again.',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const handleCancelPreviewEdit = () => {
+    setEditingPreviewAdmin({ ...previewAdmin });
+    setIsEditingPreviewAdmin(false);
   };
 
   const handleSaveResidentEdit = async () => {
     try {
-      await updateDoc(doc(db, "users", selectedResident.id), {
+      const updateData: any = {
         fullName: selectedResident.fullName,
         phoneNumber: selectedResident.phoneNumber,
         barangay: selectedResident.barangay,
         cityTown: selectedResident.cityTown,
         homeAddress: selectedResident.homeAddress,
         email: selectedResident.email,
-        validId: selectedResident.validId,
         validIdUrl: selectedResident.validIdUrl || selectedResident.validIdImage || "",
         additionalInfo: selectedResident.additionalInfo
-      });
+      };
+      
+      // Add new fields with correct Firestore field names
+      if (selectedResident.birthday !== undefined) updateData.birthday = selectedResident.birthday;
+      if (selectedResident.gender !== undefined) updateData.gender = selectedResident.gender;
+      if (selectedResident.civil_status !== undefined || selectedResident.civilStatus !== undefined) {
+        updateData.civil_status = selectedResident.civil_status || selectedResident.civilStatus;
+      }
+      if (selectedResident.religion !== undefined) updateData.religion = selectedResident.religion;
+      if (selectedResident.blood_type !== undefined || selectedResident.bloodType !== undefined) {
+        updateData.blood_type = selectedResident.blood_type || selectedResident.bloodType;
+      }
+      if (selectedResident.pwd !== undefined || selectedResident.pwdStatus !== undefined || selectedResident.isPWD !== undefined) {
+        updateData.pwd = selectedResident.pwd === true || selectedResident.pwd === 'Yes' || selectedResident.pwdStatus === 'Yes' || selectedResident.isPWD;
+      }
+      if (selectedResident.validIdType !== undefined || selectedResident.validId !== undefined) {
+        updateData.validIdType = selectedResident.validIdType || selectedResident.validId;
+      }
+      
+      await updateDoc(doc(db, "users", selectedResident.id), updateData);
       setResidents(residents.map(r => r.id === selectedResident.id ? selectedResident : r));
       setIsEditResidentOpen(false);
       setSelectedResident(null);
@@ -1219,16 +1295,28 @@ export function ManageUsersPage() {
         setLoadingReports(true);
         try {
           const querySnapshot = await getDocs(collection(db, "reports"));
-          // Prefer userId if available, else fallback to fullName
+          // Use firebaseUid to match reports (reports use Firebase Auth UID)
           const reports = querySnapshot.docs
             .filter(doc => {
               const data = doc.data();
-              return (data.userId && selectedResident.userId && data.userId === selectedResident.userId) ||
-                     (data.reportedBy && selectedResident.fullName && data.reportedBy === selectedResident.fullName);
+              // Match by Firebase UID (most reliable)
+              if (selectedResident.firebaseUid && data.userId === selectedResident.firebaseUid) {
+                return true;
+              }
+              // Fallback: match by userId field (RID- format)
+              if (selectedResident.userId && data.userId === selectedResident.userId) {
+                return true;
+              }
+              // Fallback: match by reportedBy name
+              if (data.reportedBy && selectedResident.fullName && data.reportedBy === selectedResident.fullName) {
+                return true;
+              }
+              return false;
             })
             .map(doc => ({
               id: doc.id,
               ...doc.data(),
+              reportId: doc.data().reportId || doc.id,
               timestamp: doc.data().timestamp || doc.data().createdAt || doc.data().createdDate
             }))
             .sort((a, b) => {
@@ -1472,7 +1560,7 @@ export function ManageUsersPage() {
                         value={newAdmin.idNumber} 
                         onChange={e => setNewAdmin({...newAdmin, idNumber: e.target.value})} 
                         className={showAdminFormErrors && newAdmin.idNumber.trim() === "" ? "border-red-500" : ""}
-                        placeholder="Enter ID number"
+                        placeholder="EMP"
                       />
                       {showAdminFormErrors && newAdmin.idNumber.trim() === "" && (
                         <div className="text-xs text-red-600 mt-1">ID number is required</div>
@@ -1489,6 +1577,15 @@ export function ManageUsersPage() {
                       {showAdminFormErrors && newAdmin.username.trim() === "" && (
                         <div className="text-xs text-red-600 mt-1">Username is required</div>
                       )}
+                    </div>
+                    <div>
+                      <Label>Email</Label>
+                      <Input 
+                        type="email"
+                        value={newAdmin.email} 
+                        onChange={e => setNewAdmin({...newAdmin, email: e.target.value})} 
+                        placeholder="Enter email address"
+                      />
                     </div>
                     <div>
                       <Label>Password{showAdminFormErrors && newAdmin.password.trim() === "" && <span className="text-red-500"> *</span>}</Label>
@@ -1561,40 +1658,40 @@ export function ManageUsersPage() {
                           id="admin-profile-picture-upload"
                         />
                         <div className="flex items-center gap-3">
-                          {newAdmin.profilePicture ? (
-                            <div className="relative">
-                              <img
-                                src={newAdmin.profilePicture}
-                                alt="Profile preview"
-                                className="w-20 h-20 rounded-full object-cover border-2 border-gray-200"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => setNewAdmin({ ...newAdmin, profilePicture: "" })}
-                                className="absolute -top-1 -right-1 h-5 w-5 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center"
-                              >
-                                <X className="h-3 w-3" />
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="w-20 h-20 rounded-full bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center">
-                              <User className="h-8 w-8 text-gray-400" />
-                            </div>
-                          )}
-                          <label
-                            htmlFor="admin-profile-picture-upload"
-                            className="cursor-pointer"
-                          >
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="flex items-center gap-2"
-                            >
-                              <Upload className="h-4 w-4" />
-                              {newAdmin.profilePicture ? "Change" : "Upload"}
-                            </Button>
-                          </label>
+                          <div className="relative">
+                            {newAdmin.profilePicture ? (
+                              <>
+                                <img
+                                  src={newAdmin.profilePicture}
+                                  alt="Profile preview"
+                                  className="w-32 h-32 rounded-full object-cover border-2 border-gray-200"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setNewAdmin({ ...newAdmin, profilePicture: "" })}
+                                  className="absolute -top-1 -right-1 h-6 w-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center"
+                                >
+                                  <X className="h-4 w-4" />
+                                </button>
+                                <label
+                                  htmlFor="admin-profile-picture-upload"
+                                  className="absolute bottom-0 left-0 bg-brand-orange hover:bg-brand-orange/90 text-white p-2 rounded-full cursor-pointer shadow-lg"
+                                >
+                                  <Camera className="h-4 w-4" />
+                                </label>
+                              </>
+                            ) : (
+                              <div className="w-32 h-32 rounded-full bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center relative">
+                                <User className="h-12 w-12 text-gray-400" />
+                                <label
+                                  htmlFor="admin-profile-picture-upload"
+                                  className="absolute bottom-0 left-0 bg-brand-orange hover:bg-brand-orange/90 text-white p-2 rounded-full cursor-pointer shadow-lg"
+                                >
+                                  <Camera className="h-4 w-4" />
+                                </label>
+                              </div>
+                            )}
+                          </div>
                         </div>
                         <p className="text-xs text-gray-500 mt-2">
                           Upload a profile picture (max 5MB, JPG/PNG)
@@ -1629,6 +1726,30 @@ export function ManageUsersPage() {
                     </TooltipContent>
                   </Tooltip>
 
+                  {/* Edit Admin Button */}
+                  {selectedAdmins.length === 1 && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            const adminToEdit = adminUsers.find(a => selectedAdmins.includes(a.id));
+                            if (adminToEdit) {
+                              handleEditAdmin(adminToEdit);
+                            }
+                          }}
+                        >
+                          <Edit className="h-4 w-4 mr-2" />
+                          Edit
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>Edit selected admin</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
+
                   {/* Search Bar */}
                   <div className="flex-1 min-w-[200px] relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -1657,23 +1778,6 @@ export function ManageUsersPage() {
                       </Button>
                     )}
                   </div>
-
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={exportAdminsToCSV}
-                        className="flex items-center gap-2"
-                      >
-                        <FileDown className="h-4 w-4" />
-                        Export CSV
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Download admin accounts as CSV</p>
-                    </TooltipContent>
-                  </Tooltip>
 
                   {/* Position Filter */}
                   <Select value={positionFilter} onValueChange={setPositionFilter}>
@@ -1760,6 +1864,23 @@ export function ManageUsersPage() {
                       </Tooltip>
                     </>
                   )}
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={exportAdminsToCSV}
+                        className="ml-auto flex items-center gap-2"
+                      >
+                        <FileDown className="h-4 w-4" />
+                        Export CSV
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Download admin accounts as CSV</p>
+                    </TooltipContent>
+                  </Tooltip>
                 </div>
               </div>
 
@@ -1811,44 +1932,12 @@ export function ManageUsersPage() {
                           <button
                             type="button"
                             className="flex items-center gap-2 hover:text-brand-orange transition-colors"
-                          onClick={() => handleAdminSort('idNumber')}
-                        >
-                            ID Number
-                            {adminSortField === 'idNumber' && adminSortDirection === 'asc' ? (
-                              <ArrowUp className="h-4 w-4 text-brand-orange" />
-                            ) : adminSortField === 'idNumber' && adminSortDirection === 'desc' ? (
-                              <ArrowDown className="h-4 w-4 text-brand-orange" />
-                            ) : (
-                              <ArrowUpDown className="h-4 w-4" />
-                            )}
-                          </button>
-                        </TableHead>
-                        <TableHead>
-                          <button
-                            type="button"
-                            className="flex items-center gap-2 hover:text-brand-orange transition-colors"
                           onClick={() => handleAdminSort('username')}
                         >
                             Username
                             {adminSortField === 'username' && adminSortDirection === 'asc' ? (
                               <ArrowUp className="h-4 w-4 text-brand-orange" />
                             ) : adminSortField === 'username' && adminSortDirection === 'desc' ? (
-                              <ArrowDown className="h-4 w-4 text-brand-orange" />
-                            ) : (
-                              <ArrowUpDown className="h-4 w-4" />
-                            )}
-                          </button>
-                        </TableHead>
-                        <TableHead>
-                          <button
-                            type="button"
-                            className="flex items-center gap-2 hover:text-brand-orange transition-colors"
-                          onClick={() => handleAdminSort('createdDate')}
-                        >
-                            Created Date
-                            {adminSortField === 'createdDate' && adminSortDirection === 'asc' ? (
-                              <ArrowUp className="h-4 w-4 text-brand-orange" />
-                            ) : adminSortField === 'createdDate' && adminSortDirection === 'desc' ? (
                               <ArrowDown className="h-4 w-4 text-brand-orange" />
                             ) : (
                               <ArrowUpDown className="h-4 w-4" />
@@ -1870,6 +1959,22 @@ export function ManageUsersPage() {
                             </Button>
                           </div>
                         </TableHead>
+                        <TableHead>
+                          <button
+                            type="button"
+                            className="flex items-center gap-2 hover:text-brand-orange transition-colors"
+                          onClick={() => handleAdminSort('createdDate')}
+                        >
+                            Created Date
+                            {adminSortField === 'createdDate' && adminSortDirection === 'asc' ? (
+                              <ArrowUp className="h-4 w-4 text-brand-orange" />
+                            ) : adminSortField === 'createdDate' && adminSortDirection === 'desc' ? (
+                              <ArrowDown className="h-4 w-4 text-brand-orange" />
+                            ) : (
+                              <ArrowUpDown className="h-4 w-4" />
+                            )}
+                          </button>
+                        </TableHead>
                         <TableHead>Actions</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -1883,15 +1988,14 @@ export function ManageUsersPage() {
                             <TableCell><div className="h-4 w-32 bg-gray-200 rounded animate-pulse"></div></TableCell>
                             <TableCell><div className="h-4 w-28 bg-gray-200 rounded animate-pulse"></div></TableCell>
                             <TableCell><div className="h-4 w-24 bg-gray-200 rounded animate-pulse"></div></TableCell>
-                            <TableCell><div className="h-4 w-28 bg-gray-200 rounded animate-pulse"></div></TableCell>
-                            <TableCell><div className="h-4 w-20 bg-gray-200 rounded animate-pulse"></div></TableCell>
                             <TableCell><div className="h-8 w-16 bg-gray-200 rounded animate-pulse"></div></TableCell>
+                            <TableCell><div className="h-4 w-20 bg-gray-200 rounded animate-pulse"></div></TableCell>
                             <TableCell><div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div></TableCell>
                           </TableRow>
                         ))
                       ) : pagedAdmins.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={9} className="text-center text-gray-500 py-8">
+                          <TableCell colSpan={8} className="text-center text-gray-500 py-8">
                             No results found.
                           </TableCell>
                         </TableRow>
@@ -1907,20 +2011,19 @@ export function ManageUsersPage() {
                             <TableCell className="font-medium">{admin.userId}</TableCell>
                             <TableCell className="font-medium">{admin.name}</TableCell>
                             <TableCell>{admin.position}</TableCell>
-                            <TableCell>{admin.idNumber}</TableCell>
                             <TableCell>{admin.username}</TableCell>
-                            <TableCell>
-                              <div className="flex flex-col">
-                                <span>{admin.createdDate || 'N/A'}</span>
-                                <span className="text-xs text-gray-500">{formatTimeNoSeconds(admin.createdTime)}</span>
-                              </div>
-                            </TableCell>
                             <TableCell>
                               {showAllAdminPasswords ? (
                                 <span>{admin.password}</span>
                               ) : (
                                 <span>{'•'.repeat(Math.max(8, (admin.password || '').length))}</span>
                               )}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-col">
+                                <span>{admin.createdDate || 'N/A'}</span>
+                                <span className="text-xs text-gray-500">{formatTimeNoSeconds(admin.createdTime)}</span>
+                              </div>
                             </TableCell>
                             <TableCell>
                               <div className="flex items-center gap-2">
@@ -1938,13 +2041,6 @@ export function ManageUsersPage() {
                                     <p>Preview Admin Details</p>
                                   </TooltipContent>
                                 </Tooltip>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handleEditAdmin(admin)}
-                                >
-                                  <Edit className="h-4 w-4" />
-                                </Button>
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -2353,23 +2449,6 @@ export function ManageUsersPage() {
                     )}
                   </div>
 
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={exportResidentsToCSV}
-                        className="flex items-center gap-2"
-                      >
-                        <FileDown className="h-4 w-4" />
-                        Export CSV
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Download resident accounts as CSV</p>
-                    </TooltipContent>
-                  </Tooltip>
-
                   {/* Barangay Filter */}
                     <Select value={barangayFilter} onValueChange={setBarangayFilter}>
                     <SelectTrigger className="w-auto">
@@ -2451,6 +2530,23 @@ export function ManageUsersPage() {
                       </Tooltip>
                     </>
                   )}
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={exportResidentsToCSV}
+                        className="ml-auto flex items-center gap-2"
+                      >
+                        <FileDown className="h-4 w-4" />
+                        Export CSV
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Download resident accounts as CSV</p>
+                    </TooltipContent>
+                  </Tooltip>
                 </div>
               </div>
 
@@ -2546,7 +2642,6 @@ export function ManageUsersPage() {
                             )}
                           </button>
                         </TableHead>
-                        <TableHead>Status</TableHead>
                         <TableHead>Actions</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -2563,12 +2658,11 @@ export function ManageUsersPage() {
                             <TableCell><div className="h-4 w-28 bg-gray-200 rounded animate-pulse"></div></TableCell>
                             <TableCell><div className="h-4 w-28 bg-gray-200 rounded animate-pulse"></div></TableCell>
                             <TableCell><div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div></TableCell>
-                            <TableCell><div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div></TableCell>
                           </TableRow>
                         ))
                       ) : pagedResidents.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={9} className="text-center text-gray-500 py-8">
+                          <TableCell colSpan={8} className="text-center text-gray-500 py-8">
                             No residents found. {residents.length === 0 ? "No residents have been registered yet." : "No residents match your search criteria."}
                           </TableCell>
                         </TableRow>
@@ -2599,58 +2693,6 @@ export function ManageUsersPage() {
                               <span className="text-xs text-gray-500">{formatTimeNoSeconds(resident.createdTime)}</span>
                             </TableCell>
                             <TableCell>
-                              <Select 
-                                value={
-                                  resident.suspended ? 'Suspended' : 
-                                  resident.verified ? 'Verified' : 
-                                  'Pending'
-                                } 
-                                onValueChange={async (newStatus) => {
-                                  try {
-                                    const updates: any = {};
-                                    if (newStatus === 'Verified') {
-                                      updates.verified = true;
-                                      updates.suspended = false;
-                                    } else if (newStatus === 'Pending') {
-                                      updates.verified = false;
-                                      updates.suspended = false;
-                                    } else if (newStatus === 'Suspended') {
-                                      updates.suspended = true;
-                                      updates.verified = false;
-                                    }
-                                    
-                                    await updateDoc(doc(db, "users", resident.id), updates);
-                                    setResidents(residents.map(r => r.id === resident.id ? { ...r, ...updates } : r));
-                                    toast({
-                                      title: 'Success',
-                                      description: `Status updated to ${newStatus}`
-                                    });
-                                  } catch (error) {
-                                    console.error("Error updating resident status:", error);
-                                    toast({
-                                      title: 'Error',
-                                      description: 'Failed to update status. Please try again.',
-                                      variant: 'destructive'
-                                    });
-                                  }
-                                }}
-                              >
-                                <SelectTrigger className={cn(
-                                  "w-auto border-0 bg-transparent font-medium focus:ring-1 focus:ring-brand-orange",
-                                  resident.suspended && 'text-red-600',
-                                  resident.verified && 'text-green-600',
-                                  !resident.verified && !resident.suspended && 'text-yellow-600'
-                                )}>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="Verified">Verified</SelectItem>
-                                  <SelectItem value="Pending">Pending</SelectItem>
-                                  <SelectItem value="Suspended">Suspended</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </TableCell>
-                                                        <TableCell>
                               <div className="flex items-center gap-2">
                                 <Button
                                   size="sm"
@@ -2660,6 +2702,79 @@ export function ManageUsersPage() {
                                 >
                                   <Eye className="h-4 w-4" />
                                 </Button>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className={resident.suspended ? "text-gray-400" : resident.verified ? "text-green-600" : "text-yellow-600"}
+                                      title="Account Status"
+                                    >
+                                      {resident.suspended ? <ShieldOff className="h-4 w-4" /> : resident.verified ? <ShieldCheck className="h-4 w-4" /> : <ShieldX className="h-4 w-4" />}
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    <DropdownMenuItem
+                                      onClick={async () => {
+                                        try {
+                                          await updateDoc(doc(db, "users", resident.id), {
+                                            verified: true,
+                                            suspended: false
+                                          });
+                                          setResidents(residents.map(r => r.id === resident.id ? { ...r, verified: true, suspended: false } : r));
+                                          toast({
+                                            title: 'Success',
+                                            description: 'Resident account verified'
+                                          });
+                                        } catch (error) {
+                                          console.error("Error updating verification:", error);
+                                          toast({
+                                            title: 'Error',
+                                            description: 'Failed to update status. Please try again.',
+                                            variant: 'destructive'
+                                          });
+                                        }
+                                      }}
+                                      className="cursor-pointer"
+                                    >
+                                      <ShieldCheck className="h-4 w-4 mr-2 text-green-600" />
+                                      Verify
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={async () => {
+                                        try {
+                                          await updateDoc(doc(db, "users", resident.id), {
+                                            verified: false,
+                                            suspended: false
+                                          });
+                                          setResidents(residents.map(r => r.id === resident.id ? { ...r, verified: false, suspended: false } : r));
+                                          toast({
+                                            title: 'Success',
+                                            description: 'Verification revoked'
+                                          });
+                                        } catch (error) {
+                                          console.error("Error updating verification:", error);
+                                          toast({
+                                            title: 'Error',
+                                            description: 'Failed to update status. Please try again.',
+                                            variant: 'destructive'
+                                          });
+                                        }
+                                      }}
+                                      className="cursor-pointer"
+                                    >
+                                      <ShieldX className="h-4 w-4 mr-2 text-yellow-600" />
+                                      Unverify
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() => setConfirmSuspendResident(resident)}
+                                      className="cursor-pointer"
+                                    >
+                                      <ShieldOff className="h-4 w-4 mr-2 text-gray-600" />
+                                      Suspend
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
                                 <AlertDialog>
                                   <AlertDialogTrigger asChild>
                                     <Button size="sm" variant="outline" className="text-red-600" title="Delete Resident">
@@ -2702,15 +2817,6 @@ export function ManageUsersPage() {
                                     </AlertDialogFooter>
                                   </AlertDialogContent>
                                 </AlertDialog>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className={resident.suspended ? "text-gray-400" : resident.verified ? "text-green-600" : "text-yellow-600"}
-                                  onClick={() => handleAccountStatus(resident)}
-                                  title="Account Status"
-                                >
-                                  {resident.suspended ? <ShieldOff className="h-4 w-4" /> : resident.verified ? <ShieldCheck className="h-4 w-4" /> : <ShieldX className="h-4 w-4" />}
-                                </Button>
                               </div>
                             </TableCell>
                           </TableRow>
@@ -2902,63 +3008,126 @@ export function ManageUsersPage() {
         </AlertDialog>
 
         {/* Resident Preview Modal */}
-        <Dialog open={showResidentPreview} onOpenChange={setShowResidentPreview}>
+        <Dialog open={showResidentPreview} onOpenChange={(open) => {
+          setShowResidentPreview(open);
+          if (!open) {
+            setIsEditingResidentPreview(false);
+          }
+        }}>
           <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Resident Details</DialogTitle>
+            <DialogHeader className="border-b border-gray-200 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 bg-brand-orange/10 rounded-full flex items-center justify-center">
+                  <User className="h-5 w-5 text-brand-orange" />
+                </div>
+                <DialogTitle>Resident Details</DialogTitle>
+              </div>
             </DialogHeader>
             
             {/* Profile Picture at the top - large and clickable */}
-            <div className="flex flex-col items-center py-4">
-              <div className="relative">
-                {selectedResident?.profilePicture ? (
-                  <button
-                    type="button"
-                    onClick={() => window.open(selectedResident.profilePicture, '_blank')}
-                    className="focus:outline-none group relative"
-                    title="Click to view full size"
-                  >
-                    <img 
-                      src={selectedResident.profilePicture} 
-                      alt="Profile" 
-                      className="w-32 h-32 rounded-full object-cover border-4 border-gray-200 group-hover:border-brand-orange transition-all duration-200 shadow-lg group-hover:shadow-xl"
-                      onLoad={() => console.log("✅ Profile picture loaded successfully:", selectedResident.profilePicture)}
-                      onError={(e) => {
-                        console.error("❌ Failed to load profile picture:", selectedResident.profilePicture);
-                        console.log("📋 Selected resident data:", selectedResident);
-                        e.currentTarget.style.display = 'none';
-                        const parent = e.currentTarget.parentElement;
-                        if (parent) {
-                          const fallback = document.createElement('div');
-                          fallback.className = 'w-32 h-32 rounded-full bg-gray-200 flex items-center justify-center border-4 border-gray-200';
-                          fallback.innerHTML = '<svg class="h-16 w-16 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
-                          parent.appendChild(fallback);
-                        }
-                      }}
-                    />
-                    <div className="absolute inset-0 rounded-full bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all duration-200 flex items-center justify-center">
-                      <Eye className="h-8 w-8 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+            {activeResidentTab === 'profile' && (
+              <div className="flex flex-col items-center py-4">
+                <div className="relative">
+                  {selectedResident?.profilePicture ? (
+                    <button
+                      type="button"
+                      onClick={() => setPreviewImage(selectedResident.profilePicture)}
+                      className="focus:outline-none group relative"
+                      title="Click to view full size"
+                    >
+                      <img 
+                        src={selectedResident.profilePicture} 
+                        alt="Profile" 
+                        className="w-32 h-32 rounded-full object-cover border-4 border-gray-200 group-hover:border-brand-orange transition-all duration-200 shadow-lg group-hover:shadow-xl"
+                        onLoad={() => console.log("✅ Profile picture loaded successfully:", selectedResident.profilePicture)}
+                        onError={(e) => {
+                          console.error("❌ Failed to load profile picture:", selectedResident.profilePicture);
+                          console.log("📋 Selected resident data:", selectedResident);
+                          e.currentTarget.style.display = 'none';
+                          const parent = e.currentTarget.parentElement;
+                          if (parent) {
+                            const fallback = document.createElement('div');
+                            fallback.className = 'w-32 h-32 rounded-full bg-gray-200 flex items-center justify-center border-4 border-gray-200';
+                            fallback.innerHTML = '<svg class="h-16 w-16 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
+                            parent.appendChild(fallback);
+                          }
+                        }}
+                      />
+                      <div className="absolute inset-0 rounded-full bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all duration-200 flex items-center justify-center">
+                        <Eye className="h-8 w-8 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+                      </div>
+                      
+                      {/* Status Badge */}
+                      {!isEditingResidentPreview && (
+                        <div className="absolute bottom-0 right-0 h-8 w-8 rounded-full flex items-center justify-center shadow-lg border-2 border-white"
+                          style={{
+                            backgroundColor: selectedResident?.suspended ? '#ef4444' : 
+                                           selectedResident?.verified ? '#10b981' : 
+                                           '#eab308'
+                          }}
+                        >
+                          {selectedResident?.suspended ? (
+                            <ShieldOff className="h-4 w-4 text-white" />
+                          ) : selectedResident?.verified ? (
+                            <ShieldCheck className="h-4 w-4 text-white" />
+                          ) : (
+                            <ShieldX className="h-4 w-4 text-white" />
+                          )}
+                        </div>
+                      )}
+                    </button>
+                  ) : (
+                    <div className="relative">
+                      <div className="w-32 h-32 rounded-full bg-gray-200 flex items-center justify-center border-4 border-gray-200 shadow-lg">
+                        <User className="h-16 w-16 text-gray-400" />
+                      </div>
+                      
+                      {/* Status Badge */}
+                      {!isEditingResidentPreview && (
+                        <div className="absolute bottom-0 right-0 h-8 w-8 rounded-full flex items-center justify-center shadow-lg border-2 border-white"
+                          style={{
+                            backgroundColor: selectedResident?.suspended ? '#ef4444' : 
+                                           selectedResident?.verified ? '#10b981' : 
+                                           '#eab308'
+                          }}
+                        >
+                          {selectedResident?.suspended ? (
+                            <ShieldOff className="h-4 w-4 text-white" />
+                          ) : selectedResident?.verified ? (
+                            <ShieldCheck className="h-4 w-4 text-white" />
+                          ) : (
+                            <ShieldX className="h-4 w-4 text-white" />
+                          )}
+                        </div>
+                      )}
                     </div>
-                  </button>
-                ) : (
-                  <div className="w-32 h-32 rounded-full bg-gray-200 flex items-center justify-center border-4 border-gray-200 shadow-lg">
-                    <User className="h-16 w-16 text-gray-400" />
-                  </div>
-                )}
+                  )}
+                  
+                  {/* Camera Icon Overlay - only show in edit mode */}
+                  {isEditingResidentPreview && (
+                    <button
+                      type="button"
+                      className="absolute bottom-0 right-0 h-8 w-8 bg-brand-orange hover:bg-brand-orange-400 text-white rounded-full flex items-center justify-center shadow-lg transition-colors"
+                      title="Change Profile Picture"
+                    >
+                      <Camera className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
                 
-                {/* Camera Icon Overlay */}
-                <button
-                  type="button"
-                  className="absolute bottom-0 right-0 h-8 w-8 bg-brand-orange hover:bg-brand-orange-400 text-white rounded-full flex items-center justify-center shadow-lg transition-colors"
-                  title="Change Profile Picture"
-                >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                </button>
+                {/* Edit Button - only show in view profile tab and not in edit mode */}
+                {!isEditingResidentPreview && (
+                  <Button
+                    onClick={() => setIsEditingResidentPreview(true)}
+                    className="mt-4"
+                    variant="outline"
+                  >
+                    <Edit className="h-4 w-4 mr-2" />
+                    Edit Profile
+                  </Button>
+                )}
               </div>
-            </div>
+            )}
             
         {/* Navigation Tabs */}
         <div className="border-b border-gray-200 mb-4">
@@ -2992,231 +3161,6 @@ export function ManageUsersPage() {
                     <TableCell>{selectedResident?.userId || 'N/A'}</TableCell>
                   </TableRow>
                   <TableRow>
-                    <TableCell className="font-medium text-gray-700 align-top">Full Name</TableCell>
-                    <TableCell>
-                      <Input 
-                        value={selectedResident?.fullName || ''} 
-                        onChange={e => setSelectedResident({
-                          ...selectedResident,
-                          fullName: e.target.value
-                        })}
-                        className="border-0 bg-transparent p-0 h-auto font-normal"
-                      />
-                    </TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell className="font-medium text-gray-700 align-top">Phone Number</TableCell>
-                    <TableCell>
-                      <Input 
-                        value={selectedResident?.phoneNumber || ''} 
-                        onChange={e => setSelectedResident({
-                          ...selectedResident,
-                          phoneNumber: e.target.value
-                        })}
-                        className="border-0 bg-transparent p-0 h-auto font-normal"
-                      />
-                    </TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell className="font-medium text-gray-700 align-top">Email</TableCell>
-                    <TableCell>
-                      <Input 
-                        value={selectedResident?.email || ''} 
-                        onChange={e => setSelectedResident({
-                          ...selectedResident,
-                          email: e.target.value
-                        })}
-                        className="border-0 bg-transparent p-0 h-auto font-normal"
-                        type="email"
-                      />
-                    </TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell className="font-medium text-gray-700 align-top">Barangay</TableCell>
-                    <TableCell>
-                      <Select 
-                        value={selectedResident?.barangay || ''} 
-                        onValueChange={value => setSelectedResident({
-                          ...selectedResident,
-                          barangay: value
-                        })}
-                      >
-                        <SelectTrigger className="border-0 bg-transparent p-0 h-auto font-normal shadow-none">
-                          <SelectValue placeholder="Select barangay" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Abang">Abang</SelectItem>
-                          <SelectItem value="Aliliw">Aliliw</SelectItem>
-                          <SelectItem value="Atulinao">Atulinao</SelectItem>
-                          <SelectItem value="Ayuti">Ayuti</SelectItem>
-                          <SelectItem value="Barangay 1">Barangay 1</SelectItem>
-                          <SelectItem value="Barangay 2">Barangay 2</SelectItem>
-                          <SelectItem value="Barangay 3">Barangay 3</SelectItem>
-                          <SelectItem value="Barangay 4">Barangay 4</SelectItem>
-                          <SelectItem value="Barangay 5">Barangay 5</SelectItem>
-                          <SelectItem value="Barangay 6">Barangay 6</SelectItem>
-                          <SelectItem value="Barangay 7">Barangay 7</SelectItem>
-                          <SelectItem value="Barangay 8">Barangay 8</SelectItem>
-                          <SelectItem value="Barangay 9">Barangay 9</SelectItem>
-                          <SelectItem value="Barangay 10">Barangay 10</SelectItem>
-                          <SelectItem value="Igang">Igang</SelectItem>
-                          <SelectItem value="Kabatete">Kabatete</SelectItem>
-                          <SelectItem value="Kakawit">Kakawit</SelectItem>
-                          <SelectItem value="Kalangay">Kalangay</SelectItem>
-                          <SelectItem value="Kalyaat">Kalyaat</SelectItem>
-                          <SelectItem value="Kilib">Kilib</SelectItem>
-                          <SelectItem value="Kulapi">Kulapi</SelectItem>
-                          <SelectItem value="Mahabang Parang">Mahabang Parang</SelectItem>
-                          <SelectItem value="Malupak">Malupak</SelectItem>
-                          <SelectItem value="Manasa">Manasa</SelectItem>
-                          <SelectItem value="May-it">May-it</SelectItem>
-                          <SelectItem value="Nagsinamo">Nagsinamo</SelectItem>
-                          <SelectItem value="Nalunao">Nalunao</SelectItem>
-                          <SelectItem value="Palola">Palola</SelectItem>
-                          <SelectItem value="Piis">Piis</SelectItem>
-                          <SelectItem value="Samil">Samil</SelectItem>
-                          <SelectItem value="Tiawe">Tiawe</SelectItem>
-                          <SelectItem value="Tinamnan">Tinamnan</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell className="font-medium text-gray-700 align-top">City/Town</TableCell>
-                    <TableCell>
-                      <Input 
-                        value={selectedResident?.cityTown || ''} 
-                        onChange={e => setSelectedResident({
-                          ...selectedResident,
-                          cityTown: e.target.value
-                        })}
-                        className="border-0 bg-transparent p-0 h-auto font-normal"
-                      />
-                    </TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell className="font-medium text-gray-700 align-top">Province</TableCell>
-                    <TableCell>{selectedResident?.province || '-'}</TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell className="font-medium text-gray-700 align-top">Valid ID Type</TableCell>
-                    <TableCell>
-                      <Input 
-                        value={selectedResident?.validId || ''} 
-                        onChange={e => setSelectedResident({
-                          ...selectedResident,
-                          validId: e.target.value
-                        })}
-                        className="border-0 bg-transparent p-0 h-auto font-normal"
-                        placeholder="e.g., Driver's License, Passport"
-                      />
-                    </TableCell>
-                  </TableRow>
-                    <TableRow>
-                      <TableCell className="font-medium text-gray-700 align-top">Valid ID Image</TableCell>
-                      <TableCell>
-                        <div className="space-y-3">
-                          {/* Image Recycler View */}
-                          <div className="flex flex-wrap gap-3">
-                            {(selectedResident?.validIdUrl || selectedResident?.validIdImage) && (
-                              <div className="relative group">
-                                <button
-                                  type="button"
-                                  onClick={() => setPreviewImage(selectedResident.validIdUrl || selectedResident.validIdImage)}
-                                  className="relative w-24 h-16 bg-gray-100 rounded-lg overflow-hidden border-2 border-gray-200 hover:border-brand-orange transition-all duration-200 shadow-sm hover:shadow-md"
-                                >
-                                  <img
-                                    src={selectedResident.validIdUrl || selectedResident.validIdImage}
-                                    alt="ID Preview"
-                                    className="w-full h-full object-cover"
-                                    onError={(e) => {
-                                      const target = e.currentTarget as HTMLImageElement;
-                                      const nextElement = target.nextElementSibling as HTMLElement;
-                                      target.style.display = 'none';
-                                      if (nextElement) nextElement.style.display = 'flex';
-                                    }}
-                                  />
-                                  <div className="hidden w-full h-full items-center justify-center bg-gray-100">
-                                    <FileText className="h-6 w-6 text-gray-400" />
-                                  </div>
-                                  
-                                  {/* Hover overlay with view text */}
-                                  <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 transition-all duration-200 flex flex-col items-center justify-center">
-                                    <Eye className="h-4 w-4 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200 mb-1" />
-                                    <span className="text-xs text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-center px-1">View ID</span>
-                                  </div>
-                                </button>
-                                
-                                {/* Delete button */}
-                                <button
-                                  type="button"
-                                  onClick={() => setConfirmDeleteId(true)}
-                                  className="absolute -top-2 -right-2 h-5 w-5 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-                                >
-                                  <X className="h-3 w-3" />
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  <TableRow>
-                    <TableCell className="font-medium text-gray-700 align-top">Verification Status</TableCell>
-                    <TableCell>
-                      <Select 
-                        value={
-                          selectedResident?.suspended ? 'Suspended' : 
-                          selectedResident?.verified ? 'Verified' : 
-                          'Pending'
-                        } 
-                        onValueChange={async (newStatus) => {
-                          try {
-                            const updates: any = {};
-                            if (newStatus === 'Verified') {
-                              updates.verified = true;
-                              updates.suspended = false;
-                            } else if (newStatus === 'Pending') {
-                              updates.verified = false;
-                              updates.suspended = false;
-                            } else if (newStatus === 'Suspended') {
-                              updates.suspended = true;
-                              updates.verified = false;
-                            }
-                            
-                            await updateDoc(doc(db, "users", selectedResident.id), updates);
-                            setSelectedResident({ ...selectedResident, ...updates });
-                            toast({
-                              title: 'Success',
-                              description: `Status updated to ${newStatus}`
-                            });
-                          } catch (error) {
-                            console.error("Error updating resident status:", error);
-                            toast({
-                              title: 'Error',
-                              description: 'Failed to update status. Please try again.',
-                              variant: 'destructive'
-                            });
-                          }
-                        }}
-                      >
-                        <SelectTrigger className={cn(
-                          "w-auto border-0 bg-transparent font-medium focus:ring-1 focus:ring-brand-orange",
-                          selectedResident?.suspended && 'text-red-600',
-                          selectedResident?.verified && 'text-green-600',
-                          !selectedResident?.verified && !selectedResident?.suspended && 'text-yellow-600'
-                        )}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Verified">Verified</SelectItem>
-                          <SelectItem value="Pending">Pending</SelectItem>
-                          <SelectItem value="Suspended">Suspended</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-                  </TableRow>
-                  <TableRow>
                     <TableCell className="font-medium text-gray-700 align-top">Created Date</TableCell>
                     <TableCell>
                       {selectedResident?.createdDate}
@@ -3225,10 +3169,350 @@ export function ManageUsersPage() {
                       )}
                     </TableCell>
                   </TableRow>
-                  {/* 4. Add total number of submitted reports by the resident in the details preview */}
                   <TableRow>
-                    <TableCell className="font-medium text-gray-700 align-top">Total Reports Submitted</TableCell>
-                    <TableCell>{residentReportsCount}</TableCell>
+                    <TableCell className="font-medium text-gray-700 align-top">Full Name</TableCell>
+                    <TableCell>
+                      {isEditingResidentPreview ? (
+                        <Input 
+                          value={selectedResident?.fullName || ''} 
+                          onChange={e => setSelectedResident({
+                            ...selectedResident,
+                            fullName: e.target.value
+                          })}
+                          className="border-gray-300"
+                        />
+                      ) : (
+                        <span>{selectedResident?.fullName || '-'}</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell className="font-medium text-gray-700 align-top">Phone Number</TableCell>
+                    <TableCell>
+                      {isEditingResidentPreview ? (
+                        <Input 
+                          value={selectedResident?.phoneNumber || ''} 
+                          onChange={e => setSelectedResident({
+                            ...selectedResident,
+                            phoneNumber: e.target.value
+                          })}
+                          className="border-gray-300"
+                        />
+                      ) : (
+                        <span>{selectedResident?.phoneNumber || '-'}</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell className="font-medium text-gray-700 align-top">Email</TableCell>
+                    <TableCell>
+                      {isEditingResidentPreview ? (
+                        <Input 
+                          value={selectedResident?.email || ''} 
+                          onChange={e => setSelectedResident({
+                            ...selectedResident,
+                            email: e.target.value
+                          })}
+                          className="border-gray-300"
+                          type="email"
+                        />
+                      ) : (
+                        <span>{selectedResident?.email || '-'}</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell className="font-medium text-gray-700 align-top">Barangay</TableCell>
+                    <TableCell>
+                      {isEditingResidentPreview ? (
+                        <Select 
+                          value={selectedResident?.barangay || ''} 
+                          onValueChange={value => setSelectedResident({
+                            ...selectedResident,
+                            barangay: value
+                          })}
+                        >
+                          <SelectTrigger className="border-gray-300">
+                            <SelectValue placeholder="Select barangay" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Abang">Abang</SelectItem>
+                            <SelectItem value="Aliliw">Aliliw</SelectItem>
+                            <SelectItem value="Atulinao">Atulinao</SelectItem>
+                            <SelectItem value="Ayuti">Ayuti</SelectItem>
+                            <SelectItem value="Barangay 1">Barangay 1</SelectItem>
+                            <SelectItem value="Barangay 2">Barangay 2</SelectItem>
+                            <SelectItem value="Barangay 3">Barangay 3</SelectItem>
+                            <SelectItem value="Barangay 4">Barangay 4</SelectItem>
+                            <SelectItem value="Barangay 5">Barangay 5</SelectItem>
+                            <SelectItem value="Barangay 6">Barangay 6</SelectItem>
+                            <SelectItem value="Barangay 7">Barangay 7</SelectItem>
+                            <SelectItem value="Barangay 8">Barangay 8</SelectItem>
+                            <SelectItem value="Barangay 9">Barangay 9</SelectItem>
+                            <SelectItem value="Barangay 10">Barangay 10</SelectItem>
+                            <SelectItem value="Igang">Igang</SelectItem>
+                            <SelectItem value="Kabatete">Kabatete</SelectItem>
+                            <SelectItem value="Kakawit">Kakawit</SelectItem>
+                            <SelectItem value="Kalangay">Kalangay</SelectItem>
+                            <SelectItem value="Kalyaat">Kalyaat</SelectItem>
+                            <SelectItem value="Kilib">Kilib</SelectItem>
+                            <SelectItem value="Kulapi">Kulapi</SelectItem>
+                            <SelectItem value="Mahabang Parang">Mahabang Parang</SelectItem>
+                            <SelectItem value="Malupak">Malupak</SelectItem>
+                            <SelectItem value="Manasa">Manasa</SelectItem>
+                            <SelectItem value="May-it">May-it</SelectItem>
+                            <SelectItem value="Nagsinamo">Nagsinamo</SelectItem>
+                            <SelectItem value="Nalunao">Nalunao</SelectItem>
+                            <SelectItem value="Palola">Palola</SelectItem>
+                            <SelectItem value="Piis">Piis</SelectItem>
+                            <SelectItem value="Samil">Samil</SelectItem>
+                            <SelectItem value="Tiawe">Tiawe</SelectItem>
+                            <SelectItem value="Tinamnan">Tinamnan</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <span>{selectedResident?.barangay || '-'}</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell className="font-medium text-gray-700 align-top">City/Town</TableCell>
+                    <TableCell>
+                      {isEditingResidentPreview ? (
+                        <Input 
+                          value={selectedResident?.cityTown || ''} 
+                          onChange={e => setSelectedResident({
+                            ...selectedResident,
+                            cityTown: e.target.value
+                          })}
+                          className="border-gray-300"
+                        />
+                      ) : (
+                        <span>{selectedResident?.cityTown || '-'}</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell className="font-medium text-gray-700 align-top">Province</TableCell>
+                    <TableCell>{selectedResident?.province || '-'}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell className="font-medium text-gray-700 align-top">Birthday</TableCell>
+                    <TableCell>
+                      {isEditingResidentPreview ? (
+                        <Input 
+                          value={selectedResident?.birthday || ''} 
+                          onChange={e => setSelectedResident({
+                            ...selectedResident,
+                            birthday: e.target.value
+                          })}
+                          className="border-gray-300"
+                          type="date"
+                        />
+                      ) : (
+                        <span>{selectedResident?.birthday ? new Date(selectedResident.birthday).toLocaleDateString() : '-'}</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell className="font-medium text-gray-700 align-top">Gender</TableCell>
+                    <TableCell>
+                      {isEditingResidentPreview ? (
+                        <Select 
+                          value={selectedResident?.gender || ''} 
+                          onValueChange={value => setSelectedResident({
+                            ...selectedResident,
+                            gender: value
+                          })}
+                        >
+                          <SelectTrigger className="border-gray-300">
+                            <SelectValue placeholder="Select gender" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Male">Male</SelectItem>
+                            <SelectItem value="Female">Female</SelectItem>
+                            <SelectItem value="Other">Other</SelectItem>
+                            <SelectItem value="Prefer not to say">Prefer not to say</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <span>{selectedResident?.gender || '-'}</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell className="font-medium text-gray-700 align-top">Civil Status</TableCell>
+                    <TableCell>
+                      {isEditingResidentPreview ? (
+                        <Select 
+                          value={selectedResident?.civil_status || selectedResident?.civilStatus || ''} 
+                          onValueChange={value => setSelectedResident({
+                            ...selectedResident,
+                            civil_status: value,
+                            civilStatus: value
+                          })}
+                        >
+                          <SelectTrigger className="border-gray-300">
+                            <SelectValue placeholder="Select civil status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Single">Single</SelectItem>
+                            <SelectItem value="Married">Married</SelectItem>
+                            <SelectItem value="Divorced">Divorced</SelectItem>
+                            <SelectItem value="Widowed">Widowed</SelectItem>
+                            <SelectItem value="Separated">Separated</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <span>{selectedResident?.civil_status || selectedResident?.civilStatus || '-'}</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell className="font-medium text-gray-700 align-top">Religion</TableCell>
+                    <TableCell>
+                      {isEditingResidentPreview ? (
+                        <Input 
+                          value={selectedResident?.religion || ''} 
+                          onChange={e => setSelectedResident({
+                            ...selectedResident,
+                            religion: e.target.value
+                          })}
+                          className="border-gray-300"
+                          placeholder="e.g., Catholic, Muslim, Protestant"
+                        />
+                      ) : (
+                        <span>{selectedResident?.religion || '-'}</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell className="font-medium text-gray-700 align-top">Blood Type</TableCell>
+                    <TableCell>
+                      {isEditingResidentPreview ? (
+                        <Select 
+                          value={selectedResident?.blood_type || selectedResident?.bloodType || ''} 
+                          onValueChange={value => setSelectedResident({
+                            ...selectedResident,
+                            blood_type: value,
+                            bloodType: value
+                          })}
+                        >
+                          <SelectTrigger className="border-gray-300">
+                            <SelectValue placeholder="Select blood type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="A+">A+</SelectItem>
+                            <SelectItem value="A-">A-</SelectItem>
+                            <SelectItem value="B+">B+</SelectItem>
+                            <SelectItem value="B-">B-</SelectItem>
+                            <SelectItem value="AB+">AB+</SelectItem>
+                            <SelectItem value="AB-">AB-</SelectItem>
+                            <SelectItem value="O+">O+</SelectItem>
+                            <SelectItem value="O-">O-</SelectItem>
+                            <SelectItem value="Unknown">Unknown</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <span>{selectedResident?.blood_type || selectedResident?.bloodType || '-'}</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell className="font-medium text-gray-700 align-top">PWD Status</TableCell>
+                    <TableCell>
+                      {isEditingResidentPreview ? (
+                        <Select 
+                          value={selectedResident?.pwd === true || selectedResident?.pwd === 'Yes' || selectedResident?.pwdStatus === 'Yes' || selectedResident?.isPWD ? 'Yes' : selectedResident?.pwd === false || selectedResident?.pwd === 'No' || selectedResident?.pwdStatus === 'No' ? 'No' : ''} 
+                          onValueChange={value => setSelectedResident({
+                            ...selectedResident,
+                            pwd: value === 'Yes',
+                            pwdStatus: value,
+                            isPWD: value === 'Yes'
+                          })}
+                        >
+                          <SelectTrigger className="border-gray-300">
+                            <SelectValue placeholder="Select PWD status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Yes">Yes</SelectItem>
+                            <SelectItem value="No">No</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <span>{selectedResident?.pwd === true || selectedResident?.pwd === 'Yes' || selectedResident?.pwdStatus === 'Yes' || selectedResident?.isPWD ? 'Yes' : selectedResident?.pwd === false || selectedResident?.pwd === 'No' || selectedResident?.pwdStatus === 'No' ? 'No' : '-'}</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell className="font-medium text-gray-700 align-top">Valid ID</TableCell>
+                    <TableCell>
+                      <div className="space-y-3">
+                        <div className="mb-2">
+                          {isEditingResidentPreview ? (
+                            <Input 
+                              value={selectedResident?.validIdType || selectedResident?.validId || ''} 
+                              onChange={e => setSelectedResident({
+                                ...selectedResident,
+                                validIdType: e.target.value,
+                                validId: e.target.value
+                              })}
+                              className="border-gray-300 mb-2"
+                              placeholder="e.g., Driver's License, Passport"
+                            />
+                          ) : (
+                            <span className="text-sm text-gray-600">{selectedResident?.validIdType || selectedResident?.validId || 'No ID type specified'}</span>
+                          )}
+                        </div>
+                        {/* Image Recycler View */}
+                        <div className="flex flex-wrap gap-3">
+                          {(selectedResident?.validIdUrl || selectedResident?.validIdImage) && (
+                            <div className="relative group">
+                              <button
+                                type="button"
+                                onClick={() => setPreviewImage(selectedResident.validIdUrl || selectedResident.validIdImage)}
+                                className="relative w-24 h-16 bg-gray-100 rounded-lg overflow-hidden border-2 border-gray-200 hover:border-brand-orange transition-all duration-200 shadow-sm hover:shadow-md"
+                              >
+                                <img
+                                  src={selectedResident.validIdUrl || selectedResident.validIdImage}
+                                  alt="ID Preview"
+                                  className="w-full h-full object-cover"
+                                  onError={(e) => {
+                                    const target = e.currentTarget as HTMLImageElement;
+                                    const nextElement = target.nextElementSibling as HTMLElement;
+                                    target.style.display = 'none';
+                                    if (nextElement) nextElement.style.display = 'flex';
+                                  }}
+                                />
+                                <div className="hidden w-full h-full items-center justify-center bg-gray-100">
+                                  <FileText className="h-6 w-6 text-gray-400" />
+                                </div>
+                                
+                                {/* Hover overlay with view text */}
+                                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 transition-all duration-200 flex flex-col items-center justify-center">
+                                  <Eye className="h-4 w-4 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200 mb-1" />
+                                  <span className="text-xs text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-center px-1">View ID</span>
+                                </div>
+                              </button>
+                              
+                              {/* Delete button - only show in edit mode */}
+                              {isEditingResidentPreview && (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteId(true)}
+                                  className="absolute -top-2 -right-2 h-5 w-5 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          {(!selectedResident?.validIdUrl && !selectedResident?.validIdImage) && (
+                            <span className="text-sm text-gray-400 italic">No ID image uploaded</span>
+                          )}
+                        </div>
+                      </div>
+                    </TableCell>
                   </TableRow>
                 </TableBody>
               </Table>
@@ -3253,211 +3537,403 @@ export function ManageUsersPage() {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-lg font-medium text-gray-900">
-                        Submitted Reports ({residentReports.length})
-                      </h3>
-                    </div>
-                    
-                    <div className="space-y-3">
-                      {residentReports.map((report) => (
-                        <div key={report.id} className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow">
-                          <div className="flex items-start justify-between">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-2">
-                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                  report.hazardType === 'Fire' ? 'bg-red-100 text-red-800' :
-                                  report.hazardType === 'Flood' ? 'bg-blue-100 text-blue-800' :
-                                  report.hazardType === 'Earthquake' ? 'bg-yellow-100 text-yellow-800' :
-                                  report.hazardType === 'Landslide' ? 'bg-orange-100 text-orange-800' :
-                                  report.hazardType === 'Typhoon' ? 'bg-purple-100 text-purple-800' :
-                                  'bg-gray-100 text-gray-800'
-                                }`}>
-                                  {report.hazardType || 'Unknown'}
-                                </span>
-                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                  report.status === 'Resolved' ? 'bg-green-100 text-green-800' :
-                                  report.status === 'In Progress' ? 'bg-yellow-100 text-yellow-800' :
-                                  report.status === 'Pending' ? 'bg-gray-100 text-gray-800' :
-                                  'bg-gray-100 text-gray-800'
-                                }`}>
-                                  {report.status || 'Pending'}
-                                </span>
-                              </div>
-                              
-                              <h4 className="font-medium text-gray-900 mb-1">
-                                {report.title || report.description || 'Untitled Report'}
-                              </h4>
-                              
-                              {report.description && report.description !== report.title && (
-                                <p className="text-sm text-gray-600 mb-2 line-clamp-2">
-                                  {report.description}
-                                </p>
-                              )}
-                              
-                              <div className="flex items-center gap-4 text-xs text-gray-500">
-                                <span className="flex items-center gap-1">
-                                  <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                                  </svg>
-                                  {report.location || report.barangay || 'Unknown Location'}
-                                </span>
-                                <span className="flex items-center gap-1">
-                                  <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                  </svg>
-                                  {report.timestamp ? (
-                                    report.timestamp.toDate ? 
-                                      report.timestamp.toDate().toLocaleDateString() :
-                                      new Date(report.timestamp).toLocaleDateString()
-                                  ) : 'Unknown Date'}
-                                </span>
-                              </div>
-                            </div>
-                            
-                            {report.imageUrl && (
-                              <div className="ml-4 flex-shrink-0">
-                                <img 
-                                  src={report.imageUrl} 
-                                  alt="Report" 
-                                  className="h-16 w-16 rounded-lg object-cover border border-gray-200"
-                                  onError={(e) => {
-                                    e.currentTarget.style.display = 'none';
-                                  }}
-                                />
-                              </div>
-                            )}
-                          </div>
+                    {/* Total Reports Summary */}
+                    <div className="bg-brand-orange/10 border border-brand-orange/20 rounded-lg p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-gray-700">Total Reports Submitted</p>
+                          <p className="text-2xl font-bold text-brand-orange mt-1">{residentReports.length}</p>
                         </div>
-                      ))}
+                        <FileText className="h-8 w-8 text-brand-orange/50" />
+                      </div>
+                    </div>
+
+                    {/* Reports Table */}
+                    <div className="border border-gray-200 rounded-lg overflow-hidden">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>RID</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>Date Submitted</TableHead>
+                            <TableHead>Status</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {residentReports.map((report) => {
+                            const reportDate = report.timestamp?.toDate 
+                              ? report.timestamp.toDate() 
+                              : report.timestamp 
+                                ? new Date(report.timestamp) 
+                                : null;
+                            const formattedDate = reportDate 
+                              ? reportDate.toLocaleDateString('en-US', { 
+                                  year: 'numeric', 
+                                  month: 'short', 
+                                  day: 'numeric' 
+                                })
+                              : 'Unknown Date';
+                            
+                            return (
+                              <TableRow key={report.id}>
+                                <TableCell>
+                                  <button
+                                    onClick={() => {
+                                      navigate('/manage-reports', { 
+                                        state: { highlightReportId: report.id } 
+                                      });
+                                    }}
+                                    className="text-brand-orange hover:text-brand-orange-400 hover:underline font-medium transition-colors"
+                                  >
+                                    {report.reportId || report.id}
+                                  </button>
+                                </TableCell>
+                                <TableCell>
+                                  <Badge className={
+                                    report.hazardType === 'Fire' ? 'bg-red-100 text-red-800 hover:bg-red-50' :
+                                    report.hazardType === 'Flood' ? 'bg-blue-100 text-blue-800 hover:bg-blue-50' :
+                                    report.hazardType === 'Earthquake' ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-50' :
+                                    report.hazardType === 'Landslide' ? 'bg-orange-100 text-orange-800 hover:bg-orange-50' :
+                                    report.hazardType === 'Typhoon' ? 'bg-purple-100 text-purple-800 hover:bg-purple-50' :
+                                    'bg-gray-100 text-gray-800 hover:bg-gray-50'
+                                  }>
+                                    {report.hazardType || report.type || 'Unknown'}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>{formattedDate}</TableCell>
+                                <TableCell>
+                                  <Badge className={
+                                    report.status === 'Resolved' ? 'bg-green-100 text-green-800 hover:bg-green-50' :
+                                    report.status === 'In Progress' ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-50' :
+                                    report.status === 'Pending' ? 'bg-gray-100 text-gray-800 hover:bg-gray-50' :
+                                    'bg-gray-100 text-gray-800 hover:bg-gray-50'
+                                  }>
+                                    {report.status || 'Pending'}
+                                  </Badge>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
                     </div>
                   </div>
                 )}
               </div>
             )}
-            <DialogFooter>
-              <Button
-                onClick={handleSaveResidentEdit}
-                className="bg-brand-orange hover:bg-brand-orange-400 text-white"
-              >
-                Save Changes
-              </Button>
-              <DialogClose asChild>
-                <Button type="button" variant="secondary">
-                  Close
+            {isEditingResidentPreview && activeResidentTab === 'profile' && (
+              <DialogFooter>
+                <Button
+                  onClick={async () => {
+                    await handleSaveResidentEdit();
+                    setIsEditingResidentPreview(false);
+                  }}
+                  className="bg-brand-orange hover:bg-brand-orange-400 text-white"
+                >
+                  Save Changes
                 </Button>
-              </DialogClose>
-            </DialogFooter>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setIsEditingResidentPreview(false)}
+                >
+                  Cancel
+                </Button>
+              </DialogFooter>
+            )}
           </DialogContent>
         </Dialog>
 
         {/* Admin Preview Modal */}
         <Dialog open={showAdminPreview} onOpenChange={setShowAdminPreview}>
-          <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Admin Account Details</DialogTitle>
+          <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto p-0">
+            <DialogHeader className="px-6 pt-6 pb-4 border-b border-gray-200">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-lg bg-orange-50 border border-orange-200 flex items-center justify-center flex-shrink-0">
+                  <User className="h-5 w-5 text-brand-orange" />
+                </div>
+                <DialogTitle className="text-xl font-semibold text-gray-900">
+                  Admin Account Details
+                </DialogTitle>
+              </div>
             </DialogHeader>
             
             {/* Profile Picture at the top */}
             <div className="flex flex-col items-center py-4">
               <div className="relative">
-                {previewAdmin?.profilePicture ? (
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file && isEditingPreviewAdmin) {
+                      // Validate file type
+                      if (!file.type.startsWith('image/')) {
+                        toast({
+                          title: 'Invalid file type',
+                          description: 'Please upload an image file',
+                          variant: 'destructive'
+                        });
+                        return;
+                      }
+                      // Validate file size (max 5MB)
+                      if (file.size > 5 * 1024 * 1024) {
+                        toast({
+                          title: 'File too large',
+                          description: 'Please upload an image smaller than 5MB',
+                          variant: 'destructive'
+                        });
+                        return;
+                      }
+                      // Convert to base64
+                      const reader = new FileReader();
+                      reader.onload = (event) => {
+                        const result = event.target?.result as string;
+                        setEditingPreviewAdmin({ ...editingPreviewAdmin, profilePicture: result });
+                        toast({
+                          title: 'Success',
+                          description: 'Profile picture uploaded successfully'
+                        });
+                      };
+                      reader.readAsDataURL(file);
+                    }
+                  }}
+                  className="hidden"
+                  id="preview-admin-profile-picture-upload"
+                  disabled={!isEditingPreviewAdmin}
+                />
+                {editingPreviewAdmin?.profilePicture ? (
                   <button
                     type="button"
-                    onClick={() => window.open(previewAdmin.profilePicture, '_blank')}
+                    onClick={() => !isEditingPreviewAdmin && setPreviewImage(editingPreviewAdmin.profilePicture)}
                     className="focus:outline-none group relative"
-                    title="Click to view full size"
+                    title={isEditingPreviewAdmin ? "Click camera to change" : "Click to view full size"}
                   >
                     <img 
-                      src={previewAdmin.profilePicture} 
+                      src={editingPreviewAdmin.profilePicture} 
                       alt="Profile" 
-                      className="w-32 h-32 rounded-full object-cover border-4 border-gray-200 group-hover:border-brand-orange transition-all duration-200 shadow-lg group-hover:shadow-xl"
+                      className="w-40 h-40 rounded-full object-cover border-4 border-gray-200 group-hover:border-brand-orange shadow-lg group-hover:shadow-xl transition-all duration-200"
                       onError={(e) => {
                         e.currentTarget.style.display = 'none';
                         const parent = e.currentTarget.parentElement;
                         if (parent) {
                           const fallback = document.createElement('div');
-                          fallback.className = 'w-32 h-32 rounded-full bg-gray-200 flex items-center justify-center border-4 border-gray-200';
-                          fallback.innerHTML = '<svg class="h-16 w-16 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
+                          fallback.className = 'w-40 h-40 rounded-full bg-gray-200 flex items-center justify-center border-4 border-gray-200';
+                          fallback.innerHTML = '<svg class="h-20 w-20 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
                           parent.appendChild(fallback);
                         }
                       }}
                     />
-                    <div className="absolute inset-0 rounded-full bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all duration-200 flex items-center justify-center">
-                      <Eye className="h-8 w-8 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
-                    </div>
+                    {!isEditingPreviewAdmin && (
+                      <div className="absolute inset-0 rounded-full bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all duration-200 flex items-center justify-center">
+                        <Eye className="h-8 w-8 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+                      </div>
+                    )}
+                    {isEditingPreviewAdmin && (
+                      <label
+                        htmlFor="preview-admin-profile-picture-upload"
+                        className="absolute bottom-0 right-0 bg-brand-orange hover:bg-brand-orange/90 text-white p-2 rounded-full cursor-pointer shadow-lg z-10"
+                      >
+                        <Camera className="h-4 w-4" />
+                      </label>
+                    )}
+                    {/* Edit Permission Badge Icon */}
+                    {previewAdmin && !isEditingPreviewAdmin && (
+                      <div className={`absolute bottom-0 right-0 rounded-full p-2 shadow-lg ${
+                        (editingPreviewAdmin?.hasEditPermission ?? previewAdmin.hasEditPermission)
+                          ? 'bg-green-100 hover:bg-green-50'
+                          : 'bg-gray-100 hover:bg-gray-50'
+                      } transition-colors`}>
+                        <Shield className={`h-4 w-4 ${
+                          (editingPreviewAdmin?.hasEditPermission ?? previewAdmin.hasEditPermission)
+                            ? 'text-green-800'
+                            : 'text-gray-800'
+                        }`} />
+                      </div>
+                    )}
                   </button>
                 ) : (
-                  <div className="w-32 h-32 rounded-full bg-gray-200 flex items-center justify-center border-4 border-gray-200 shadow-lg">
-                    <User className="h-16 w-16 text-gray-400" />
+                  <div className="w-40 h-40 rounded-full bg-gray-200 flex items-center justify-center border-4 border-gray-200 shadow-lg relative">
+                    <User className="h-20 w-20 text-gray-400" />
+                    {isEditingPreviewAdmin && (
+                      <label
+                        htmlFor="preview-admin-profile-picture-upload"
+                        className="absolute bottom-0 right-0 bg-brand-orange hover:bg-brand-orange/90 text-white p-2 rounded-full cursor-pointer shadow-lg z-10"
+                      >
+                        <Camera className="h-4 w-4" />
+                      </label>
+                    )}
+                    {/* Edit Permission Badge Icon */}
+                    {previewAdmin && !isEditingPreviewAdmin && (
+                      <div className={`absolute bottom-0 right-0 rounded-full p-2 shadow-lg ${
+                        (editingPreviewAdmin?.hasEditPermission ?? previewAdmin.hasEditPermission)
+                          ? 'bg-green-100 hover:bg-green-50'
+                          : 'bg-gray-100 hover:bg-gray-50'
+                      } transition-colors`}>
+                        <Shield className={`h-4 w-4 ${
+                          (editingPreviewAdmin?.hasEditPermission ?? previewAdmin.hasEditPermission)
+                            ? 'text-green-800'
+                            : 'text-gray-800'
+                        }`} />
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
             </div>
+
+            {/* Edit Button */}
+            {previewAdmin && !isEditingPreviewAdmin && (
+              <div className="flex justify-center mb-2 px-6">
+                <Button
+                  variant="outline"
+                  onClick={() => setIsEditingPreviewAdmin(true)}
+                >
+                  <Edit className="h-4 w-4 mr-2" />
+                  Edit Admin
+                </Button>
+              </div>
+            )}
             
             {/* Admin Information Table */}
             {previewAdmin && (
-              <div>
+              <div className="px-6">
                 <Table>
                   <TableBody>
                     <TableRow>
                       <TableCell className="font-medium text-gray-700 align-top">User ID</TableCell>
-                      <TableCell>{previewAdmin.userId || 'N/A'}</TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell className="font-medium text-gray-700 align-top">Full Name</TableCell>
-                      <TableCell>{previewAdmin.name || 'N/A'}</TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell className="font-medium text-gray-700 align-top">Position</TableCell>
-                      <TableCell>{previewAdmin.position || 'N/A'}</TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell className="font-medium text-gray-700 align-top">ID Number</TableCell>
-                      <TableCell>{previewAdmin.idNumber || 'N/A'}</TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell className="font-medium text-gray-700 align-top">Username</TableCell>
-                      <TableCell>{previewAdmin.username || 'N/A'}</TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell className="font-medium text-gray-700 align-top">Password</TableCell>
-                      <TableCell>
-                        {showAllAdminPasswords ? (
-                          <span>{previewAdmin.password || 'N/A'}</span>
-                        ) : (
-                          <span>{'•'.repeat(Math.max(8, (previewAdmin.password || '').length))}</span>
-                        )}
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setShowAllAdminPasswords(v => !v)}
-                          className="ml-2"
-                        >
-                          {showAllAdminPasswords ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell className="font-medium text-gray-700 align-top">Edit Permission</TableCell>
-                      <TableCell>
-                        <Badge className={previewAdmin.hasEditPermission ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800"}>
-                          {previewAdmin.hasEditPermission ? "Yes" : "No"}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell className="font-medium text-gray-700 align-top">Role</TableCell>
-                      <TableCell>{previewAdmin.role || 'admin'}</TableCell>
+                      <TableCell>{editingPreviewAdmin?.userId || previewAdmin.userId || 'N/A'}</TableCell>
                     </TableRow>
                     <TableRow>
                       <TableCell className="font-medium text-gray-700 align-top">Created Date</TableCell>
                       <TableCell>
-                        {previewAdmin.createdDate || 'N/A'}
-                        {previewAdmin.createdTime && (
-                          <><br /><span className="text-xs text-gray-500">{formatTimeNoSeconds(previewAdmin.createdTime)}</span></>
+                        {editingPreviewAdmin?.createdDate || previewAdmin.createdDate || 'N/A'}
+                        {(editingPreviewAdmin?.createdTime || previewAdmin.createdTime) && (
+                          <><br /><span className="text-xs text-gray-500">{formatTimeNoSeconds(editingPreviewAdmin?.createdTime || previewAdmin.createdTime)}</span></>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell className="font-medium text-gray-700 align-top">Role</TableCell>
+                      <TableCell>{editingPreviewAdmin?.role || previewAdmin.role || 'admin'}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell className="font-medium text-gray-700 align-top">Full Name</TableCell>
+                      <TableCell>
+                        {isEditingPreviewAdmin ? (
+                          <Input
+                            value={editingPreviewAdmin?.name || ''}
+                            onChange={e => setEditingPreviewAdmin({ ...editingPreviewAdmin, name: e.target.value })}
+                            className="w-full"
+                          />
+                        ) : (
+                          editingPreviewAdmin?.name || previewAdmin.name || 'N/A'
+                        )}
+                      </TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell className="font-medium text-gray-700 align-top">Username</TableCell>
+                      <TableCell>
+                        {isEditingPreviewAdmin ? (
+                          <Input
+                            value={editingPreviewAdmin?.username || ''}
+                            onChange={e => setEditingPreviewAdmin({ ...editingPreviewAdmin, username: e.target.value })}
+                            className="w-full"
+                          />
+                        ) : (
+                          editingPreviewAdmin?.username || previewAdmin.username || 'N/A'
+                        )}
+                      </TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell className="font-medium text-gray-700 align-top">Position</TableCell>
+                      <TableCell>
+                        {isEditingPreviewAdmin ? (
+                          <Select
+                            value={editingPreviewAdmin?.position || ''}
+                            onValueChange={value => setEditingPreviewAdmin({ ...editingPreviewAdmin, position: value })}
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Select position" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {positionOptions.map(pos => (
+                                <SelectItem key={pos} value={pos}>{pos}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          editingPreviewAdmin?.position || previewAdmin.position || 'N/A'
+                        )}
+                      </TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell className="font-medium text-gray-700 align-top">ID Number</TableCell>
+                      <TableCell>
+                        {isEditingPreviewAdmin ? (
+                          <Input
+                            value={editingPreviewAdmin?.idNumber || ''}
+                            onChange={e => setEditingPreviewAdmin({ ...editingPreviewAdmin, idNumber: e.target.value })}
+                            className="w-full"
+                            placeholder="EMP"
+                          />
+                        ) : (
+                          editingPreviewAdmin?.idNumber || previewAdmin.idNumber || 'N/A'
+                        )}
+                      </TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell className="font-medium text-gray-700 align-top">Email</TableCell>
+                      <TableCell>
+                        {isEditingPreviewAdmin ? (
+                          <Input
+                            type="email"
+                            value={editingPreviewAdmin?.email || ''}
+                            onChange={e => setEditingPreviewAdmin({ ...editingPreviewAdmin, email: e.target.value })}
+                            className="w-full"
+                          />
+                        ) : (
+                          editingPreviewAdmin?.email || previewAdmin.email || 'N/A'
+                        )}
+                      </TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell className="font-medium text-gray-700 align-top">Password</TableCell>
+                      <TableCell>
+                        {isEditingPreviewAdmin ? (
+                          <div className="flex items-center gap-2">
+                            <Input
+                              type={showAllAdminPasswords ? "text" : "password"}
+                              value={editingPreviewAdmin?.password || ''}
+                              onChange={e => setEditingPreviewAdmin({ ...editingPreviewAdmin, password: e.target.value })}
+                              className="w-full"
+                            />
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setShowAllAdminPasswords(v => !v)}
+                            >
+                              {showAllAdminPasswords ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </Button>
+                          </div>
+                        ) : (
+                          <>
+                            {showAllAdminPasswords ? (
+                              <span>{editingPreviewAdmin?.password || previewAdmin.password || 'N/A'}</span>
+                            ) : (
+                              <span>{'•'.repeat(Math.max(8, ((editingPreviewAdmin?.password || previewAdmin.password || '').length)))}</span>
+                            )}
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setShowAllAdminPasswords(v => !v)}
+                              className="ml-2"
+                            >
+                              {showAllAdminPasswords ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </Button>
+                          </>
                         )}
                       </TableCell>
                     </TableRow>
@@ -3465,14 +3941,26 @@ export function ManageUsersPage() {
                 </Table>
               </div>
             )}
-            
-            <DialogFooter>
-              <DialogClose asChild>
-                <Button type="button" variant="secondary">
-                  Close
+
+            {/* Save/Cancel Buttons */}
+            {isEditingPreviewAdmin && (
+              <DialogFooter className="px-6 pb-6">
+                <Button
+                  variant="outline"
+                  onClick={handleCancelPreviewEdit}
+                >
+                  <X className="h-4 w-4 mr-2" />
+                  Cancel
                 </Button>
-              </DialogClose>
-            </DialogFooter>
+                <Button
+                  onClick={handleSavePreviewAdminEdit}
+                  className="bg-brand-orange hover:bg-brand-orange-400 text-white"
+                >
+                  <Check className="h-4 w-4 mr-2" />
+                  Save Changes
+                </Button>
+              </DialogFooter>
+            )}
           </DialogContent>
         </Dialog>
 
@@ -3480,10 +3968,10 @@ export function ManageUsersPage() {
         <Dialog open={!!previewImage} onOpenChange={() => setPreviewImage(null)}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>Valid ID Preview</DialogTitle>
+              <DialogTitle>Image Preview</DialogTitle>
             </DialogHeader>
             <div className="flex justify-center">
-              <img src={previewImage || ""} alt="Valid ID Preview" className="max-w-full h-auto rounded-lg" />
+              <img src={previewImage || ""} alt="Preview" className="max-w-full h-auto rounded-lg" />
             </div>
           </DialogContent>
         </Dialog>
@@ -3509,6 +3997,84 @@ export function ManageUsersPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Suspend Account Confirmation Modal */}
+        <AlertDialog open={!!confirmSuspendResident} onOpenChange={() => {
+          setConfirmSuspendResident(null);
+          setSuspensionReason("");
+        }}>
+          <AlertDialogContent className="sm:max-w-[500px]">
+            <AlertDialogHeader>
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 bg-gray-100 rounded-full flex items-center justify-center">
+                  <ShieldOff className="h-5 w-5 text-gray-600" />
+                </div>
+                <div>
+                  <AlertDialogTitle className="text-gray-800">Suspend Resident Account</AlertDialogTitle>
+                  <AlertDialogDescription className="text-gray-600">
+                    Are you sure you want to suspend {confirmSuspendResident?.fullName}'s account? Suspended accounts will be unable to log in to the mobile app. This action can be reversed later.
+                  </AlertDialogDescription>
+                </div>
+              </div>
+            </AlertDialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <label htmlFor="suspension-reason" className="text-sm font-medium text-gray-700">
+                  Reason for Suspension <span className="text-gray-400">(Optional)</span>
+                </label>
+                <Textarea
+                  id="suspension-reason"
+                  placeholder="Enter the reason for suspending this account..."
+                  value={suspensionReason}
+                  onChange={(e) => setSuspensionReason(e.target.value)}
+                  className="min-h-[100px] resize-none"
+                  maxLength={500}
+                />
+                <p className="text-xs text-gray-500">
+                  {suspensionReason.length}/500 characters
+                </p>
+              </div>
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => {
+                setSuspensionReason("");
+              }}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={async () => {
+                  if (!confirmSuspendResident) return;
+                  try {
+                    const updateData: any = {
+                      suspended: true,
+                      verified: false
+                    };
+                    if (suspensionReason.trim()) {
+                      updateData.suspensionReason = suspensionReason.trim();
+                      updateData.suspensionDate = new Date().toISOString();
+                    }
+                    await updateDoc(doc(db, "users", confirmSuspendResident.id), updateData);
+                    setResidents(residents.map(r => r.id === confirmSuspendResident.id ? { ...r, suspended: true, verified: false, suspensionReason: suspensionReason.trim() || undefined } : r));
+                    toast({
+                      title: 'Success',
+                      description: 'Resident account suspended. They will be unable to log in to the mobile app.'
+                    });
+                    setConfirmSuspendResident(null);
+                    setSuspensionReason("");
+                  } catch (error) {
+                    console.error("Error updating suspension:", error);
+                    toast({
+                      title: 'Error',
+                      description: 'Failed to suspend account. Please try again.',
+                      variant: 'destructive'
+                    });
+                  }
+                }}
+                className="bg-gray-600 hover:bg-gray-700"
+              >
+                Suspend Account
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {/* Confirm Delete Position Modal */}
         <AlertDialog open={!!confirmDeletePosition} onOpenChange={() => setConfirmDeletePosition(null)}>
@@ -3602,6 +4168,15 @@ export function ManageUsersPage() {
                     className={showEditAdminErrors && !editingAdmin.username?.trim() ? "border-red-500" : ""}
                   />
                   {showEditAdminErrors && !editingAdmin.username?.trim() && <div className="text-xs text-red-600 mt-1">Username is required</div>}
+                </div>
+                <div>
+                  <Label>Email</Label>
+                  <Input
+                    type="email"
+                    value={editingAdmin.email || ""}
+                    onChange={e => setEditingAdmin({ ...editingAdmin, email: e.target.value })}
+                    placeholder="Enter email address"
+                  />
                 </div>
               </div>
             )}

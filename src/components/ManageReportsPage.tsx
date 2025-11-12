@@ -4031,18 +4031,6 @@ useEffect(() => {
               </Select>
 
               {/* Action Buttons */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button onClick={handleExportCSV} size="sm" variant="outline" className="ml-auto">
-                    <FileDown className="h-4 w-4 mr-2" />
-                    Export
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Export reports to CSV</p>
-                </TooltipContent>
-              </Tooltip>
-
               {selectedReports.length > 0 && (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -4056,6 +4044,18 @@ useEffect(() => {
                   </TooltipContent>
                 </Tooltip>
               )}
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button onClick={handleExportCSV} size="sm" variant="outline" className="ml-auto">
+                    <FileDown className="h-4 w-4 mr-2" />
+                    Export
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Export reports to CSV</p>
+                </TooltipContent>
+              </Tooltip>
             </div>
           </div>
 
