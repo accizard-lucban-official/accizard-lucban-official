@@ -22,12 +22,14 @@ import { useState, useEffect, useMemo, useRef, ReactNode, ChangeEvent, DragEvent
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription, DialogClose } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, Plus, Edit, Trash2, Calendar, AlertTriangle, Info, X, Eye, ChevronUp, ChevronDown, Check, Megaphone, Download, CloudLightning, Waves, Mountain, Activity, TrafficCone, UserSearch, ListFilter, Upload, FileIcon } from "lucide-react";
+import ReactQuill from 'react-quill';
+import 'react-quill/dist/quill.snow.css';
+import { Search, Plus, Edit, Trash2, Calendar, AlertTriangle, Info, X, Eye, ChevronUp, ChevronDown, Check, Megaphone, Download, CloudLightning, Waves, Mountain, Activity, TrafficCone, UserSearch, ListFilter, Upload, FileIcon, Image } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Layout } from "./Layout";
 import { DateRange } from "react-day-picker";
@@ -82,8 +84,32 @@ const renderAnnouncementTypeOption = (type: string) => {
   );
 };
 
+// ReactQuill configuration
+const quillModules = {
+  toolbar: [
+    ['bold', 'italic', 'underline'],
+    [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+    ['link'],
+    ['clean']
+  ],
+};
+
+const quillFormats = [
+  'bold', 'italic', 'underline',
+  'list', 'bullet',
+  'link'
+];
+
 const linkifyText = (text: string): ReactNode[] => {
   if (!text) return [];
+  
+  // Check if text contains HTML tags (from rich text editor)
+  if (/<[^>]+>/.test(text)) {
+    // Return HTML content wrapped in a div
+    return [<div key="html-content" dangerouslySetInnerHTML={{ __html: text }} />];
+  }
+  
+  // Original linkify logic for plain text
   const nodes: ReactNode[] = [];
   let lastIndex = 0;
 
@@ -169,6 +195,11 @@ export function AnnouncementsPage() {
   const [isEditingAnnouncement, setIsEditingAnnouncement] = useState(false);
   const [isDeletingAnnouncement, setIsDeletingAnnouncement] = useState<string | null>(null);
   const [isLoadingAnnouncements, setIsLoadingAnnouncements] = useState(true);
+  
+  // Image preview state
+  const [showImagePreview, setShowImagePreview] = useState(false);
+  const [previewImageUrl, setPreviewImageUrl] = useState("");
+  const [previewImageName, setPreviewImageName] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const announcementMediaPreviewUrls = useMemo(
@@ -462,10 +493,12 @@ export function AnnouncementsPage() {
     setSelectedAnnouncements(new Set());
   }, [announcementPage, searchTerm, typeFilter, priorityFilter, dateRange]);
 
-  // Helper to truncate description
+  // Helper to truncate description (strips HTML tags for table display)
   function truncateDescription(desc: string, maxLength = 20) {
     if (!desc) return '';
-    return desc.length > maxLength ? desc.slice(0, maxLength) + '…' : desc;
+    // Strip HTML tags for truncation
+    const textOnly = desc.replace(/<[^>]*>/g, '');
+    return textOnly.length > maxLength ? textOnly.slice(0, maxLength) + '…' : textOnly;
   }
 
   const addAnnouncementMediaFiles = (files: FileList | File[] | null) => {
@@ -633,6 +666,13 @@ export function AnnouncementsPage() {
       title: "Export Started",
       description: `Exported ${sortedAnnouncements.length} announcement(s) to CSV.`,
     });
+  };
+
+  // Function to open image preview
+  const handleImagePreview = (imageUrl: string, imageName: string) => {
+    setPreviewImageUrl(imageUrl);
+    setPreviewImageName(imageName);
+    setShowImagePreview(true);
   };
 
   return <Layout>
@@ -975,10 +1015,19 @@ export function AnnouncementsPage() {
                                     </div>
                                     <div>
                                       <Label>Description</Label>
-                                      <Textarea value={editingAnnouncement.description} onChange={e => setEditingAnnouncement({
-                                        ...editingAnnouncement,
-                                        description: e.target.value
-                                      })} />
+                                      <div className="mt-1 [&_.ql-container]:min-h-[150px] [&_.ql-editor]:min-h-[150px] [&_.ql-container]:border [&_.ql-container]:border-gray-300 [&_.ql-container]:rounded-md [&_.ql-toolbar]:border-b [&_.ql-toolbar]:border-gray-300 [&_.ql-toolbar]:rounded-t-md [&_.ql-container]:rounded-t-none">
+                                        <ReactQuill
+                                          theme="snow"
+                                          value={editingAnnouncement.description}
+                                          onChange={(value) => setEditingAnnouncement({
+                                            ...editingAnnouncement,
+                                            description: value
+                                          })}
+                                          modules={quillModules}
+                                          formats={quillFormats}
+                                          className="bg-white"
+                                        />
+                                      </div>
                                     </div>
                                   </div>
                                 )}
@@ -1126,58 +1175,204 @@ export function AnnouncementsPage() {
 
         {/* Preview Dialog */}
         <Dialog open={!!previewAnnouncement} onOpenChange={open => !open && setPreviewAnnouncement(null)}>
-          <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Announcement Details</DialogTitle>
-            </DialogHeader>
+          <DialogContent className="sm:max-w-[550px] max-h-[80vh] overflow-y-auto p-0">
             {previewAnnouncement && (
-              <div className="py-4">
-                <Table>
-                  <TableBody>
-                    <TableRow>
-                      <TableCell className="font-medium text-gray-700 align-top">Type</TableCell>
-                      <TableCell>{previewAnnouncement.type}</TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell className="font-medium text-gray-700 align-top">Priority</TableCell>
-                      <TableCell>{previewAnnouncement.priority}</TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell className="font-medium text-gray-700 align-top">Created Date</TableCell>
-                      <TableCell>
-                        {previewAnnouncement.date}
-                        <br />
-                        <span className="text-xs text-gray-500">{formatTimeNoSeconds(previewAnnouncement.createdTime)}</span>
-                      </TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell className="font-medium text-gray-700 align-top">Description</TableCell>
-                      <TableCell className="whitespace-pre-line break-words">
-                        {linkifyText(previewAnnouncement.description || "")}
-                      </TableCell>
-                    </TableRow>
-                    {Array.isArray(previewAnnouncement.media) && previewAnnouncement.media.length > 0 && (
+              <>
+                {/* Header with icon and bottom border */}
+                <DialogHeader className="px-6 pt-6 pb-4 border-b border-gray-200">
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-lg bg-orange-50 border border-orange-200 flex items-center justify-center flex-shrink-0">
+                      <Megaphone className="h-5 w-5 text-brand-orange" />
+                    </div>
+                    <DialogTitle className="text-xl font-semibold text-gray-900">
+                      Announcement Details
+                    </DialogTitle>
+                  </div>
+                </DialogHeader>
+
+                {/* Table format content */}
+                <div className="py-4 px-6">
+                  <Table>
+                    <TableBody>
                       <TableRow>
-                        <TableCell className="font-medium text-gray-700 align-top">Attachments</TableCell>
-                        <TableCell className="space-y-1">
-                          {previewAnnouncement.media.map((mediaItem: AnnouncementMedia, index: number) => (
-                            <a
-                              key={`${mediaItem.fileName || mediaItem.url}-${index}`}
-                              href={mediaItem.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-brand-orange underline break-all block"
-                            >
-                              {mediaItem.fileName || `Attachment ${index + 1}`}
-                            </a>
-                          ))}
+                        <TableCell className="font-medium text-gray-700 align-top">Type</TableCell>
+                        <TableCell className="flex items-center gap-2">
+                          {(() => {
+                            const IconComponent = ANNOUNCEMENT_TYPE_ICONS[previewAnnouncement.type] || Info;
+                            return <IconComponent className="h-5 w-5 text-brand-orange" />;
+                          })()}
+                          {previewAnnouncement.type}
                         </TableCell>
                       </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
+                      <TableRow>
+                        <TableCell className="font-medium text-gray-700 align-top">Priority</TableCell>
+                        <TableCell>
+                          <span className={cn(
+                            "inline-flex items-center px-3 py-1.5 rounded-full text-sm font-medium capitalize",
+                            previewAnnouncement.priority === 'high' && "bg-red-100 text-red-700",
+                            previewAnnouncement.priority === 'medium' && "bg-yellow-100 text-yellow-700",
+                            previewAnnouncement.priority === 'low' && "bg-green-100 text-green-700",
+                            !previewAnnouncement.priority && "bg-gray-100 text-gray-700"
+                          )}>
+                            {previewAnnouncement.priority || 'No Priority'}
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="font-medium text-gray-700 align-top">Created Date</TableCell>
+                        <TableCell>
+                          {previewAnnouncement.date}
+                          <br />
+                          <span className="text-xs text-gray-500">{formatTimeNoSeconds(previewAnnouncement.createdTime)}</span>
+                        </TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="font-medium text-gray-700 align-top">Description</TableCell>
+                        <TableCell className="break-words">
+                          <div className="prose prose-sm max-w-none">
+                            {linkifyText(previewAnnouncement.description || "")}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                      {Array.isArray(previewAnnouncement.media) && previewAnnouncement.media.length > 0 && (
+                        <TableRow>
+                          <TableCell className="font-medium text-gray-700 align-top">Attachments</TableCell>
+                          <TableCell>
+                            <div className="space-y-4">
+                              {/* Image Gallery */}
+                              {previewAnnouncement.media.some((mediaItem: AnnouncementMedia) => {
+                                const fileName = mediaItem.fileName?.toLowerCase() || mediaItem.url?.toLowerCase() || '';
+                                return /\.(jpg|jpeg|png|gif|webp|svg|bmp)$/i.test(fileName) || mediaItem.url?.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp)$/i);
+                              }) && (
+                                <div className="grid grid-cols-2 gap-3">
+                                  {previewAnnouncement.media
+                                    .filter((mediaItem: AnnouncementMedia) => {
+                                      const fileName = mediaItem.fileName?.toLowerCase() || mediaItem.url?.toLowerCase() || '';
+                                      return /\.(jpg|jpeg|png|gif|webp|svg|bmp)$/i.test(fileName) || mediaItem.url?.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp)$/i);
+                                    })
+                                    .map((mediaItem: AnnouncementMedia, index: number) => (
+                                      <button
+                                        key={`image-${mediaItem.fileName || mediaItem.url}-${index}`}
+                                        onClick={() => handleImagePreview(mediaItem.url, mediaItem.fileName || `Image ${index + 1}`)}
+                                        className="group relative aspect-square rounded-lg overflow-hidden border border-gray-200 hover:border-brand-orange transition-colors bg-gray-100 cursor-pointer"
+                                      >
+                                        <img
+                                          src={mediaItem.url}
+                                          alt={mediaItem.fileName || `Image ${index + 1}`}
+                                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                                          onError={(e) => {
+                                            const target = e.target as HTMLImageElement;
+                                            target.style.display = 'none';
+                                          }}
+                                        />
+                                        <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-opacity flex items-center justify-center">
+                                          <Eye className="h-5 w-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                                        </div>
+                                      </button>
+                                    ))}
+                                </div>
+                              )}
+
+                              {/* Non-image files */}
+                              {previewAnnouncement.media.some((mediaItem: AnnouncementMedia) => {
+                                const fileName = mediaItem.fileName?.toLowerCase() || mediaItem.url?.toLowerCase() || '';
+                                return !/\.(jpg|jpeg|png|gif|webp|svg|bmp)$/i.test(fileName) && !mediaItem.url?.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp)$/i);
+                              }) && (
+                                <div className="space-y-2">
+                                  <h4 className="text-xs font-medium text-gray-600 uppercase tracking-wide">Other Files</h4>
+                                  {previewAnnouncement.media
+                                    .filter((mediaItem: AnnouncementMedia) => {
+                                      const fileName = mediaItem.fileName?.toLowerCase() || mediaItem.url?.toLowerCase() || '';
+                                      return !/\.(jpg|jpeg|png|gif|webp|svg|bmp)$/i.test(fileName) && !mediaItem.url?.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp)$/i);
+                                    })
+                                    .map((mediaItem: AnnouncementMedia, index: number) => (
+                                      <a
+                                        key={`file-${mediaItem.fileName || mediaItem.url}-${index}`}
+                                        href={mediaItem.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="flex items-center gap-2 p-2 rounded-lg border border-gray-200 hover:border-brand-orange hover:bg-orange-50 transition-colors group"
+                                      >
+                                        <FileIcon className="h-5 w-5 text-gray-400 group-hover:text-brand-orange transition-colors" />
+                                        <span className="text-sm text-gray-700 group-hover:text-brand-orange break-all flex-1">
+                                          {mediaItem.fileName || `Attachment ${index + 1}`}
+                                        </span>
+                                      </a>
+                                    ))}
+                                </div>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </>
             )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Image Preview Dialog */}
+        <Dialog open={showImagePreview} onOpenChange={setShowImagePreview}>
+          <DialogContent className="sm:max-w-[800px] max-h-[90vh] bg-white flex flex-col overflow-hidden">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Image className="h-5 w-5 text-brand-orange" />
+                Image Preview
+              </DialogTitle>
+              <DialogDescription>
+                {previewImageName}
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="flex-1 flex flex-col items-center justify-center p-4 bg-gray-50 rounded-lg">
+              <div className="relative max-w-full max-h-full">
+                <img 
+                  src={previewImageUrl} 
+                  alt={previewImageName}
+                  className="max-w-full max-h-[60vh] object-contain rounded-lg shadow-lg"
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement;
+                    target.style.display = 'none';
+                    const parent = target.parentElement;
+                    if (parent) {
+                      parent.innerHTML = `
+                        <div class="w-full h-64 flex flex-col items-center justify-center bg-gray-100 rounded-lg">
+                          <svg class="w-16 h-16 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                          </svg>
+                          <p class="text-gray-500 text-center">Failed to load image</p>
+                          <p class="text-sm text-gray-400 text-center mt-1">${previewImageName}</p>
+                        </div>
+                      `;
+                    }
+                  }}
+                />
+              </div>
+            </div>
+            
+            <DialogFooter className="flex gap-2">
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  const link = document.createElement('a');
+                  link.href = previewImageUrl;
+                  link.download = previewImageName;
+                  link.target = '_blank';
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                }}
+                className="flex items-center gap-2"
+              >
+                <Download className="h-4 w-4" />
+                Download
+              </Button>
+              <DialogClose asChild>
+                <Button variant="outline">Close</Button>
+              </DialogClose>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
 
@@ -1191,7 +1386,7 @@ export function AnnouncementsPage() {
             }
           }}
         >
-          <DialogContent>
+          <DialogContent className="max-h-[90vh] overflow-y-auto">
             <DialogHeader className="border-b border-gray-200 pb-4">
               <DialogTitle className="flex items-center gap-2">
                 <Megaphone className="h-5 w-5 text-[#FF4F0B]" />
@@ -1237,21 +1432,20 @@ export function AnnouncementsPage() {
               
               <div>
                 <Label htmlFor="new-description">Description</Label>
-                <Textarea
-                  id="new-description"
-                  value={newAnnouncement.description}
-                  onChange={e => setNewAnnouncement({
-                    ...newAnnouncement,
-                    description: e.target.value
-                  })}
-                  placeholder="Enter announcement description..."
-                  rows={4}
-                />
-                {newAnnouncement.description && (
-                  <div className="mt-2 text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded p-3 whitespace-pre-line break-words">
-                    {linkifyText(newAnnouncement.description)}
-                  </div>
-                )}
+                <div className="mt-1 [&_.ql-container]:min-h-[150px] [&_.ql-editor]:min-h-[150px] [&_.ql-container]:border [&_.ql-container]:border-gray-300 [&_.ql-container]:rounded-md [&_.ql-toolbar]:border-b [&_.ql-toolbar]:border-gray-300 [&_.ql-toolbar]:rounded-t-md [&_.ql-container]:rounded-t-none">
+                  <ReactQuill
+                    theme="snow"
+                    value={newAnnouncement.description}
+                    onChange={(value) => setNewAnnouncement({
+                      ...newAnnouncement,
+                      description: value
+                    })}
+                    modules={quillModules}
+                    formats={quillFormats}
+                    placeholder="Enter announcement description..."
+                    className="bg-white"
+                  />
+                </div>
               </div>
 
               <div>
@@ -1261,15 +1455,17 @@ export function AnnouncementsPage() {
                     "mt-1 border-2 border-dashed rounded-lg p-6 text-center transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-orange focus-visible:ring-offset-2",
                     isMediaDragActive
                       ? "border-brand-orange bg-orange-50"
-                      : "border-gray-300 bg-white hover:border-brand-orange"
+                      : "border-gray-300 bg-white"
                   )}
                   onDragEnter={handleMediaDragEnter}
                   onDragOver={handleMediaDragOver}
                   onDragLeave={handleMediaDragLeave}
                   onDrop={handleMediaDrop}
                   onClick={(event) => {
-                    event.preventDefault();
-                    openMediaFileDialog();
+                    // Only trigger if clicking directly on the drop zone, not on buttons
+                    if (!(event.target as HTMLElement).closest('button')) {
+                      openMediaFileDialog();
+                    }
                   }}
                   role="button"
                   tabIndex={0}
@@ -1287,6 +1483,7 @@ export function AnnouncementsPage() {
                     multiple
                     onChange={handleAnnouncementMediaChange}
                     className="hidden"
+                    accept="image/*,video/*,audio/*,.pdf,.doc,.docx"
                   />
                   <Upload className="h-8 w-8 mx-auto text-gray-400 mb-2" />
                   <p className="text-sm text-gray-600">Drag & drop files here or</p>
@@ -1310,12 +1507,13 @@ export function AnnouncementsPage() {
                   <p className="text-xs text-red-600 mt-2">{mediaUploadError}</p>
                 )}
                 {newAnnouncementMedia.length > 0 && (
-                  <div className="mt-4 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-medium text-gray-700">
-                        Selected file{newAnnouncementMedia.length > 1 ? "s" : ""}
-                      </p>
+                  <div className="mt-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="text-sm font-medium text-gray-700">
+                        Selected Files ({newAnnouncementMedia.length})
+                      </h4>
                       <Button
+                        type="button"
                         variant="ghost"
                         size="sm"
                         onClick={(event) => {
@@ -1323,52 +1521,41 @@ export function AnnouncementsPage() {
                           event.stopPropagation();
                           clearAnnouncementMediaSelection();
                         }}
-                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                        className="text-brand-red hover:text-brand-red-700 hover:bg-red-50"
                       >
-                        Clear all
+                        Clear All
                       </Button>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-48 overflow-y-auto pr-1">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
                       {newAnnouncementMedia.map((file, index) => {
                         const previewUrl = announcementMediaPreviewUrls[index];
                         const isImage = file.type.startsWith("image/");
 
                         return (
-                          <div
-                            key={`${file.name}-${file.size}-${index}`}
-                            className="relative flex items-center gap-3 border border-gray-200 rounded-lg bg-white p-3"
-                          >
-                            <div className="w-16 h-16 sm:w-20 sm:h-20 flex-shrink-0 rounded-md overflow-hidden bg-gray-100 flex items-center justify-center">
+                          <div key={`${file.name}-${file.size}-${index}`} className="relative group">
+                            <div className="w-16 h-16 rounded-lg overflow-hidden border-2 border-gray-200 bg-gray-50 flex items-center justify-center">
                               {isImage ? (
-                                <img
-                                  src={previewUrl}
+                                <img 
+                                  src={previewUrl} 
                                   alt={file.name}
                                   className="w-full h-full object-cover"
                                 />
                               ) : (
-                                <FileIcon className="h-8 w-8 text-gray-400" />
+                                <FileIcon className="h-6 w-6 text-gray-400" />
                               )}
                             </div>
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-gray-900 truncate" title={file.name}>
-                                {file.name}
-                              </p>
-                              <p className="text-xs text-gray-500">{formatFileSize(file.size)}</p>
-                            </div>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="absolute top-2 right-2 h-6 w-6 text-gray-500 hover:text-red-600 hover:bg-red-50"
-                              onClick={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                handleRemoveAnnouncementMedia(index);
-                              }}
-                              aria-label={`Remove ${file.name}`}
-                            >
+                            <div className="absolute -top-1 -right-1 bg-brand-red hover:bg-brand-red-700 text-white rounded-full p-1 cursor-pointer"
+                                 onClick={(event) => {
+                                   event.preventDefault();
+                                   event.stopPropagation();
+                                   handleRemoveAnnouncementMedia(index);
+                                 }}
+                                 title="Remove file">
                               <X className="h-3 w-3" />
-                            </Button>
+                            </div>
+                            <div className="mt-1 text-xs text-gray-600 truncate" title={file.name}>
+                              {file.name}
+                            </div>
                           </div>
                         );
                       })}

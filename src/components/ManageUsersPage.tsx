@@ -55,6 +55,8 @@ export function ManageUsersPage() {
   const [isAddResidentOpen, setIsAddResidentOpen] = useState(false);
   const [selectedResident, setSelectedResident] = useState<any>(null);
   const [showResidentPreview, setShowResidentPreview] = useState(false);
+  const [showAdminPreview, setShowAdminPreview] = useState(false);
+  const [previewAdmin, setPreviewAdmin] = useState<any>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<boolean>(false);
   const [activeResidentTab, setActiveResidentTab] = useState<'profile' | 'reports'>('profile');
@@ -75,7 +77,8 @@ export function ManageUsersPage() {
     position: "",
     idNumber: "",
     username: "",
-    password: ""
+    password: "",
+    profilePicture: ""
   });
   const [newResident, setNewResident] = useState({
     fullName: "",
@@ -507,6 +510,7 @@ export function ManageUsersPage() {
         idNumber: newAdmin.idNumber,
         username: newAdmin.username,
         password: newAdmin.password,
+        profilePicture: newAdmin.profilePicture || "",
         hasEditPermission: false,
         role: "admin",
         createdDate: now.toLocaleDateString(),
@@ -522,6 +526,7 @@ export function ManageUsersPage() {
           idNumber: newAdmin.idNumber,
           username: newAdmin.username,
           password: newAdmin.password,
+          profilePicture: newAdmin.profilePicture || "",
           hasEditPermission: false,
             role: "admin",
             createdDate: now.toLocaleDateString(),
@@ -534,7 +539,8 @@ export function ManageUsersPage() {
         position: "",
         idNumber: "",
         username: "",
-        password: ""
+        password: "",
+        profilePicture: ""
       });
       toast({
         title: 'Success',
@@ -718,6 +724,11 @@ export function ManageUsersPage() {
     
     setSelectedResident(resident);
     setShowResidentPreview(true);
+  };
+
+  const handlePreviewAdmin = (admin: any) => {
+    setPreviewAdmin(admin);
+    setShowAdminPreview(true);
   };
 
   const handleSaveResidentEdit = async () => {
@@ -1506,6 +1517,90 @@ export function ManageUsersPage() {
                       )}
                       {passwordError && <div className="text-xs text-red-600 mt-1">{passwordError}</div>}
                     </div>
+                    <div>
+                      <Label>Profile Picture</Label>
+                      <div className="mt-1">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              // Validate file type
+                              if (!file.type.startsWith('image/')) {
+                                toast({
+                                  title: 'Invalid file type',
+                                  description: 'Please upload an image file',
+                                  variant: 'destructive'
+                                });
+                                return;
+                              }
+                              // Validate file size (max 5MB)
+                              if (file.size > 5 * 1024 * 1024) {
+                                toast({
+                                  title: 'File too large',
+                                  description: 'Please upload an image smaller than 5MB',
+                                  variant: 'destructive'
+                                });
+                                return;
+                              }
+                              // Convert to base64
+                              const reader = new FileReader();
+                              reader.onload = (event) => {
+                                const result = event.target?.result as string;
+                                setNewAdmin({ ...newAdmin, profilePicture: result });
+                                toast({
+                                  title: 'Success',
+                                  description: 'Profile picture uploaded successfully'
+                                });
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                          className="hidden"
+                          id="admin-profile-picture-upload"
+                        />
+                        <div className="flex items-center gap-3">
+                          {newAdmin.profilePicture ? (
+                            <div className="relative">
+                              <img
+                                src={newAdmin.profilePicture}
+                                alt="Profile preview"
+                                className="w-20 h-20 rounded-full object-cover border-2 border-gray-200"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setNewAdmin({ ...newAdmin, profilePicture: "" })}
+                                className="absolute -top-1 -right-1 h-5 w-5 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="w-20 h-20 rounded-full bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center">
+                              <User className="h-8 w-8 text-gray-400" />
+                            </div>
+                          )}
+                          <label
+                            htmlFor="admin-profile-picture-upload"
+                            className="cursor-pointer"
+                          >
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="flex items-center gap-2"
+                            >
+                              <Upload className="h-4 w-4" />
+                              {newAdmin.profilePicture ? "Change" : "Upload"}
+                            </Button>
+                          </label>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-2">
+                          Upload a profile picture (max 5MB, JPG/PNG)
+                        </p>
+                      </div>
+                    </div>
                   </div>
                   <DialogFooter>
                     <Button 
@@ -1829,6 +1924,20 @@ export function ManageUsersPage() {
                             </TableCell>
                             <TableCell>
                               <div className="flex items-center gap-2">
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => handlePreviewAdmin(admin)}
+                                    >
+                                      <Eye className="h-4 w-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>Preview Admin Details</p>
+                                  </TooltipContent>
+                                </Tooltip>
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -3234,6 +3343,130 @@ export function ManageUsersPage() {
               >
                 Save Changes
               </Button>
+              <DialogClose asChild>
+                <Button type="button" variant="secondary">
+                  Close
+                </Button>
+              </DialogClose>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Admin Preview Modal */}
+        <Dialog open={showAdminPreview} onOpenChange={setShowAdminPreview}>
+          <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Admin Account Details</DialogTitle>
+            </DialogHeader>
+            
+            {/* Profile Picture at the top */}
+            <div className="flex flex-col items-center py-4">
+              <div className="relative">
+                {previewAdmin?.profilePicture ? (
+                  <button
+                    type="button"
+                    onClick={() => window.open(previewAdmin.profilePicture, '_blank')}
+                    className="focus:outline-none group relative"
+                    title="Click to view full size"
+                  >
+                    <img 
+                      src={previewAdmin.profilePicture} 
+                      alt="Profile" 
+                      className="w-32 h-32 rounded-full object-cover border-4 border-gray-200 group-hover:border-brand-orange transition-all duration-200 shadow-lg group-hover:shadow-xl"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                        const parent = e.currentTarget.parentElement;
+                        if (parent) {
+                          const fallback = document.createElement('div');
+                          fallback.className = 'w-32 h-32 rounded-full bg-gray-200 flex items-center justify-center border-4 border-gray-200';
+                          fallback.innerHTML = '<svg class="h-16 w-16 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
+                          parent.appendChild(fallback);
+                        }
+                      }}
+                    />
+                    <div className="absolute inset-0 rounded-full bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all duration-200 flex items-center justify-center">
+                      <Eye className="h-8 w-8 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+                    </div>
+                  </button>
+                ) : (
+                  <div className="w-32 h-32 rounded-full bg-gray-200 flex items-center justify-center border-4 border-gray-200 shadow-lg">
+                    <User className="h-16 w-16 text-gray-400" />
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            {/* Admin Information Table */}
+            {previewAdmin && (
+              <div>
+                <Table>
+                  <TableBody>
+                    <TableRow>
+                      <TableCell className="font-medium text-gray-700 align-top">User ID</TableCell>
+                      <TableCell>{previewAdmin.userId || 'N/A'}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell className="font-medium text-gray-700 align-top">Full Name</TableCell>
+                      <TableCell>{previewAdmin.name || 'N/A'}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell className="font-medium text-gray-700 align-top">Position</TableCell>
+                      <TableCell>{previewAdmin.position || 'N/A'}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell className="font-medium text-gray-700 align-top">ID Number</TableCell>
+                      <TableCell>{previewAdmin.idNumber || 'N/A'}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell className="font-medium text-gray-700 align-top">Username</TableCell>
+                      <TableCell>{previewAdmin.username || 'N/A'}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell className="font-medium text-gray-700 align-top">Password</TableCell>
+                      <TableCell>
+                        {showAllAdminPasswords ? (
+                          <span>{previewAdmin.password || 'N/A'}</span>
+                        ) : (
+                          <span>{'•'.repeat(Math.max(8, (previewAdmin.password || '').length))}</span>
+                        )}
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setShowAllAdminPasswords(v => !v)}
+                          className="ml-2"
+                        >
+                          {showAllAdminPasswords ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell className="font-medium text-gray-700 align-top">Edit Permission</TableCell>
+                      <TableCell>
+                        <Badge className={previewAdmin.hasEditPermission ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800"}>
+                          {previewAdmin.hasEditPermission ? "Yes" : "No"}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell className="font-medium text-gray-700 align-top">Role</TableCell>
+                      <TableCell>{previewAdmin.role || 'admin'}</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell className="font-medium text-gray-700 align-top">Created Date</TableCell>
+                      <TableCell>
+                        {previewAdmin.createdDate || 'N/A'}
+                        {previewAdmin.createdTime && (
+                          <><br /><span className="text-xs text-gray-500">{formatTimeNoSeconds(previewAdmin.createdTime)}</span></>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+            
+            <DialogFooter>
               <DialogClose asChild>
                 <Button type="button" variant="secondary">
                   Close

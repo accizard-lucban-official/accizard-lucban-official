@@ -4688,6 +4688,9 @@ useEffect(() => {
                     Browse Files
                   </Button>
                 </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  Upload images, documents, audio, or video files up to 25 MB each.
+                </p>
                 
                 {/* Show selected files */}
                 {selectedFiles.length > 0 && (
@@ -7740,25 +7743,7 @@ useEffect(() => {
                   }}
                 />
               </div>
-              {addLocationData && (
-                <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-                  <p className="text-sm font-medium text-gray-800">Selected location</p>
-                  <p className="text-sm text-gray-600 mt-1 break-words">{addLocationData.address}</p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Coordinates: {addLocationData.lat.toFixed(5)}, {addLocationData.lng.toFixed(5)}
-                  </p>
-                </div>
-              )}
             </div>
-            {addLocationData && (
-              <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-                <p className="text-sm font-medium text-gray-800">Selected location</p>
-                <p className="text-sm text-gray-600 mt-1 break-words">{addLocationData.address}</p>
-                <p className="text-xs text-gray-500 mt-1">
-                  Coordinates: {addLocationData.lat.toFixed(5)}, {addLocationData.lng.toFixed(5)}
-                </p>
-              </div>
-            )}
             
             <DialogFooter className="flex gap-2">
               <Button 
