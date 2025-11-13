@@ -43,6 +43,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "@/components/ui/use-toast";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
+import { useUserRole } from "@/hooks/useUserRole";
 
 type AnnouncementMedia = {
   url: string;
@@ -167,6 +168,7 @@ function formatTimeNoSeconds(time: string | number | null | undefined) {
 }
 
 export function AnnouncementsPage() {
+  const { canEditAnnouncements, canDeleteAnnouncements } = useUserRole();
   const [searchTerm, setSearchTerm] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
@@ -942,22 +944,23 @@ export function AnnouncementsPage() {
                             </Tooltip>
                             
                             {/* Edit Icon with Tooltip */}
-                            <Dialog open={editDialogOpenId === announcement.id} onOpenChange={open => {
-                              if (!open) {
-                                setEditDialogOpenId(null);
-                                setEditingAnnouncement(null);
-                              }
-                            }}>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <DialogTrigger asChild>
-                                    <Button size="sm" variant="outline" onClick={() => handleEditAnnouncement(announcement)}>
-                                      <Edit className="h-4 w-4" />
-                                    </Button>
-                                  </DialogTrigger>
-                                </TooltipTrigger>
-                                <TooltipContent>Edit</TooltipContent>
-                              </Tooltip>
+                            {canEditAnnouncements() ? (
+                              <Dialog open={editDialogOpenId === announcement.id} onOpenChange={open => {
+                                if (!open) {
+                                  setEditDialogOpenId(null);
+                                  setEditingAnnouncement(null);
+                                }
+                              }}>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <DialogTrigger asChild>
+                                      <Button size="sm" variant="outline" onClick={() => handleEditAnnouncement(announcement)}>
+                                        <Edit className="h-4 w-4" />
+                                      </Button>
+                                    </DialogTrigger>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Edit</TooltipContent>
+                                </Tooltip>
                               <DialogContent>
                                 <DialogHeader className="border-b border-gray-200 pb-4">
                                   <DialogTitle className="flex items-center gap-2">
@@ -1040,9 +1043,24 @@ export function AnnouncementsPage() {
                                 </DialogFooter>
                               </DialogContent>
                             </Dialog>
+                            ) : (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span>
+                                    <Button size="sm" variant="outline" disabled className="opacity-50 cursor-not-allowed">
+                                      <Edit className="h-4 w-4" />
+                                    </Button>
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>You don't have permission to edit announcements. Contact your super admin for access.</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            )}
                             
                             {/* Delete Icon with Tooltip */}
-                            <AlertDialog>
+                            {canDeleteAnnouncements() ? (
+                              <AlertDialog>
                               <Tooltip>
                                 <TooltipTrigger asChild>
                                   <AlertDialogTrigger asChild>
@@ -1082,6 +1100,20 @@ export function AnnouncementsPage() {
                                 </AlertDialogFooter>
                               </AlertDialogContent>
                             </AlertDialog>
+                            ) : (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span>
+                                    <Button size="sm" variant="outline" disabled className="text-red-600 opacity-50 cursor-not-allowed">
+                                      <Trash2 className="h-4 w-4 text-red-600" />
+                                    </Button>
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <p>You don't have permission to delete announcements. Contact your super admin for access.</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>

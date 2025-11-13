@@ -109,6 +109,25 @@ export function useUserRole() {
   const canViewEmail = () => hasPermission('view_email') || isSuperAdmin();
   const canManageReports = () => hasPermission('manage_reports') || isSuperAdmin();
   const canManageResidents = () => hasPermission('manage_residents') || isSuperAdmin();
+  
+  // Report permissions
+  const canEditReports = () => hasPermission('edit_reports') || isSuperAdmin();
+  const canDeleteReports = () => hasPermission('delete_reports') || isSuperAdmin();
+  const canAddReportToMap = () => hasPermission('add_report_to_map') || isSuperAdmin();
+  
+  // Map/Pin permissions
+  const canAddPlacemark = () => hasPermission('add_placemark') || isSuperAdmin();
+  const canEditPins = () => hasPermission('edit_pins') || isSuperAdmin();
+  const canDeletePins = () => hasPermission('delete_pins') || isSuperAdmin();
+  
+  // Announcement permissions
+  const canEditAnnouncements = () => hasPermission('edit_announcements') || isSuperAdmin();
+  const canDeleteAnnouncements = () => hasPermission('delete_announcements') || isSuperAdmin();
+  
+  // Resident permissions
+  const canEditResidents = () => hasPermission('edit_residents') || isSuperAdmin();
+  const canDeleteResidents = () => hasPermission('delete_residents') || isSuperAdmin();
+  const canChangeResidentStatus = () => hasPermission('change_resident_status') || isSuperAdmin();
 
   return {
     userRole,
@@ -119,6 +138,17 @@ export function useUserRole() {
     canManageAdmins,
     canViewEmail,
     canManageReports,
-    canManageResidents
+    canManageResidents,
+    canEditReports,
+    canDeleteReports,
+    canAddReportToMap,
+    canAddPlacemark,
+    canEditPins,
+    canDeletePins,
+    canEditAnnouncements,
+    canDeleteAnnouncements,
+    canEditResidents,
+    canDeleteResidents,
+    canChangeResidentStatus
   };
 }

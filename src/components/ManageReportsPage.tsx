@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Calendar as DatePickerCalendar } from "@/components/ui/calendar";
-import { Eye, Edit, Trash2, Plus, FileText, Calendar as CalendarIcon, Clock, MapPin, Upload, FileIcon, Image, Printer, Download, X, Search, FileDown, Car, Flame, Ambulance, Waves, Mountain, CircleAlert, Users, ShieldAlert, Activity, ArrowUpRight, ArrowUpDown, ArrowUp, ArrowDown, Layers, ZoomIn, ZoomOut, LocateFixed, Wrench, AlertTriangle, Zap, Leaf, Check, ChevronDown } from "lucide-react";
+import { Eye, Edit, Trash2, Plus, FileText, Calendar as CalendarIcon, Clock, MapPin, Upload, FileIcon, Image, Printer, Download, X, Search, FileDown, Car, Flame, Ambulance, Waves, Mountain, CircleAlert, Users, ShieldAlert, Activity, ArrowUpRight, ArrowUpDown, ArrowUp, ArrowDown, Layers, ZoomIn, ZoomOut, LocateFixed, Wrench, AlertTriangle, Zap, Leaf, Check, ChevronDown, Info } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -28,6 +28,7 @@ import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { storage } from "@/lib/firebase";
 import { auth } from "@/lib/firebase";
 import { toast } from "@/components/ui/sonner";
+import { useUserRole } from "@/hooks/useUserRole";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 
@@ -248,6 +249,7 @@ const normalizeDispatchData = (data: any): DispatchDataState => {
 
 export function ManageReportsPage() {
   const navigate = useNavigate();
+  const { canEditReports, canDeleteReports, canAddReportToMap } = useUserRole();
   const [searchTerm, setSearchTerm] = useState("");
   const [date, setDate] = useState<DateRange | undefined>();
   const [typeFilter, setTypeFilter] = useState("all");
@@ -2895,6 +2897,8 @@ useEffect(() => {
   const [previewEditData, setPreviewEditData] = useState<any>(null);
   const [showLocationMap, setShowLocationMap] = useState(false);
   const [newLocation, setNewLocation] = useState<{lat: number, lng: number, address: string} | null>(null);
+  const [showPatientLocationMap, setShowPatientLocationMap] = useState(false);
+  const [patientLocationData, setPatientLocationData] = useState<{lat: number, lng: number, address: string} | null>(null);
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [uploadingDocument, setUploadingDocument] = useState(false);
   const [currentUser, setCurrentUser] = useState<{ id: string; username: string; name: string; userType: string } | null>(null);
@@ -3466,6 +3470,8 @@ useEffect(() => {
       name: "",
       contactNumber: "",
       address: "",
+      latitude: "",
+      longitude: "",
       religion: "",
       birthday: "",
       bloodType: "",
@@ -3818,6 +3824,35 @@ useEffect(() => {
     }
   };
 
+  // Function to handle map click for patient location selection
+  const handlePatientLocationMapClick = async (lngLat: { lng: number; lat: number }) => {
+    try {
+      const address = await reverseGeocode(lngLat.lat, lngLat.lng);
+      setPatientLocationData({
+        lat: lngLat.lat,
+        lng: lngLat.lng,
+        address: address
+      });
+    } catch (error) {
+      console.error('Error getting address for clicked location:', error);
+      toast.error('Failed to get address for selected location');
+    }
+  };
+
+  // Function to save patient location
+  const handleSavePatientLocation = () => {
+    if (patientLocationData) {
+      updateCurrentPatient({
+        address: patientLocationData.address,
+        latitude: patientLocationData.lat.toString(),
+        longitude: patientLocationData.lng.toString()
+      });
+      setShowPatientLocationMap(false);
+      setPatientLocationData(null);
+      toast.success('Patient location pinned successfully!');
+    }
+  };
+
   // Function to save new location
   const handleSaveLocation = async () => {
     if (newLocation && selectedReport) {
@@ -3950,17 +3985,33 @@ useEffect(() => {
           <div className="border-b border-gray-200 px-6 py-4">
             <div className="flex items-center gap-3 flex-wrap">
               {/* Add New Report Button */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button onClick={() => setShowAddModal(true)} size="sm" className="bg-brand-orange hover:bg-brand-orange-400 text-white">
-                    <Plus className="h-4 w-4 mr-2" />
-                    New
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Create a new emergency report manually</p>
-                </TooltipContent>
-              </Tooltip>
+              {canEditReports() ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button onClick={() => setShowAddModal(true)} size="sm" className="bg-brand-orange hover:bg-brand-orange-400 text-white">
+                      <Plus className="h-4 w-4 mr-2" />
+                      New
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Create a new emergency report manually</p>
+                  </TooltipContent>
+                </Tooltip>
+              ) : (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span>
+                      <Button disabled size="sm" className="bg-brand-orange hover:bg-brand-orange-400 text-white opacity-50 cursor-not-allowed">
+                        <Plus className="h-4 w-4 mr-2" />
+                        New
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>You don't have permission to create reports. Contact your super admin for access.</p>
+                  </TooltipContent>
+                </Tooltip>
+              )}
 
               {/* Search Bar */}
               <div className="flex-1 min-w-[200px] relative">
@@ -4018,17 +4069,33 @@ useEffect(() => {
 
               {/* Action Buttons */}
               {selectedReports.length > 0 && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button onClick={handleBatchDelete} variant="destructive" size="sm" className="bg-brand-red hover:bg-brand-red-700 text-white">
-                      <Trash2 className="h-4 w-4 mr-2" />
-                      Delete ({selectedReports.length})
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Delete {selectedReports.length} selected report(s)</p>
-                  </TooltipContent>
-                </Tooltip>
+                canDeleteReports() ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button onClick={handleBatchDelete} variant="destructive" size="sm" className="bg-brand-red hover:bg-brand-red-700 text-white">
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        Delete ({selectedReports.length})
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Delete {selectedReports.length} selected report(s)</p>
+                    </TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span>
+                        <Button disabled variant="destructive" size="sm" className="bg-brand-red hover:bg-brand-red-700 text-white opacity-50 cursor-not-allowed">
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Delete ({selectedReports.length})
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>You don't have permission to delete reports. Contact your super admin for access.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                )
               )}
 
               <Tooltip>
@@ -4286,20 +4353,40 @@ useEffect(() => {
                             </TooltipContent>
                           </Tooltip>
                           
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handlePinOnMap(report)}
-                              >
-                                <MapPin className="h-4 w-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <p>Pin location on map</p>
-                            </TooltipContent>
-                          </Tooltip>
+                          {canAddReportToMap() ? (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handlePinOnMap(report)}
+                                >
+                                  <MapPin className="h-4 w-4" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>Pin location on map</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          ) : (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    disabled
+                                    className="opacity-50 cursor-not-allowed"
+                                  >
+                                    <MapPin className="h-4 w-4" />
+                                  </Button>
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>You don't have permission to add reports to map. Contact your super admin for access.</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          )}
                           
                           <Tooltip>
                             <TooltipTrigger asChild>
@@ -4323,20 +4410,40 @@ useEffect(() => {
                             </TooltipContent>
                           </Tooltip>
                           
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleDeleteReport(report.firestoreId)}
-                              >
-                                <Trash2 className="h-4 w-4 text-red-600" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              <p>Delete report</p>
-                            </TooltipContent>
-                          </Tooltip>
+                          {canDeleteReports() ? (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleDeleteReport(report.firestoreId)}
+                                >
+                                  <Trash2 className="h-4 w-4 text-red-600" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>Delete report</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          ) : (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    disabled
+                                    className="opacity-50 cursor-not-allowed"
+                                  >
+                                    <Trash2 className="h-4 w-4 text-red-600" />
+                                  </Button>
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>You don't have permission to delete reports. Contact your super admin for access.</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -4853,6 +4960,13 @@ useEffect(() => {
               </TabsList>
 
               <TabsContent value="directions" className="mt-2 flex-1 min-h-0 flex flex-col">
+                {/* Info Box */}
+                <div className="mb-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2.5 flex items-start gap-3">
+                  <Info className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                  <p className="text-sm text-blue-800">
+                    Click on the marker to reveal route/directions and additional information.
+                  </p>
+                </div>
                 <div className="flex-1 w-full relative min-h-0" style={{ height: 'calc(90vh - 200px)' }}>
                   {selectedReport ? (
                     <div 
@@ -4969,20 +5083,35 @@ useEffect(() => {
                         </TooltipContent>
                       </Tooltip>
                     ) : (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button size="sm" variant="outline" className="border-gray-300 text-gray-800 hover:bg-gray-50" onClick={() => {
-                            setIsPreviewEditMode(true);
-                            setPreviewEditData({ ...selectedReport });
-                            setSelectedFiles([]); // Clear any previously selected files
-                          }}>
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Edit report details</p>
-                        </TooltipContent>
-                      </Tooltip>
+                      canEditReports() ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button size="sm" variant="outline" className="border-gray-300 text-gray-800 hover:bg-gray-50" onClick={() => {
+                              setIsPreviewEditMode(true);
+                              setPreviewEditData({ ...selectedReport });
+                              setSelectedFiles([]); // Clear any previously selected files
+                            }}>
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>Edit report details</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span>
+                              <Button size="sm" variant="outline" className="border-gray-300 text-gray-800 hover:bg-gray-50 opacity-50 cursor-not-allowed" disabled>
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>You don't have permission to edit reports. Contact your super admin for access.</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      )
                     )}
                   </div>
                 </div>
@@ -5500,29 +5629,44 @@ useEffect(() => {
                         </TooltipContent>
                       </Tooltip>
                     ) : (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button size="sm" variant="outline" onClick={() => {
-                            setIsDispatchEditMode(true);
-                            // Automatically assign responders when entering edit mode
-                            const autoAssigned = getAutoAssignedResponders();
-                            setDispatchData(d => ({
-                              ...d,
-                              responders: [{
-                                id: `auto-${Date.now()}`,
-                                team: autoAssigned.team,
-                                drivers: [],
-                                responders: autoAssigned.members
-                              }]
-                            }));
-                          }}>
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Edit dispatch form</p>
-                        </TooltipContent>
-                      </Tooltip>
+                      canEditReports() ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button size="sm" variant="outline" onClick={() => {
+                              setIsDispatchEditMode(true);
+                              // Automatically assign responders when entering edit mode
+                              const autoAssigned = getAutoAssignedResponders();
+                              setDispatchData(d => ({
+                                ...d,
+                                responders: [{
+                                  id: `auto-${Date.now()}`,
+                                  team: autoAssigned.team,
+                                  drivers: [],
+                                  responders: autoAssigned.members
+                                }]
+                              }));
+                            }}>
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>Edit dispatch form</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span>
+                              <Button size="sm" variant="outline" disabled className="opacity-50 cursor-not-allowed">
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>You don't have permission to edit dispatch forms. Contact your super admin for access.</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      )
                     )}
                   </div>
                 </div>
@@ -6709,8 +6853,8 @@ useEffect(() => {
                 </div>
               </TabsContent>
 
-              <TabsContent value="patient" className="flex-1 min-h-0 flex flex-col">
-                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-3 gap-2">
+              <TabsContent value="patient" className="mt-1 flex-1 min-h-0 flex flex-col">
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-4 gap-2">
                   <div className="text-lg font-semibold text-gray-900">Patient Information</div>
                   <div className="flex gap-2 flex-wrap">
                     {isPatientEditMode ? (
@@ -6729,78 +6873,128 @@ useEffect(() => {
                         </TooltipContent>
                       </Tooltip>
                     ) : (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button size="sm" variant="outline" onClick={() => {
-                            setIsPatientEditMode(true);
-                          }}>
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Edit patient information</p>
-                        </TooltipContent>
-                      </Tooltip>
+                      canEditReports() ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button size="sm" variant="outline" onClick={() => {
+                              setIsPatientEditMode(true);
+                            }}>
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>Edit patient information</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span>
+                              <Button size="sm" variant="outline" disabled className="opacity-50 cursor-not-allowed">
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>You don't have permission to edit patient information. Contact your super admin for access.</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      )
                     )}
                   </div>
                 </div>
                 
-                <div className="flex-1 overflow-y-auto border rounded-lg min-h-0 max-h-[400px]">
-                  <div className="p-4 space-y-5 pb-6">
-                    {/* Patient Management Header */}
-                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                      <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-base font-semibold text-gray-900">Patient Management</h3>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button onClick={addNewPatient} className="bg-brand-orange hover:bg-brand-orange-400 text-white">
+                {/* Patient Management Header */}
+                <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-base font-semibold text-gray-900">Patient Management</h3>
+                    {canEditReports() ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button onClick={addNewPatient} className="bg-brand-orange hover:bg-brand-orange-400 text-white">
+                            <Plus className="h-4 w-4 mr-2" />
+                            Add New Patient
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Add another patient to this report</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span>
+                            <Button disabled className="bg-brand-orange hover:bg-brand-orange-400 text-white opacity-50 cursor-not-allowed">
                               <Plus className="h-4 w-4 mr-2" />
                               Add New Patient
                             </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>Add another patient to this report</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </div>
-                      
-                      {patients.length > 1 && (
-                        <div className="space-y-2">
-                          <Label className="text-sm font-medium text-gray-700">Select Patient:</Label>
-                          <div className="flex flex-wrap gap-2">
-                            {patients.map((patient, index) => (
-                              <div key={patient.id} className="flex items-center gap-2">
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>You don't have permission to add patients. Contact your super admin for access.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    )}
+                  </div>
+                  
+                  {patients.length > 1 && (
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-gray-700">Select Patient:</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {patients.map((patient, index) => (
+                          <div key={patient.id} className="flex items-center gap-2">
+                            <Button
+                              variant={currentPatientIndex === index ? "default" : "outline"}
+                              size="sm"
+                              onClick={() => setCurrentPatientIndex(index)}
+                              className={`text-xs ${currentPatientIndex === index ? 'bg-brand-orange hover:bg-brand-orange-400 text-white' : 'border-brand-orange text-brand-orange hover:bg-orange-50'}`}
+                            >
+                              Patient {index + 1}
+                              {patient.name && ` - ${patient.name}`}
+                            </Button>
+                            {patients.length > 1 && (
+                              canEditReports() ? (
                                 <Button
-                                  variant={currentPatientIndex === index ? "default" : "outline"}
+                                  variant="ghost"
                                   size="sm"
-                                  onClick={() => setCurrentPatientIndex(index)}
-                                  className={`text-xs ${currentPatientIndex === index ? 'bg-brand-orange hover:bg-brand-orange-400 text-white' : 'border-brand-orange text-brand-orange hover:bg-orange-50'}`}
+                                  onClick={() => removePatient(index)}
+                                  className="text-brand-orange hover:text-brand-orange-700 hover:bg-orange-50 p-1 h-6 w-6"
                                 >
-                                  Patient {index + 1}
-                                  {patient.name && ` - ${patient.name}`}
+                                  <X className="h-3 w-3" />
                                 </Button>
-                                {patients.length > 1 && (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => removePatient(index)}
-                                    className="text-brand-orange hover:text-brand-orange-700 hover:bg-orange-50 p-1 h-6 w-6"
-                                  >
-                                    <X className="h-3 w-3" />
-                                  </Button>
-                                )}
-                              </div>
-                            ))}
+                              ) : (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        disabled
+                                        className="text-brand-orange opacity-50 cursor-not-allowed p-1 h-6 w-6"
+                                      >
+                                        <X className="h-3 w-3" />
+                                      </Button>
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>You don't have permission to remove patients. Contact your super admin for access.</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              )
+                            )}
                           </div>
-                        </div>
-                      )}
-                      
+                        ))}
+                      </div>
                     </div>
-                    <div className="overflow-x-auto">
-                      <Table className="w-full min-w-[600px]">
-                        <TableBody>
-                        <TableRow>
-                          <TableCell className="text-sm font-medium text-gray-800 align-top w-1/3 min-w-[150px]">Name</TableCell>
+                  )}
+                </div>
+                
+                <div className="flex-1 overflow-y-auto border rounded-lg min-h-0 px-4 pb-4">
+                  <div className="overflow-x-auto">
+                    <Table className="w-full min-w-[600px]">
+                      <TableBody>
+                      <TableRow>
+                        <TableCell className="text-sm font-medium text-gray-800 align-top w-1/3 min-w-[150px]">Name</TableCell>
                           <TableCell>
                             {isPatientEditMode ? (
                               <Input 
@@ -6841,15 +7035,60 @@ useEffect(() => {
                           <TableCell className="text-sm font-medium text-gray-800 align-top w-1/3 min-w-[150px]">Address</TableCell>
                           <TableCell>
                           {isPatientEditMode ? (
-                            <Textarea 
-                              value={currentPatient.address} 
-                              onChange={e => updateCurrentPatient({ address: e.target.value })} 
-                              placeholder="Enter complete address"
-                              className="min-h-[80px] border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0"
-                            />
+                            <div className="space-y-2">
+                              <div className="flex gap-2">
+                                <Textarea 
+                                  value={currentPatient.address} 
+                                  onChange={e => updateCurrentPatient({ address: e.target.value })} 
+                                  placeholder="Enter complete address"
+                                  className="flex-1 min-h-[80px] border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0"
+                                />
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => {
+                                        if (currentPatient.latitude && currentPatient.longitude) {
+                                          setPatientLocationData({
+                                            lat: Number(currentPatient.latitude),
+                                            lng: Number(currentPatient.longitude),
+                                            address: currentPatient.address || ""
+                                          });
+                                        } else {
+                                          setPatientLocationData(null);
+                                        }
+                                        setShowPatientLocationMap(true);
+                                      }}
+                                      className="h-[80px] border-gray-300"
+                                    >
+                                      <MapPin className="h-4 w-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>Pin location on map</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </div>
+                              {currentPatient.latitude && currentPatient.longitude && (
+                                <div className="text-xs text-gray-500 flex items-center gap-1">
+                                  <MapPin className="h-3 w-3" />
+                                  Location pinned: {Number(currentPatient.latitude).toFixed(6)}, {Number(currentPatient.longitude).toFixed(6)}
+                                </div>
+                              )}
+                            </div>
                           ) : (
                             currentPatient.address ? (
-                              <span className="text-gray-800">{currentPatient.address}</span>
+                              <div className="space-y-1">
+                                <span className="text-gray-800">{currentPatient.address}</span>
+                                {currentPatient.latitude && currentPatient.longitude && (
+                                  <div className="text-xs text-gray-500 flex items-center gap-1">
+                                    <MapPin className="h-3 w-3" />
+                                    {Number(currentPatient.latitude).toFixed(6)}, {Number(currentPatient.longitude).toFixed(6)}
+                                  </div>
+                                )}
+                              </div>
                             ) : (
                               <span className="text-gray-400 italic">Not specified</span>
                             )
@@ -6917,6 +7156,9 @@ useEffect(() => {
                                     });
                                   }}
                                   initialFocus
+                                  captionLayout="dropdown"
+                                  fromYear={1900}
+                                  toYear={new Date().getFullYear()}
                                 />
                               </PopoverContent>
                             </Popover>
@@ -7660,7 +7902,6 @@ useEffect(() => {
                         </TableRow>
                       </TableBody>
                     </Table>
-                    </div>
                   </div>
                 </div>
               </TabsContent>
@@ -8134,6 +8375,68 @@ useEffect(() => {
                 </div>
               </div>
             )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Patient Location Map Modal */}
+        <Dialog open={showPatientLocationMap} onOpenChange={setShowPatientLocationMap}>
+          <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <MapPin className="h-5 w-5 text-brand-orange" />
+                Pin Patient Location
+              </DialogTitle>
+              <DialogDescription>
+                Click on the map to select the patient's location. The address will be automatically filled.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex-1 min-h-0 flex flex-col">
+              <div className="flex-1 relative min-h-[400px] rounded-lg overflow-hidden border border-gray-200">
+                <MapboxMap
+                  center={patientLocationData ? [patientLocationData.lng, patientLocationData.lat] : [121.5556, 14.1139]}
+                  zoom={patientLocationData ? 15 : 11}
+                  showControls={true}
+                  showGeocoder={true}
+                  onMapClick={handlePatientLocationMapClick}
+                  singleMarker={patientLocationData ? {
+                    id: 'patient-location-marker',
+                    type: 'Patient Location',
+                    title: 'Patient Location',
+                    description: patientLocationData.address,
+                    coordinates: [patientLocationData.lng, patientLocationData.lat] as [number, number],
+                    latitude: patientLocationData.lat,
+                    longitude: patientLocationData.lng,
+                    locationName: patientLocationData.address
+                  } : undefined}
+                  disableSingleMarkerPulse={false}
+                  hideStyleToggle={false}
+                />
+              </div>
+              {patientLocationData && (
+                <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+                  <div className="text-sm font-medium text-gray-700 mb-1">Selected Location:</div>
+                  <div className="text-sm text-gray-900">{patientLocationData.address}</div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Coordinates: {patientLocationData.lat.toFixed(6)}, {patientLocationData.lng.toFixed(6)}
+                  </div>
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => {
+                setShowPatientLocationMap(false);
+                setPatientLocationData(null);
+              }}>
+                Cancel
+              </Button>
+              <Button 
+                onClick={handleSavePatientLocation}
+                disabled={!patientLocationData}
+                className="bg-brand-orange hover:bg-brand-orange-400 text-white"
+              >
+                Save Location
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
 

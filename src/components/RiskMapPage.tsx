@@ -27,6 +27,7 @@ import { toast } from "@/components/ui/sonner";
 import { PinModal, PinFormData } from "./PinModal";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
+import { useUserRole } from "@/hooks/useUserRole";
 
 // Pin type icons mapping
 const pinTypeIcons: Record<string, any> = {
@@ -66,6 +67,7 @@ export function RiskMapPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const { createPin, updatePin, subscribeToPins, deletePin, loading: pinLoading } = usePins();
+  const { canAddPlacemark, canEditPins, canDeletePins } = useUserRole();
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [date, setDate] = useState<DateRange | undefined>();
   const [quickDateFilter, setQuickDateFilter] = useState("all");
@@ -884,34 +886,55 @@ ${placemarks}
                 </div>
 
                 {/* Add Placemark Button */}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className={cn(
-                        "h-9 px-3",
-                        isAddPlacemarkMode && "bg-brand-orange text-white hover:bg-brand-orange/90"
-                      )}
-                      onClick={() => {
-                        if (isAddPlacemarkMode) {
-                          // Toggle off if already active
-                          setIsAddPlacemarkMode(false);
-                        } else {
-                          setIsAddPlacemarkMode(true);
-                          setIsFiltersOpen(false);
-                          setIsPinModalOpen(false);
-                        }
-                      }}
-                    >
-                      <MapPin className="h-4 w-4 mr-2" />
-                      Add Placemark
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Add a new placemark on the map</p>
-                  </TooltipContent>
-                </Tooltip>
+                {canAddPlacemark() ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className={cn(
+                          "h-9 px-3",
+                          isAddPlacemarkMode && "bg-brand-orange text-white hover:bg-brand-orange/90"
+                        )}
+                        onClick={() => {
+                          if (isAddPlacemarkMode) {
+                            // Toggle off if already active
+                            setIsAddPlacemarkMode(false);
+                          } else {
+                            setIsAddPlacemarkMode(true);
+                            setIsFiltersOpen(false);
+                            setIsPinModalOpen(false);
+                          }
+                        }}
+                      >
+                        <MapPin className="h-4 w-4 mr-2" />
+                        Add Placemark
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Add a new placemark on the map</p>
+                    </TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled
+                          className="h-9 px-3 opacity-50 cursor-not-allowed"
+                        >
+                          <MapPin className="h-4 w-4 mr-2" />
+                          Add Placemark
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>You don't have permission to add placemarks. Contact your super admin for access.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                )}
 
                 {/* Filters Button */}
                 <Tooltip>
@@ -1141,7 +1164,7 @@ ${placemarks}
                 lng: tempClickedLocation.lng,
                 address: tempClickedLocation.locationName
               } : null}
-              canEdit={true}
+              canEdit={canEditPins() && canDeletePins()}
               onEditPin={handleEditPin}
               onDeletePin={handleDeletePinClick}
               hideStyleToggle={false}
@@ -1164,6 +1187,8 @@ ${placemarks}
               existingPin={editingPin}
               prefillData={pinModalPrefill}
               onDelete={handleDeletePinClick}
+              canEdit={canEditPins()}
+              canDelete={canDeletePins()}
             />
             
             {/* Filters Overlay - positioned within map container */}

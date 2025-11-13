@@ -29,6 +29,67 @@ service cloud.firestore {
       return isSuperAdmin() || isLDRRMOAdmin();
     }
     
+    // Note: Firestore rules cannot easily check array membership for permissions
+    // Granular permission checks (edit_reports, delete_reports, etc.) are handled at the application level
+    // These functions check if user is an admin (super admin or LDRRMO admin)
+    // Application-level checks (UI disabling buttons) enforce granular permissions
+    
+    // Check if admin can edit reports
+    // Super admins always allowed, Firebase-authenticated admins allowed (permission checked in app)
+    function canEditReports() {
+      return isAdmin();
+    }
+    
+    // Check if admin can delete reports
+    function canDeleteReports() {
+      return isAdmin();
+    }
+    
+    // Check if admin can add reports to map
+    function canAddReportToMap() {
+      return isAdmin();
+    }
+    
+    // Check if admin can edit announcements
+    function canEditAnnouncements() {
+      return isAdmin();
+    }
+    
+    // Check if admin can delete announcements
+    function canDeleteAnnouncements() {
+      return isAdmin();
+    }
+    
+    // Check if admin can add placemarks
+    function canAddPlacemark() {
+      return isAdmin();
+    }
+    
+    // Check if admin can edit pins
+    function canEditPins() {
+      return isAdmin();
+    }
+    
+    // Check if admin can delete pins
+    function canDeletePins() {
+      return isAdmin();
+    }
+    
+    // Check if admin can edit residents
+    function canEditResidents() {
+      return isAdmin();
+    }
+    
+    // Check if admin can delete residents
+    function canDeleteResidents() {
+      return isAdmin();
+    }
+    
+    // Check if admin can change resident status
+    function canChangeResidentStatus() {
+      return isAdmin();
+    }
+    
     // Check if user owns the document
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
@@ -63,21 +124,29 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
     
-    // Users collection
+    // Users collection (Residents)
     match /users/{userId} {
       // Allow public read access (needed for regular Admins who don't have Firebase Auth)
       // Profile information is not highly sensitive and is needed for display purposes
       allow read: if true;
       
-      // Users can create/update their own profile, admins can modify any
-      // Suspended users cannot create or update their profile
-      allow create: if isAuthenticated() && 
+      // Users can create their own profile, admins with permission can create any
+      // Suspended users cannot create profiles
+      allow create: if (isAuthenticated() && 
                        !isSuspended() &&
-                       request.auth.uid == request.resource.data.firebaseUid;
-      allow update: if (!isSuspended() && isOwner(resource.data.firebaseUid)) || isAdmin();
+                       request.auth.uid == request.resource.data.firebaseUid) ||
+                      canEditResidents();
       
-      // Users can delete their own account, admins can delete any
-      allow delete: if isOwner(resource.data.firebaseUid) || isAdmin();
+      // Users can update their own profile, admins with permission can update any
+      // Suspended users cannot update their profile
+      allow update: if (!isSuspended() && isOwner(resource.data.firebaseUid)) || 
+                      canEditResidents() || 
+                      isAdmin();
+      
+      // Users can delete their own account, admins with permission can delete any
+      allow delete: if isOwner(resource.data.firebaseUid) || 
+                      canDeleteResidents() || 
+                      isAdmin();
     }
     
     // Reports collection
@@ -87,12 +156,17 @@ service cloud.firestore {
       
       // Authenticated users can create reports with their own userId
       // Suspended users cannot create reports
-      allow create: if isAuthenticated() && 
+      // Admins with permission can also create reports
+      allow create: if (isAuthenticated() && 
                        !isSuspended() &&
-                       request.resource.data.userId == request.auth.uid;
+                       request.resource.data.userId == request.auth.uid) ||
+                      canEditReports();
       
-      // Allow public update and delete (for regular admins to manage reports)
-      allow update, delete: if true;
+      // Admins with edit permission can update, or allow public update (for regular admins without Firebase Auth)
+      allow update: if canEditReports() || true;
+      
+      // Admins with delete permission can delete, or allow public delete (for regular admins without Firebase Auth)
+      allow delete: if canDeleteReports() || true;
     }
     
     // Announcements collection
@@ -100,8 +174,14 @@ service cloud.firestore {
       // Allow public read access (needed for regular Admins who don't have Firebase Auth)
       allow read: if true;
       
-      // Allow public write (for regular admins to manage announcements)
-      allow create, update, delete: if true;
+      // Admins with permission can create, or allow public create (for regular admins without Firebase Auth)
+      allow create: if canEditAnnouncements() || true;
+      
+      // Admins with permission can update, or allow public update (for regular admins without Firebase Auth)
+      allow update: if canEditAnnouncements() || true;
+      
+      // Admins with permission can delete, or allow public delete (for regular admins without Firebase Auth)
+      allow delete: if canDeleteAnnouncements() || true;
     }
     
     // Announcement Types collection
@@ -187,10 +267,14 @@ service cloud.firestore {
       // Public read access (mobile app + web app + anyone can view pins)
       allow read: if true;
       
-      // Allow public write (for regular LDRRMO admins who use localStorage auth, not Firebase Auth)
-      // Super admins (Firebase Auth) also have access
-      // This follows the same pattern as reports, announcements, and other admin-managed collections
-      allow create, update, delete: if true;
+      // Admins with permission can create, or allow public create (for regular admins without Firebase Auth)
+      allow create: if canAddPlacemark() || true;
+      
+      // Admins with permission can update, or allow public update (for regular admins without Firebase Auth)
+      allow update: if canEditPins() || true;
+      
+      // Admins with permission can delete, or allow public delete (for regular admins without Firebase Auth)
+      allow delete: if canDeletePins() || true;
     }
     
     // PAGASA Bulletins collection

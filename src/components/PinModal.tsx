@@ -59,6 +59,8 @@ interface PinModalProps {
   prefillData?: Partial<PinFormData>;
   onMapClick?: (lngLat: { lng: number; lat: number }) => void;
   onDelete?: (pinId: string) => void;
+  canEdit?: boolean;
+  canDelete?: boolean;
 }
 
 export interface PinFormData {
@@ -92,7 +94,9 @@ export function PinModal({
   existingPin,
   prefillData,
   onMapClick,
-  onDelete
+  onDelete,
+  canEdit = true,
+  canDelete = true
 }: PinModalProps) {
   const [formData, setFormData] = useState<PinFormData>({
     type: "",
@@ -514,20 +518,33 @@ export function PinModal({
         <div className="bg-white border-t border-gray-200 px-4 sm:px-6 py-2 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] flex-shrink-0">
           <div className="flex gap-3">
             {mode === "edit" && onDelete && existingPin?.id && (
-              <Button 
-                onClick={handleDelete} 
-                variant="destructive"
-                className="h-10 px-4 border-red-300 hover:bg-red-600 hover:border-red-400"
-                disabled={isSaving}
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                Delete
-              </Button>
+              canDelete ? (
+                <Button 
+                  onClick={handleDelete} 
+                  variant="destructive"
+                  className="h-10 px-4 border-red-300 hover:bg-red-600 hover:border-red-400"
+                  disabled={isSaving}
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete
+                </Button>
+              ) : (
+                <Button 
+                  variant="destructive"
+                  className="h-10 px-4 border-red-300 opacity-50 cursor-not-allowed"
+                  disabled
+                  title="You don't have permission to delete pins. Contact your super admin for access."
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete
+                </Button>
+              )
             )}
             <Button 
               onClick={handleSave} 
               className="flex-1 h-10 bg-brand-orange hover:bg-brand-orange/90 text-white font-medium shadow-sm hover:shadow-md transition-all"
-              disabled={!isValid() || isSaving}
+              disabled={!isValid() || isSaving || (mode === "edit" && !canEdit)}
+              title={mode === "edit" && !canEdit ? "You don't have permission to edit pins. Contact your super admin for access." : undefined}
             >
               {isSaving ? (
                 <>

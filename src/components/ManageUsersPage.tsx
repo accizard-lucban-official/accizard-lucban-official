@@ -96,7 +96,7 @@ const ADMIN_POSITIONS_COLLECTION = "adminPositions";
 
 export function ManageUsersPage() {
   const navigate = useNavigate();
-  const { userRole, loading: roleLoading, canManageAdmins } = useUserRole();
+  const { userRole, loading: roleLoading, canManageAdmins, canEditResidents, canDeleteResidents, canChangeResidentStatus } = useUserRole();
   const [searchTerm, setSearchTerm] = useState("");
   const [positionFilter, setPositionFilter] = useState("all");
   const [permissionFilter, setPermissionFilter] = useState("all");
@@ -3277,22 +3277,43 @@ export function ManageUsersPage() {
                         </TooltipContent>
                       </Tooltip>
 
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                <Button
-                            variant="destructive"
-                  size="sm"
-                            onClick={() => handleBatchDelete('resident')}
-                            className="bg-brand-red hover:bg-brand-red-700 text-white"
-                >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            Delete ({selectedResidents.length})
-                </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Delete {selectedResidents.length} selected resident(s)</p>
-                        </TooltipContent>
-                      </Tooltip>
+                      {canDeleteResidents() ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => handleBatchDelete('resident')}
+                              className="bg-brand-red hover:bg-brand-red-700 text-white"
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Delete ({selectedResidents.length})
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>Delete {selectedResidents.length} selected resident(s)</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span>
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                disabled
+                                className="bg-brand-red hover:bg-brand-red-700 text-white opacity-50 cursor-not-allowed"
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Delete ({selectedResidents.length})
+                              </Button>
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>You don't have permission to delete resident accounts. Contact your super admin for access.</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
                     </>
                   )}
 
@@ -3467,18 +3488,19 @@ export function ManageUsersPage() {
                                 >
                                   <Eye className="h-4 w-4" />
                                 </Button>
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      className={resident.suspended ? "text-gray-400" : resident.verified ? "text-green-600" : "text-yellow-600"}
-                                      title="Account Status"
-                                    >
-                                      {resident.suspended ? <ShieldOff className="h-4 w-4" /> : resident.verified ? <ShieldCheck className="h-4 w-4" /> : <ShieldX className="h-4 w-4" />}
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end">
+                                {canChangeResidentStatus() ? (
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className={resident.suspended ? "text-gray-400" : resident.verified ? "text-green-600" : "text-yellow-600"}
+                                        title="Account Status"
+                                      >
+                                        {resident.suspended ? <ShieldOff className="h-4 w-4" /> : resident.verified ? <ShieldCheck className="h-4 w-4" /> : <ShieldX className="h-4 w-4" />}
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
                                     <DropdownMenuItem
                                       onClick={async () => {
                                         try {
@@ -3540,7 +3562,30 @@ export function ManageUsersPage() {
                                     </DropdownMenuItem>
                                   </DropdownMenuContent>
                                 </DropdownMenu>
-                                <AlertDialog>
+                                ) : (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span>
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          disabled
+                                          className={cn(
+                                            "opacity-50 cursor-not-allowed",
+                                            resident.suspended ? "text-gray-400" : resident.verified ? "text-green-600" : "text-yellow-600"
+                                          )}
+                                        >
+                                          {resident.suspended ? <ShieldOff className="h-4 w-4" /> : resident.verified ? <ShieldCheck className="h-4 w-4" /> : <ShieldX className="h-4 w-4" />}
+                                        </Button>
+                                      </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p>You don't have permission to change resident account status. Contact your super admin for access.</p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                )}
+                                {canDeleteResidents() ? (
+                                  <AlertDialog>
                                   <AlertDialogTrigger asChild>
                                     <Button size="sm" variant="outline" className="text-red-600" title="Delete Resident">
                                       <Trash2 className="h-4 w-4 text-red-600" />
@@ -3582,6 +3627,20 @@ export function ManageUsersPage() {
                                     </AlertDialogFooter>
                                   </AlertDialogContent>
                                 </AlertDialog>
+                                ) : (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span>
+                                        <Button size="sm" variant="outline" disabled className="text-red-600 opacity-50 cursor-not-allowed">
+                                          <Trash2 className="h-4 w-4 text-red-600" />
+                                        </Button>
+                                      </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p>You don't have permission to delete resident accounts. Contact your super admin for access.</p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                )}
                               </div>
                             </TableCell>
                           </TableRow>
@@ -3883,14 +3942,34 @@ export function ManageUsersPage() {
                 
                 {/* Edit Button - only show in view profile tab and not in edit mode */}
                 {!isEditingResidentPreview && (
-                  <Button
-                    onClick={() => setIsEditingResidentPreview(true)}
-                    className="mt-4"
-                    variant="outline"
-                  >
-                    <Edit className="h-4 w-4 mr-2" />
-                    Edit Profile
-                  </Button>
+                  canEditResidents() ? (
+                    <Button
+                      onClick={() => setIsEditingResidentPreview(true)}
+                      className="mt-4"
+                      variant="outline"
+                    >
+                      <Edit className="h-4 w-4 mr-2" />
+                      Edit Profile
+                    </Button>
+                  ) : (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span>
+                          <Button
+                            disabled
+                            className="mt-4 opacity-50 cursor-not-allowed"
+                            variant="outline"
+                          >
+                            <Edit className="h-4 w-4 mr-2" />
+                            Edit Profile
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>You don't have permission to edit resident accounts. Contact your super admin for access.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  )
                 )}
               </div>
             )}

@@ -17,6 +17,11 @@ service firebase.storage {
     }
     function isVideo() { return request.resource.contentType.matches('video/.*'); }
     function isAudio() { return request.resource.contentType.matches('audio/.*'); }
+    
+    // Note: Storage rules cannot directly access Firestore permissions
+    // Permission checks are handled at the application level (UI disabling buttons)
+    // These rules allow authenticated users to upload files
+    // Regular admins without Firebase Auth may need public write access for some paths
 
     // ========================================
     // EXISTING RULES (PRESERVED)
@@ -100,6 +105,8 @@ service firebase.storage {
       allow delete: if isAuthenticated();
     }
 
+    // Announcement media - authenticated users can upload
+    // Permission checks (edit_announcements) are handled at application level
     match /announcements/{announcementId}/{fileName} {
       allow read: if true;
       allow write: if isAuthenticated() && (isImage() || isDocument()) && isValidSize();
@@ -112,6 +119,8 @@ service firebase.storage {
       allow delete: if isAuthenticated();
     }
 
+    // Report media - authenticated users can upload
+    // Permission checks (edit_reports, delete_reports) are handled at application level
     match /reports/{reportId}/{fileName} {
       allow read: if isAuthenticated();
       allow write: if isAuthenticated() && (isImage() || isDocument()) && isValidSize();
