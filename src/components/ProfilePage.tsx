@@ -10,7 +10,7 @@ import { Layout } from "./Layout";
 import { useNavigate } from "react-router-dom";
 import { db, auth, storage } from "@/lib/firebase";
 import { updateProfile, updateEmail } from "firebase/auth";
-import { collection, query, where, getDocs, doc, updateDoc, addDoc, deleteDoc, orderBy, limit, serverTimestamp } from "firebase/firestore";
+import { collection, query, where, getDocs, doc, updateDoc, addDoc, deleteDoc, orderBy, limit, serverTimestamp, Timestamp } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { toast } from "@/components/ui/sonner";
 import { useUserRole } from "@/hooks/useUserRole";
@@ -53,6 +53,36 @@ export function ProfilePage() {
     title: "",
     description: ""
   });
+
+  // Helper function to format Firestore timestamps
+  const formatTimestamp = (timestamp: any): string => {
+    if (!timestamp) return '-';
+    if (timestamp instanceof Timestamp) {
+      return timestamp.toDate().toLocaleDateString();
+    }
+    if (timestamp?.toDate && typeof timestamp.toDate === 'function') {
+      return timestamp.toDate().toLocaleDateString();
+    }
+    if (timestamp?.seconds) {
+      return new Date(timestamp.seconds * 1000).toLocaleDateString();
+    }
+    return new Date(timestamp).toLocaleDateString();
+  };
+
+  // Helper function to get timestamp milliseconds for comparison
+  const getTimestampMillis = (timestamp: any): number => {
+    if (!timestamp) return 0;
+    if (timestamp instanceof Timestamp) {
+      return timestamp.toMillis();
+    }
+    if (timestamp?.toMillis && typeof timestamp.toMillis === 'function') {
+      return timestamp.toMillis();
+    }
+    if (timestamp?.seconds) {
+      return timestamp.seconds * 1000;
+    }
+    return new Date(timestamp).getTime();
+  };
 
   // Handle field editing
   const startEditing = (field: string, currentValue: string) => {
@@ -773,9 +803,9 @@ export function ProfilePage() {
                             <h4 className="font-medium text-gray-900 mb-2">{note.title}</h4>
                             <p className="text-sm text-gray-600 mb-2">{note.description}</p>
                             <p className="text-xs text-gray-500">
-                              Created: {note.createdAt ? new Date(note.createdAt).toLocaleDateString() : '-'}
-                              {note.updatedAt && note.updatedAt !== note.createdAt && (
-                                <span> • Updated: {new Date(note.updatedAt).toLocaleDateString()}</span>
+                              Created: {formatTimestamp(note.createdAt)}
+                              {note.updatedAt && getTimestampMillis(note.updatedAt) !== getTimestampMillis(note.createdAt) && (
+                                <span> • Updated: {formatTimestamp(note.updatedAt)}</span>
                               )}
                             </p>
                           </div>

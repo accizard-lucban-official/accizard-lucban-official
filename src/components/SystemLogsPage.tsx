@@ -4,11 +4,18 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { ChevronUp, ChevronDown, Search, Activity, Users, Clock } from "lucide-react";
+import { ChevronUp, ChevronDown, Search, Activity, Users, Clock, Trash2, Download } from "lucide-react";
 import { Layout } from "./Layout";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { db } from "@/lib/firebase";
-import { collection, onSnapshot, query, orderBy, getDocs } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, getDocs, deleteDoc, doc } from "firebase/firestore";
+import { useNavigate } from "react-router-dom";
+import { useUserRole } from "@/hooks/useUserRole";
+import { useToast } from "@/components/ui/use-toast";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
+import { DateRange } from "react-day-picker";
 
 // Helper function to format time without seconds
 function formatTimeNoSeconds(time: string | number | null | undefined) {
@@ -27,12 +34,18 @@ function formatTimeNoSeconds(time: string | number | null | undefined) {
 }
 
 export function SystemLogsPage() {
+  const navigate = useNavigate();
+  const { isSuperAdmin } = useUserRole();
+  const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState("");
   const [userFilter, setUserFilter] = useState("all");
   const [actionTypeFilter, setActionTypeFilter] = useState("all");
   const [activityLogs, setActivityLogs] = useState([]);
   const [adminUsers, setAdminUsers] = useState<any[]>([]);
   const [activitySortDirection, setActivitySortDirection] = useState<'asc' | 'desc'>('desc');
+  const [selectedLogs, setSelectedLogs] = useState<string[]>([]);
+  const [deletingLogId, setDeletingLogId] = useState<string | null>(null);
+  const [dateRange, setDateRange] = useState<DateRange | undefined>();
   
   // Pagination state
   const [activityPage, setActivityPage] = useState(1);
@@ -80,14 +93,39 @@ export function SystemLogsPage() {
   // Filter activity logs based on search and filters
   const filteredActivityLogs = activityLogs.filter(log => {
     const search = searchTerm.toLowerCase();
+    const admin = adminUsers.find(a => a.name === log.admin || a.name === log.actor);
+    const adminName = log.admin || log.actor || "";
+    const adminUserId = admin?.userId || "";
+    
     const matchesSearch = 
       log.action?.toLowerCase().includes(search) ||
-      log.admin?.toLowerCase().includes(search) ||
-      log.actor?.toLowerCase().includes(search) ||
-      log.actionType?.toLowerCase().includes(search);
+      adminName.toLowerCase().includes(search) ||
+      adminUserId.toLowerCase().includes(search) ||
+      log.actionType?.toLowerCase().includes(search) ||
+      (admin?.position || admin?.role || "").toLowerCase().includes(search);
     const matchesUser = userFilter === "all" || log.admin === userFilter || log.actor === userFilter;
     const matchesActionType = actionTypeFilter === "all" || log.actionType === actionTypeFilter;
-    return matchesSearch && matchesUser && matchesActionType;
+    
+    // Date range filter
+    let matchesDateRange = true;
+    if (dateRange?.from || dateRange?.to) {
+      const logDate = typeof log.timestamp === 'number' ? new Date(log.timestamp) : new Date(log.timestamp);
+      logDate.setHours(0, 0, 0, 0);
+      
+      if (dateRange.from) {
+        const fromDate = new Date(dateRange.from);
+        fromDate.setHours(0, 0, 0, 0);
+        matchesDateRange = logDate >= fromDate;
+      }
+      
+      if (matchesDateRange && dateRange.to) {
+        const toDate = new Date(dateRange.to);
+        toDate.setHours(23, 59, 59, 999);
+        matchesDateRange = logDate <= toDate;
+      }
+    }
+    
+    return matchesSearch && matchesUser && matchesActionType && matchesDateRange;
   });
   
   // Sort activity logs
@@ -108,6 +146,131 @@ export function SystemLogsPage() {
   // Handler for sorting
   const handleActivitySort = () => {
     setActivitySortDirection(activitySortDirection === 'asc' ? 'desc' : 'asc');
+  };
+
+  // Handler for selecting/deselecting logs
+  const handleSelectLog = (logId: string) => {
+    setSelectedLogs(prev => 
+      prev.includes(logId) 
+        ? prev.filter(id => id !== logId)
+        : [...prev, logId]
+    );
+  };
+
+  // Handler for selecting all logs
+  const handleSelectAllLogs = () => {
+    setSelectedLogs(prev => 
+      prev.length === pagedActivityLogs.length 
+        ? [] 
+        : pagedActivityLogs.map(log => log.id)
+    );
+  };
+
+  // Handler for deleting a log
+  const handleDeleteLog = async (logId: string) => {
+    setDeletingLogId(logId);
+    try {
+      await deleteDoc(doc(db, "activityLogs", logId));
+      setActivityLogs(prev => prev.filter(log => log.id !== logId));
+      setSelectedLogs(prev => prev.filter(id => id !== logId));
+      toast({
+        title: 'Success',
+        description: 'Activity log deleted successfully'
+      });
+    } catch (error) {
+      console.error("Error deleting log:", error);
+      toast({
+        title: 'Error',
+        description: 'Failed to delete activity log. Please try again.',
+        variant: 'destructive'
+      });
+    } finally {
+      setDeletingLogId(null);
+    }
+  };
+
+  // Handler for navigating to admin account
+  const handleNavigateToAdmin = (adminId: string, adminName: string) => {
+    if (isSuperAdmin()) {
+      navigate('/manage-users', { 
+        state: { 
+          tab: 'admins',
+          search: adminName,
+          highlightAdminId: adminId
+        } 
+      });
+    }
+  };
+
+  // Handler for exporting logs to CSV
+  const handleExportLogs = () => {
+    if (filteredActivityLogs.length === 0) {
+      toast({
+        title: 'No logs to export',
+        description: 'There are no logs matching your current filters.',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    // CSV header
+    const headers = ['Log ID', 'User ID', 'User Name', 'Role', 'Created Date', 'Created Time', 'Action Type', 'Log Message'];
+    
+    // CSV rows
+    const rows = filteredActivityLogs.map(log => {
+      const admin = adminUsers.find(a => a.name === log.admin || a.name === log.actor);
+      const adminName = log.admin || log.actor || "-";
+      const adminUserId = admin?.userId || "-";
+      const role = admin ? admin.position || admin.role || "-" : "-";
+      const logDate = log.timestamp ? new Date(log.timestamp).toLocaleDateString() : "-";
+      const logTime = log.timestamp ? formatTimeNoSeconds(log.timestamp) : "-";
+      
+      return [
+        log.id || "",
+        adminUserId,
+        adminName,
+        role,
+        logDate,
+        logTime,
+        log.actionType || "-",
+        log.action || "-"
+      ];
+    });
+
+    // Create CSV content
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+
+    // Create blob and download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    
+    // Generate filename with date range if applicable
+    let filename = 'accizard-activity-logs';
+    if (dateRange?.from && dateRange?.to) {
+      const fromStr = dateRange.from.toISOString().split('T')[0];
+      const toStr = dateRange.to.toISOString().split('T')[0];
+      filename += `-${fromStr}-to-${toStr}`;
+    } else {
+      filename += `-${new Date().toISOString().split('T')[0]}`;
+    }
+    filename += '.csv';
+    
+    link.setAttribute('download', filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    toast({
+      title: 'Export Successful',
+      description: `Exported ${filteredActivityLogs.length} log(s) to CSV.`
+    });
   };
 
   return (
@@ -196,6 +359,12 @@ export function SystemLogsPage() {
                 />
               </div>
 
+              {/* Date Range Picker */}
+              <DateRangePicker
+                date={dateRange}
+                onDateChange={setDateRange}
+              />
+
               {/* User Filter */}
               <Select value={userFilter} onValueChange={setUserFilter}>
                 <SelectTrigger className="w-auto">
@@ -226,6 +395,17 @@ export function SystemLogsPage() {
                   <SelectItem value="verification">Verification</SelectItem>
                 </SelectContent>
               </Select>
+
+              {/* Export Button */}
+              <Button
+                onClick={handleExportLogs}
+                variant="outline"
+                className="flex items-center gap-2"
+                disabled={filteredActivityLogs.length === 0}
+              >
+                <Download className="h-4 w-4" />
+                Export CSV
+              </Button>
             </div>
           </div>
 
@@ -234,35 +414,72 @@ export function SystemLogsPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>User ID</TableHead>
+                    <TableHead className="w-[50px]">
+                      {isSuperAdmin() && (
+                        <Checkbox
+                          checked={selectedLogs.length === pagedActivityLogs.length && pagedActivityLogs.length > 0}
+                          onCheckedChange={handleSelectAllLogs}
+                        />
+                      )}
+                    </TableHead>
+                    <TableHead>Log ID</TableHead>
+                    <TableHead>User</TableHead>
                     <TableHead>Role</TableHead>
-                    <TableHead>Actor</TableHead>
                     <TableHead className="cursor-pointer hover:bg-gray-50" onClick={handleActivitySort}>
                       <div className="flex items-center gap-1">
                         Created Date
                         {activitySortDirection === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                       </div>
                     </TableHead>
-                    <TableHead>Action Type</TableHead>
-                    <TableHead>Action</TableHead>
+                    <TableHead>Log Message</TableHead>
+                    {isSuperAdmin() && <TableHead>Actions</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {pagedActivityLogs.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center text-gray-500 py-8">
+                      <TableCell colSpan={isSuperAdmin() ? 7 : 6} className="text-center text-gray-500 py-8">
                         No activity logs found.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    pagedActivityLogs.map(log => {
+                    pagedActivityLogs.map((log, index) => {
                       // Try to find the admin user by name
-                      const admin = adminUsers.find(a => a.name === log.admin);
+                      const admin = adminUsers.find(a => a.name === log.admin || a.name === log.actor);
+                      const adminName = log.admin || log.actor || "-";
+                      const adminId = admin?.id || "";
+                      const adminUserId = admin?.userId || "-";
+                      // Check if user is super admin (from log.userRole field)
+                      const isSuperAdminUser = log.userRole === 'superadmin';
+                      const role = isSuperAdminUser ? "Super Admin" : (admin ? admin.position || admin.role || "-" : "-");
+                      const logIdNumber = (activityPage - 1) * activityRowsPerPage + index + 1;
+                      
                       return (
                         <TableRow key={log.id}>
-                          <TableCell className="font-medium">{admin ? admin.userId : "-"}</TableCell>
-                          <TableCell>{admin ? admin.position || admin.role || "-" : "-"}</TableCell>
-                          <TableCell>{log.admin || (admin ? admin.name : "-")}</TableCell>
+                          <TableCell>
+                            {isSuperAdmin() && (
+                              <Checkbox
+                                checked={selectedLogs.includes(log.id)}
+                                onCheckedChange={() => handleSelectLog(log.id)}
+                              />
+                            )}
+                          </TableCell>
+                          <TableCell className="text-gray-700">
+                            LID - {logIdNumber}
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            {isSuperAdmin() && adminId ? (
+                              <button
+                                onClick={() => handleNavigateToAdmin(adminId, adminName)}
+                                className="text-brand-orange hover:text-brand-orange-400 hover:underline transition-colors"
+                              >
+                                {adminUserId} - {adminName}
+                              </button>
+                            ) : (
+                              <span>{adminUserId} - {adminName}</span>
+                            )}
+                          </TableCell>
+                          <TableCell>{role}</TableCell>
                           <TableCell>
                             {log.timestamp ? (
                               <>
@@ -272,21 +489,58 @@ export function SystemLogsPage() {
                               </>
                             ) : "-"}
                           </TableCell>
-                          <TableCell>
-                            <Badge 
-                              className={
-                                log.actionType === 'create' ? 'bg-green-100 text-green-600' :
-                                log.actionType === 'edit' ? 'bg-blue-100 text-blue-600' :
-                                log.actionType === 'delete' ? 'bg-red-100 text-red-600' :
-                                log.actionType === 'permission' ? 'bg-purple-100 text-purple-600' :
-                                log.actionType === 'verification' ? 'bg-yellow-100 text-yellow-600' :
-                                'bg-gray-100 text-gray-600'
-                              }
-                            >
-                              {log.actionType || '-'}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="max-w-xs truncate">{log.action}</TableCell>
+                          <TableCell className="max-w-xs truncate" title={log.action}>{log.action || '-'}</TableCell>
+                          {isSuperAdmin() && (
+                            <TableCell>
+                              <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline" 
+                                    className="text-red-600 hover:text-red-700"
+                                    disabled={deletingLogId === log.id}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                  <AlertDialogHeader>
+                                    <div className="flex items-center gap-3">
+                                      <div className="h-10 w-10 bg-red-100 rounded-full flex items-center justify-center">
+                                        <Trash2 className="h-5 w-5 text-red-600" />
+                                      </div>
+                                      <div>
+                                        <AlertDialogTitle className="text-red-800">Delete Activity Log</AlertDialogTitle>
+                                        <AlertDialogDescription className="text-red-600">
+                                          Are you sure you want to delete this activity log? This action cannot be undone.
+                                        </AlertDialogDescription>
+                                      </div>
+                                    </div>
+                                  </AlertDialogHeader>
+                                  <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction
+                                      onClick={() => handleDeleteLog(log.id)}
+                                      disabled={deletingLogId === log.id}
+                                      className="bg-red-600 hover:bg-red-700 disabled:opacity-50"
+                                    >
+                                      {deletingLogId === log.id ? (
+                                        <div className="flex items-center">
+                                          <svg className="animate-spin -ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                          </svg>
+                                          Deleting...
+                                        </div>
+                                      ) : (
+                                        "Delete"
+                                      )}
+                                    </AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
+                            </TableCell>
+                          )}
                         </TableRow>
                       );
                     })

@@ -31,6 +31,7 @@ import { toast } from "@/components/ui/sonner";
 import { useUserRole } from "@/hooks/useUserRole";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
+import { logActivity, ActionType, formatLogMessage } from "@/lib/activityLogger";
 
 // Helper function to get icon for report type
 const getReportTypeIcon = (type: string) => {
@@ -848,6 +849,22 @@ export function ManageReportsPage() {
       const docRef = await addDoc(collection(db, "reports"), reportData);
       console.log("Report created with ID:", docRef.id);
       
+      // Log activity
+      await logActivity({
+        actionType: ActionType.REPORT_CREATED,
+        action: formatLogMessage('Created', 'report', `${formData.type} Incident`, docRef.id),
+        entityType: 'report',
+        entityId: docRef.id,
+        entityName: `${formData.type} Incident`,
+        metadata: {
+          reportId: reportData.reportId,
+          type: formData.type,
+          status: 'Pending',
+          barangay: formData.barangay || '',
+          reportedBy: formData.reportedBy || ''
+        }
+      });
+      
       // Move uploaded files from temp folder to actual report folder if needed
       // (Optional: can be done later or files can stay in temp folder)
       
@@ -1457,6 +1474,21 @@ useEffect(() => {
       // Delete the report from Firestore
       await deleteDoc(doc(db, "reports", reportToDelete));
       console.log("Successfully deleted report from Firestore:", reportToDelete);
+      
+      // Log activity (reportToDeleteData was already declared above)
+      if (reportToDeleteData) {
+        await logActivity({
+          actionType: ActionType.REPORT_DELETED,
+          action: formatLogMessage('Deleted', 'report', `${reportToDeleteData.type || 'Unknown'} Incident`, reportToDelete),
+          entityType: 'report',
+          entityId: reportToDelete,
+          entityName: `${reportToDeleteData.type || 'Unknown'} Incident`,
+          metadata: {
+            reportId: reportToDeleteData.id,
+            type: reportToDeleteData.type || 'Unknown'
+          }
+        });
+      }
       
       // Remove from viewed reports if it exists
       setViewedReports(prev => {
@@ -2220,11 +2252,27 @@ useEffect(() => {
       console.log(`Updating report ${reportFirestoreId} status to ${newStatus}`);
       
       // Update in Firestore
+      const report = reports.find(r => r.firestoreId === reportFirestoreId);
+      
       await updateDoc(doc(db, "reports", reportFirestoreId), {
         status: newStatus,
         updatedAt: serverTimestamp(),
         lastModifiedBy: currentUser?.id
       });
+      
+      // Log activity
+      if (report) {
+        await logActivity({
+          actionType: ActionType.REPORT_UPDATED,
+          action: `Updated report "${report.type || 'Unknown'} Incident" (${reportFirestoreId}) - Changed status to "${newStatus}"`,
+          entityType: 'report',
+          entityId: reportFirestoreId,
+          entityName: `${report.type || 'Unknown'} Incident`,
+          changes: {
+            status: { from: report.status || 'Unknown', to: newStatus }
+          }
+        });
+      }
       
       toast.success(`Status updated to ${newStatus}`);
     } catch (error) {
@@ -2984,6 +3032,22 @@ useEffect(() => {
           updatedAt: serverTimestamp(),
           lastModifiedBy: currentUser?.id
         });
+        
+        // Log activity
+        const report = reports.find(r => r.firestoreId === firestoreId);
+        if (report) {
+          await logActivity({
+            actionType: ActionType.REPORT_UPDATED,
+            action: `Updated dispatch form for report "${report.type || 'Unknown'} Incident" (${firestoreId})`,
+            entityType: 'report',
+            entityId: firestoreId,
+            entityName: `${report.type || 'Unknown'} Incident`,
+            metadata: {
+              section: 'dispatchInfo'
+            }
+          });
+        }
+        
         toast.success("Dispatch data saved successfully!");
       }
     } catch (error) {
@@ -3034,6 +3098,24 @@ useEffect(() => {
           updatedAt: serverTimestamp(),
           lastModifiedBy: currentUser?.id
         });
+        
+        // Log activity
+        const report = reports.find(r => r.firestoreId === firestoreId);
+        if (report) {
+          const patientCount = patientData.patients ? patientData.patients.length : (Array.isArray(patientData) ? patientData.length : 1);
+          await logActivity({
+            actionType: ActionType.REPORT_UPDATED,
+            action: `Updated patient information for report "${report.type || 'Unknown'} Incident" (${firestoreId}) - ${patientCount} patient(s)`,
+            entityType: 'report',
+            entityId: firestoreId,
+            entityName: `${report.type || 'Unknown'} Incident`,
+            metadata: {
+              section: 'patientInfo',
+              patientCount
+            }
+          });
+        }
+        
         toast.success("Patient information saved successfully!");
       }
     } catch (error) {
@@ -3052,8 +3134,14 @@ useEffect(() => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         if (data.patientInfo && data.patientInfo.patients) {
-          setPatients(data.patientInfo.patients);
-          return data.patientInfo;
+          // Normalize patient data to ensure latitude and longitude are always present
+          const normalizedPatients = data.patientInfo.patients.map((patient: any) => ({
+            ...patient,
+            latitude: patient.latitude || "",
+            longitude: patient.longitude || ""
+          }));
+          setPatients(normalizedPatients);
+          return { ...data.patientInfo, patients: normalizedPatients };
         }
       }
     } catch (error) {
@@ -3437,6 +3525,8 @@ useEffect(() => {
       gender: "",
       companionName: "",
       companionContact: "",
+      latitude: "",
+      longitude: "",
       gcs: {
         eyes: "",
         verbal: "",
@@ -3864,6 +3954,21 @@ useEffect(() => {
           coordinates: `${newLocation.lat}, ${newLocation.lng}`,
           updatedAt: serverTimestamp(),
           lastModifiedBy: currentUser?.id
+        });
+
+        // Log activity
+        await logActivity({
+          actionType: ActionType.REPORT_UPDATED,
+          action: `Updated report "${selectedReport.type || 'Unknown'} Incident" (${selectedReport.firestoreId}) - Changed location`,
+          entityType: 'report',
+          entityId: selectedReport.firestoreId,
+          entityName: `${selectedReport.type || 'Unknown'} Incident`,
+          changes: {
+            location: { from: selectedReport.location || '', to: newLocation.address }
+          },
+          metadata: {
+            coordinates: `${newLocation.lat}, ${newLocation.lng}`
+          }
         });
 
         // Update the local state
@@ -4911,6 +5016,8 @@ useEffect(() => {
               gender: "",
               companionName: "",
               companionContact: "",
+              latitude: "",
+              longitude: "",
               gcs: {
                 eyes: "",
                 verbal: "",
@@ -6989,8 +7096,8 @@ useEffect(() => {
                   )}
                 </div>
                 
-                <div className="flex-1 overflow-y-auto border rounded-lg min-h-0 px-4 pb-4">
-                  <div className="overflow-x-auto">
+                <div className="flex-1 overflow-y-auto border rounded-lg min-h-0">
+                  <div className="overflow-x-auto max-h-[300px] overflow-y-auto">
                     <Table className="w-full min-w-[600px]">
                       <TableBody>
                       <TableRow>
@@ -7037,11 +7144,11 @@ useEffect(() => {
                           {isPatientEditMode ? (
                             <div className="space-y-2">
                               <div className="flex gap-2">
-                                <Textarea 
+                                <Input 
                                   value={currentPatient.address} 
                                   onChange={e => updateCurrentPatient({ address: e.target.value })} 
                                   placeholder="Enter complete address"
-                                  className="flex-1 min-h-[80px] border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0"
+                                  className="flex-1 border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0"
                                 />
                                 <Tooltip>
                                   <TooltipTrigger asChild>
@@ -7061,7 +7168,7 @@ useEffect(() => {
                                         }
                                         setShowPatientLocationMap(true);
                                       }}
-                                      className="h-[80px] border-gray-300"
+                                      className="border-gray-300"
                                     >
                                       <MapPin className="h-4 w-4" />
                                     </Button>
@@ -7384,520 +7491,587 @@ useEffect(() => {
                         <TableRow>
                           <TableCell className="text-sm font-medium text-gray-800 align-top w-1/3 min-w-[150px]">Glasgow Coma Scale (GCS)</TableCell>
                           <TableCell>
-                            <div className="space-y-4">
-                              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                                <div>
-                                  <h4 className="mb-2 text-sm font-medium text-gray-800">Eyes Response</h4>
-                                  <div className="space-y-2">
-                                    {isPatientEditMode ? (
-                                      <RadioGroup value={currentPatient.gcs.eyes} onValueChange={v => updateCurrentPatient({ gcs: { ...currentPatient.gcs, eyes: v } })}>
-                                        {[
-                                          { value: "4", label: "4 - Spontaneous" },
-                                          { value: "3", label: "3 - To sound" },
-                                          { value: "2", label: "2 - To Pain" },
-                                          { value: "1", label: "1 - None" }
-                                        ].map(option => (
-                                          <div key={option.value} className="flex items-center space-x-2">
-                                            <RadioGroupItem value={option.value} id={`eyes-${option.value}`} />
-                                            <Label htmlFor={`eyes-${option.value}`} className="text-sm">
-                                              {option.label}
-                                            </Label>
-                                          </div>
-                                        ))}
-                                      </RadioGroup>
-                                    ) : (
-                                      <div className="space-y-1">
-                                        {currentPatient.gcs.eyes ? (
-                                          <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-50">
-                                            {[
-                                              { value: "4", label: "4 - Spontaneous" },
-                                              { value: "3", label: "3 - To sound" },
-                                              { value: "2", label: "2 - To Pain" },
-                                              { value: "1", label: "1 - None" }
-                                            ].find(opt => opt.value === currentPatient.gcs.eyes)?.label || currentPatient.gcs.eyes}
-                                          </Badge>
-                                        ) : (
-                                          <span className="text-gray-500">Not assessed</span>
-                                        )}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                                <div>
-                                  <h4 className="mb-2 text-sm font-medium text-gray-800">Verbal Response</h4>
-                                  <div className="space-y-2">
-                                    {isPatientEditMode ? (
-                                      <RadioGroup value={currentPatient.gcs.verbal} onValueChange={v => updateCurrentPatient({ gcs: { ...currentPatient.gcs, verbal: v } })}>
-                                        {[
-                                          { value: "5", label: "5 - Oriented" },
-                                          { value: "4", label: "4 - Confused" },
-                                          { value: "3", label: "3 - Words" },
-                                          { value: "2", label: "2 - Sounds" },
-                                          { value: "1", label: "1 - None" }
-                                        ].map(option => (
-                                          <div key={option.value} className="flex items-center space-x-2">
-                                            <RadioGroupItem value={option.value} id={`verbal-${option.value}`} />
-                                            <Label htmlFor={`verbal-${option.value}`} className="text-sm">
-                                              {option.label}
-                                            </Label>
-                                          </div>
-                                        ))}
-                                      </RadioGroup>
-                                    ) : (
-                                      <div className="space-y-1">
-                                        {currentPatient.gcs.verbal ? (
-                                          <Badge className="bg-green-100 text-green-800 hover:bg-green-50">
-                                            {[
-                                              { value: "5", label: "5 - Oriented" },
-                                              { value: "4", label: "4 - Confused" },
-                                              { value: "3", label: "3 - Words" },
-                                              { value: "2", label: "2 - Sounds" },
-                                              { value: "1", label: "1 - None" }
-                                            ].find(opt => opt.value === currentPatient.gcs.verbal)?.label || currentPatient.gcs.verbal}
-                                          </Badge>
-                                        ) : (
-                                          <span className="text-gray-500">Not assessed</span>
-                                        )}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                                <div>
-                                  <h4 className="mb-2 text-sm font-medium text-gray-800">Motor Response</h4>
-                                  <div className="space-y-2">
-                                    {isPatientEditMode ? (
-                                      <RadioGroup value={currentPatient.gcs.motor} onValueChange={v => updateCurrentPatient({ gcs: { ...currentPatient.gcs, motor: v } })}>
-                                        {[
-                                          { value: "6", label: "6 - Obey Commands" },
-                                          { value: "5", label: "5 - Localizing" },
-                                          { value: "4", label: "4 - Withdrawn" },
-                                          { value: "3", label: "3 - Flexion" },
-                                          { value: "2", label: "2 - Extension" },
-                                          { value: "1", label: "1 - None" }
-                                        ].map(option => (
-                                          <div key={option.value} className="flex items-center space-x-2">
-                                            <RadioGroupItem value={option.value} id={`motor-${option.value}`} />
-                                            <Label htmlFor={`motor-${option.value}`} className="text-sm">
-                                              {option.label}
-                                            </Label>
-                                          </div>
-                                        ))}
-                                      </RadioGroup>
-                                    ) : (
-                                      <div className="space-y-1">
-                                        {currentPatient.gcs.motor ? (
-                                          <Badge className="bg-purple-100 text-purple-800 hover:bg-purple-50">
-                                            {[
-                                              { value: "6", label: "6 - Obey Commands" },
-                                              { value: "5", label: "5 - Localizing" },
-                                              { value: "4", label: "4 - Withdrawn" },
-                                              { value: "3", label: "3 - Flexion" },
-                                              { value: "2", label: "2 - Extension" },
-                                              { value: "1", label: "1 - None" }
-                                            ].find(opt => opt.value === currentPatient.gcs.motor)?.label || currentPatient.gcs.motor}
-                                          </Badge>
-                                        ) : (
-                                          <span className="text-gray-500">Not assessed</span>
-                                        )}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="rounded border border-gray-200 bg-white p-3">
-                                <div className="flex items-center justify-between">
-                                  <span className="text-sm font-medium text-gray-800">GCS Total Score:</span>
-                                  <span className="text-2xl font-bold text-brand-orange">
-                                    {(() => {
-                                      const eyesScore = currentPatient.gcs.eyes ? parseInt(currentPatient.gcs.eyes) : 0;
-                                      const verbalScore = currentPatient.gcs.verbal ? parseInt(currentPatient.gcs.verbal) : 0;
-                                      const motorScore = currentPatient.gcs.motor ? parseInt(currentPatient.gcs.motor) : 0;
-                                      const total = eyesScore + verbalScore + motorScore;
-                                      return total > 0 ? total : "Not assessed";
-                                    })()}
-                                  </span>
-                                </div>
-                                <div className="mt-1 text-sm text-gray-500">
-                                  {(() => {
-                                    const eyesScore = currentPatient.gcs.eyes ? parseInt(currentPatient.gcs.eyes) : 0;
-                                    const verbalScore = currentPatient.gcs.verbal ? parseInt(currentPatient.gcs.verbal) : 0;
-                                    const motorScore = currentPatient.gcs.motor ? parseInt(currentPatient.gcs.motor) : 0;
-                                    const total = eyesScore + verbalScore + motorScore;
+                            {(() => {
+                              const eyesScore = currentPatient.gcs.eyes ? parseInt(currentPatient.gcs.eyes) : 0;
+                              const verbalScore = currentPatient.gcs.verbal ? parseInt(currentPatient.gcs.verbal) : 0;
+                              const motorScore = currentPatient.gcs.motor ? parseInt(currentPatient.gcs.motor) : 0;
+                              const total = eyesScore + verbalScore + motorScore;
+                              const eyesOptions = [
+                                { value: "4", label: "Spontaneous", short: "4" },
+                                { value: "3", label: "To sound", short: "3" },
+                                { value: "2", label: "To Pain", short: "2" },
+                                { value: "1", label: "None", short: "1" }
+                              ];
+                              const verbalOptions = [
+                                { value: "5", label: "Oriented", short: "5" },
+                                { value: "4", label: "Confused", short: "4" },
+                                { value: "3", label: "Words", short: "3" },
+                                { value: "2", label: "Sounds", short: "2" },
+                                { value: "1", label: "None", short: "1" }
+                              ];
+                              const motorOptions = [
+                                { value: "6", label: "Obey Commands", short: "6" },
+                                { value: "5", label: "Localizing", short: "5" },
+                                { value: "4", label: "Withdrawn", short: "4" },
+                                { value: "3", label: "Flexion", short: "3" },
+                                { value: "2", label: "Extension", short: "2" },
+                                { value: "1", label: "None", short: "1" }
+                              ];
+                              const getSeverityColor = (score: number) => {
+                                if (score === 0) return "bg-gray-100 text-gray-600 border-gray-300";
+                                if (score >= 13) return "bg-green-50 text-green-700 border-green-300";
+                                if (score >= 9) return "bg-yellow-50 text-yellow-700 border-yellow-300";
+                                return "bg-red-50 text-red-700 border-red-300";
+                              };
+                              const getSeverityLabel = (score: number) => {
+                                if (score === 0) return "Not assessed";
+                                if (score >= 13) return "Minor";
+                                if (score >= 9) return "Moderate";
+                                return "Severe";
+                              };
+                              return (
+                                <div className="space-y-3">
+                                  {/* Compact Score Display */}
+                                  <div className="flex items-center gap-3 flex-wrap">
+                                    {/* Total Score - Prominent */}
+                                    <div className={`flex items-center gap-2 px-4 py-2 rounded-lg border-2 ${getSeverityColor(total)}`}>
+                                      <span className="text-xs font-medium uppercase tracking-wide">GCS</span>
+                                      <span className="text-2xl font-bold">
+                                        {total > 0 ? total : "—"}
+                                      </span>
+                                      {total > 0 && (
+                                        <span className="text-xs font-medium ml-1">
+                                          ({getSeverityLabel(total)})
+                                        </span>
+                                      )}
+                                    </div>
                                     
-                                    if (total === 0) return "Complete assessment required";
-                                    if (total >= 13) return "Minor (13-14)";
-                                    if (total >= 9) return "Moderate (9-12)";
-                                    if (total >= 3) return "Severe (< 8)";
-                                    return "Critical condition";
-                                  })()}
+                                    {/* Individual Scores */}
+                                    {isPatientEditMode ? (
+                                      <div className="flex items-center gap-4 flex-wrap">
+                                        {/* Eyes */}
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-sm font-medium text-gray-600">E:</span>
+                                          <Select 
+                                            value={currentPatient.gcs.eyes || ""} 
+                                            onValueChange={v => updateCurrentPatient({ gcs: { ...currentPatient.gcs, eyes: v } })}
+                                          >
+                                            <SelectTrigger className="w-[180px] border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0">
+                                              <SelectValue placeholder="Eyes" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                              {eyesOptions.map(opt => (
+                                                <SelectItem key={opt.value} value={opt.value}>
+                                                  {opt.short} - {opt.label}
+                                                </SelectItem>
+                                              ))}
+                                            </SelectContent>
+                                          </Select>
+                                        </div>
+                                        
+                                        {/* Verbal */}
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-sm font-medium text-gray-600">V:</span>
+                                          <Select 
+                                            value={currentPatient.gcs.verbal || ""} 
+                                            onValueChange={v => updateCurrentPatient({ gcs: { ...currentPatient.gcs, verbal: v } })}
+                                          >
+                                            <SelectTrigger className="w-[180px] border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0">
+                                              <SelectValue placeholder="Verbal" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                              {verbalOptions.map(opt => (
+                                                <SelectItem key={opt.value} value={opt.value}>
+                                                  {opt.short} - {opt.label}
+                                                </SelectItem>
+                                              ))}
+                                            </SelectContent>
+                                          </Select>
+                                        </div>
+                                        
+                                        {/* Motor */}
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-sm font-medium text-gray-600">M:</span>
+                                          <Select 
+                                            value={currentPatient.gcs.motor || ""} 
+                                            onValueChange={v => updateCurrentPatient({ gcs: { ...currentPatient.gcs, motor: v } })}
+                                          >
+                                            <SelectTrigger className="w-[180px] border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0">
+                                              <SelectValue placeholder="Motor" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                              {motorOptions.map(opt => (
+                                                <SelectItem key={opt.value} value={opt.value}>
+                                                  {opt.short} - {opt.label}
+                                                </SelectItem>
+                                              ))}
+                                            </SelectContent>
+                                          </Select>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="flex flex-col gap-2">
+                                        {/* Eyes Badge */}
+                                        {currentPatient.gcs.eyes ? (
+                                          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-blue-50 border border-blue-200 w-full">
+                                            <span className="text-xs font-medium text-blue-600">E:</span>
+                                            <span className="text-sm font-semibold text-blue-800">
+                                              {eyesOptions.find(opt => opt.value === currentPatient.gcs.eyes)?.short}
+                                            </span>
+                                            <span className="text-xs text-blue-700">
+                                              {eyesOptions.find(opt => opt.value === currentPatient.gcs.eyes)?.label}
+                                            </span>
+                                          </div>
+                                        ) : (
+                                          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gray-50 border border-gray-200 w-full">
+                                            <span className="text-xs font-medium text-gray-500">E:</span>
+                                            <span className="text-xs text-gray-400">—</span>
+                                          </div>
+                                        )}
+                                        
+                                        {/* Verbal Badge */}
+                                        {currentPatient.gcs.verbal ? (
+                                          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-green-50 border border-green-200 w-full">
+                                            <span className="text-xs font-medium text-green-600">V:</span>
+                                            <span className="text-sm font-semibold text-green-800">
+                                              {verbalOptions.find(opt => opt.value === currentPatient.gcs.verbal)?.short}
+                                            </span>
+                                            <span className="text-xs text-green-700">
+                                              {verbalOptions.find(opt => opt.value === currentPatient.gcs.verbal)?.label}
+                                            </span>
+                                          </div>
+                                        ) : (
+                                          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gray-50 border border-gray-200 w-full">
+                                            <span className="text-xs font-medium text-gray-500">V:</span>
+                                            <span className="text-xs text-gray-400">—</span>
+                                          </div>
+                                        )}
+                                        
+                                        {/* Motor Badge */}
+                                        {currentPatient.gcs.motor ? (
+                                          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-purple-50 border border-purple-200 w-full">
+                                            <span className="text-xs font-medium text-purple-600">M:</span>
+                                            <span className="text-sm font-semibold text-purple-800">
+                                              {motorOptions.find(opt => opt.value === currentPatient.gcs.motor)?.short}
+                                            </span>
+                                            <span className="text-xs text-purple-700">
+                                              {motorOptions.find(opt => opt.value === currentPatient.gcs.motor)?.label}
+                                            </span>
+                                          </div>
+                                        ) : (
+                                          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gray-50 border border-gray-200 w-full">
+                                            <span className="text-xs font-medium text-gray-500">M:</span>
+                                            <span className="text-xs text-gray-400">—</span>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
                                 </div>
-                              </div>
-                            </div>
+                              );
+                            })()}
                           </TableCell>
                         </TableRow>
                         <TableRow>
                           <TableCell className="text-sm font-medium text-gray-800 align-top w-1/3 min-w-[150px]">Pupil Assessment</TableCell>
                           <TableCell>
-                            <div className="max-w-md space-y-2">
-                              {isPatientEditMode ? (
-                                <RadioGroup value={currentPatient.pupil} onValueChange={v => updateCurrentPatient({ pupil: v })}>
-                                  {[
-                                    { value: "PERRLA", label: "PERRLA" },
-                                    { value: "Constricted", label: "Constricted" },
-                                    { value: "Dilated", label: "Dilated" }
-                                  ].map(option => (
-                                    <div key={option.value} className="flex items-center space-x-2">
-                                      <RadioGroupItem value={option.value} id={`pupil-${option.value}`} />
-                                      <Label htmlFor={`pupil-${option.value}`} className="text-sm">
-                                        {option.label}
-                                      </Label>
-                                    </div>
-                                  ))}
-                                </RadioGroup>
-                              ) : (
-                                <div>
-                                  {currentPatient.pupil ? (
-                                    <Badge className="bg-yellow-100 text-yellow-800 hover:bg-yellow-50">
+                            {isPatientEditMode ? (
+                              <Select value={currentPatient.pupil || ""} onValueChange={v => updateCurrentPatient({ pupil: v })}>
+                                <SelectTrigger className="w-full max-w-md border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0">
+                                  <SelectValue placeholder="Select pupil assessment" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="PERRLA">PERRLA</SelectItem>
+                                  <SelectItem value="Constricted">Constricted</SelectItem>
+                                  <SelectItem value="Dilated">Dilated</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <div className="w-full">
+                                {currentPatient.pupil ? (
+                                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-yellow-50 border border-yellow-200 w-full">
+                                    <span className="text-xs font-medium text-yellow-600">Pupil:</span>
+                                    <span className="text-sm font-semibold text-yellow-800">
                                       {currentPatient.pupil}
-                                    </Badge>
-                                  ) : (
-                                    <span className="text-gray-500">Not assessed</span>
-                                  )}
-                                </div>
-                              )}
-                            </div>
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gray-50 border border-gray-200 w-full">
+                                    <span className="text-xs font-medium text-gray-500">Pupil:</span>
+                                    <span className="text-xs text-gray-400">—</span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </TableCell>
                         </TableRow>
                         <TableRow>
                           <TableCell className="text-sm font-medium text-gray-800 align-top w-1/3 min-w-[150px]">Lung Sounds</TableCell>
                           <TableCell>
-                            <div className="max-w-md space-y-2">
-                              {isPatientEditMode ? (
-                                <RadioGroup value={currentPatient.lungSounds} onValueChange={v => updateCurrentPatient({ lungSounds: v })}>
-                                  {[
-                                    { value: "Clear", label: "Clear" },
-                                    { value: "Absent", label: "Absent" },
-                                    { value: "Decreased", label: "Decreased" },
-                                    { value: "Rales", label: "Rales" },
-                                    { value: "Wheezes", label: "Wheezes" },
-                                    { value: "Stridor", label: "Stridor" }
-                                  ].map(option => (
-                                    <div key={option.value} className="flex items-center space-x-2">
-                                      <RadioGroupItem value={option.value} id={`lung-${option.value}`} />
-                                      <Label htmlFor={`lung-${option.value}`} className="text-sm">
-                                        {option.label}
-                                      </Label>
-                                    </div>
-                                  ))}
-                                </RadioGroup>
-                              ) : (
-                                <div>
-                                  {currentPatient.lungSounds ? (
-                                    <Badge className="bg-cyan-100 text-cyan-800 hover:bg-cyan-50">
+                            {isPatientEditMode ? (
+                              <Select value={currentPatient.lungSounds || ""} onValueChange={v => updateCurrentPatient({ lungSounds: v })}>
+                                <SelectTrigger className="w-full max-w-md border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0">
+                                  <SelectValue placeholder="Select lung sounds" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="Clear">Clear</SelectItem>
+                                  <SelectItem value="Absent">Absent</SelectItem>
+                                  <SelectItem value="Decreased">Decreased</SelectItem>
+                                  <SelectItem value="Rales">Rales</SelectItem>
+                                  <SelectItem value="Wheezes">Wheezes</SelectItem>
+                                  <SelectItem value="Stridor">Stridor</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <div className="w-full">
+                                {currentPatient.lungSounds ? (
+                                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-cyan-50 border border-cyan-200 w-full">
+                                    <span className="text-xs font-medium text-cyan-600">Lung:</span>
+                                    <span className="text-sm font-semibold text-cyan-800">
                                       {currentPatient.lungSounds}
-                                    </Badge>
-                                  ) : (
-                                    <span className="text-gray-500">Not assessed</span>
-                                  )}
-                                </div>
-                              )}
-                            </div>
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gray-50 border border-gray-200 w-full">
+                                    <span className="text-xs font-medium text-gray-500">Lung:</span>
+                                    <span className="text-xs text-gray-400">—</span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </TableCell>
                         </TableRow>
                         <TableRow>
                           <TableCell className="text-sm font-medium text-gray-800 align-top w-1/3 min-w-[150px]">Perfusion Assessment</TableCell>
                           <TableCell>
-                            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                              <div>
-                                <h4 className="mb-2 text-sm font-medium text-gray-800">Skin</h4>
-                                <div className="space-y-2">
-                                  {isPatientEditMode ? (
-                                    <RadioGroup value={currentPatient.perfusion.skin} onValueChange={v => updateCurrentPatient({ perfusion: { ...currentPatient.perfusion, skin: v } })}>
-                                      {[
-                                        { value: "Normal", label: "Normal" },
-                                        { value: "Warm", label: "Warm" },
-                                        { value: "Dry", label: "Dry" },
-                                        { value: "Moist", label: "Moist" },
-                                        { value: "Cool", label: "Cool" },
-                                        { value: "Pale", label: "Pale" },
-                                        { value: "Cyanotic", label: "Cyanotic" },
-                                        { value: "Flushed", label: "Flushed" },
-                                        { value: "Jaundice", label: "Jaundice" }
-                                      ].map(option => (
-                                        <div key={option.value} className="flex items-center space-x-2">
-                                          <RadioGroupItem value={option.value} id={`skin-${option.value}`} />
-                                          <Label htmlFor={`skin-${option.value}`} className="text-sm">
-                                            {option.label}
-                                          </Label>
-                                        </div>
-                                      ))}
-                                    </RadioGroup>
-                                  ) : (
-                                    <div>
-                                      {currentPatient.perfusion.skin ? (
-                                        <Badge className="bg-pink-100 text-pink-800 hover:bg-pink-50">
-                                          {currentPatient.perfusion.skin}
-                                        </Badge>
-                                      ) : (
-                                        <span className="text-gray-500">Not assessed</span>
-                                      )}
-                                    </div>
-                                  )}
+                            {isPatientEditMode ? (
+                              <div className="flex items-center gap-4 flex-wrap">
+                                {/* Skin */}
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-medium text-gray-600">Skin:</span>
+                                  <Select 
+                                    value={currentPatient.perfusion.skin || ""} 
+                                    onValueChange={v => updateCurrentPatient({ perfusion: { ...currentPatient.perfusion, skin: v } })}
+                                  >
+                                    <SelectTrigger className="w-[180px] border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0">
+                                      <SelectValue placeholder="Skin" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="Normal">Normal</SelectItem>
+                                      <SelectItem value="Warm">Warm</SelectItem>
+                                      <SelectItem value="Dry">Dry</SelectItem>
+                                      <SelectItem value="Moist">Moist</SelectItem>
+                                      <SelectItem value="Cool">Cool</SelectItem>
+                                      <SelectItem value="Pale">Pale</SelectItem>
+                                      <SelectItem value="Cyanotic">Cyanotic</SelectItem>
+                                      <SelectItem value="Flushed">Flushed</SelectItem>
+                                      <SelectItem value="Jaundice">Jaundice</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                
+                                {/* Pulse */}
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-medium text-gray-600">Pulse:</span>
+                                  <Select 
+                                    value={currentPatient.perfusion.pulse || ""} 
+                                    onValueChange={v => updateCurrentPatient({ perfusion: { ...currentPatient.perfusion, pulse: v } })}
+                                  >
+                                    <SelectTrigger className="w-[180px] border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0">
+                                      <SelectValue placeholder="Pulse" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="Regular">Regular</SelectItem>
+                                      <SelectItem value="Strong">Strong</SelectItem>
+                                      <SelectItem value="Irregular">Irregular</SelectItem>
+                                      <SelectItem value="Weak">Weak</SelectItem>
+                                      <SelectItem value="Absent">Absent</SelectItem>
+                                    </SelectContent>
+                                  </Select>
                                 </div>
                               </div>
-                              <div>
-                                <h4 className="mb-2 text-sm font-medium text-gray-800">Pulse</h4>
-                                <div className="space-y-2">
-                                  {isPatientEditMode ? (
-                                    <RadioGroup value={currentPatient.perfusion.pulse} onValueChange={v => updateCurrentPatient({ perfusion: { ...currentPatient.perfusion, pulse: v } })}>
-                                      {[
-                                        { value: "Regular", label: "Regular" },
-                                        { value: "Strong", label: "Strong" },
-                                        { value: "Irregular", label: "Irregular" },
-                                        { value: "Weak", label: "Weak" },
-                                        { value: "Absent", label: "Absent" }
-                                      ].map(option => (
-                                        <div key={option.value} className="flex items-center space-x-2">
-                                          <RadioGroupItem value={option.value} id={`pulse-${option.value}`} />
-                                          <Label htmlFor={`pulse-${option.value}`} className="text-sm">
-                                            {option.label}
-                                          </Label>
-                                        </div>
-                                      ))}
-                                    </RadioGroup>
-                                  ) : (
-                                    <div>
-                                      {currentPatient.perfusion.pulse ? (
-                                        <Badge className="bg-red-100 text-red-800 hover:bg-red-50">
-                                          {currentPatient.perfusion.pulse}
-                                        </Badge>
-                                      ) : (
-                                        <span className="text-gray-500">Not assessed</span>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
+                            ) : (
+                              <div className="flex flex-col gap-2 w-full">
+                                {/* Skin Badge */}
+                                {currentPatient.perfusion.skin ? (
+                                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-pink-50 border border-pink-200 w-full">
+                                    <span className="text-xs font-medium text-pink-600">Skin:</span>
+                                    <span className="text-sm font-semibold text-pink-800">
+                                      {currentPatient.perfusion.skin}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gray-50 border border-gray-200 w-full">
+                                    <span className="text-xs font-medium text-gray-500">Skin:</span>
+                                    <span className="text-xs text-gray-400">—</span>
+                                  </div>
+                                )}
+                                
+                                {/* Pulse Badge */}
+                                {currentPatient.perfusion.pulse ? (
+                                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-50 border border-red-200 w-full">
+                                    <span className="text-xs font-medium text-red-600">Pulse:</span>
+                                    <span className="text-sm font-semibold text-red-800">
+                                      {currentPatient.perfusion.pulse}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gray-50 border border-gray-200 w-full">
+                                    <span className="text-xs font-medium text-gray-500">Pulse:</span>
+                                    <span className="text-xs text-gray-400">—</span>
+                                  </div>
+                                )}
                               </div>
-                            </div>
+                            )}
                           </TableCell>
                         </TableRow>
                         <TableRow>
                           <TableCell className="text-sm font-medium text-gray-800 align-top w-1/3 min-w-[150px]">Vital Signs</TableCell>
                           <TableCell>
-                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-                              <div>
-                                <Label className="text-sm font-medium text-gray-800">Time Taken</Label>
-                                {isPatientEditMode ? (
-                                  <Input 
-                                    type="time" 
-                                    value={currentPatient.vitalSigns.timeTaken} 
-                                    onChange={e => updateCurrentPatient({ vitalSigns: { ...currentPatient.vitalSigns, timeTaken: e.target.value } })} 
-                                    className="mt-1 border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0"
-                                  />
-                                ) : (
-                                  <div className="mt-1">
-                                    {currentPatient.vitalSigns.timeTaken ? (
-                                      <Badge className="bg-gray-100 text-gray-800 hover:bg-gray-50">
-                                        {currentPatient.vitalSigns.timeTaken}
-                                      </Badge>
-                                    ) : (
-                                      <span className="text-gray-500">Not recorded</span>
-                                    )}
+                            {isPatientEditMode ? (
+                              <div className="grid grid-cols-2 gap-x-8 gap-y-4">
+                                {/* Column 1 */}
+                                <div className="space-y-4">
+                                  {/* Time */}
+                                  <div className="flex items-center gap-2.5">
+                                    <span className="text-sm font-medium text-gray-600 w-[50px]">Time:</span>
+                                    <Input 
+                                      type="time" 
+                                      value={currentPatient.vitalSigns.timeTaken} 
+                                      onChange={e => updateCurrentPatient({ vitalSigns: { ...currentPatient.vitalSigns, timeTaken: e.target.value } })} 
+                                      className="w-[150px] border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0"
+                                    />
                                   </div>
-                                )}
-                              </div>
-                              <div>
-                                <Label className="text-sm font-medium text-gray-800">Temperature (°C)</Label>
-                                {isPatientEditMode ? (
-                                  <Input 
-                                    type="number" 
-                                    step="0.1"
-                                    value={currentPatient.vitalSigns.temperature} 
-                                    onChange={e => updateCurrentPatient({ vitalSigns: { ...currentPatient.vitalSigns, temperature: e.target.value } })} 
-                                    placeholder="36.5"
-                                    className="mt-1 border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0"
-                                  />
-                                ) : (
-                                  <div className="mt-1">
-                                    {currentPatient.vitalSigns.temperature ? (
-                                      <Badge className="bg-red-100 text-red-800 hover:bg-red-50">
-                                        {currentPatient.vitalSigns.temperature}°C
-                                      </Badge>
-                                    ) : (
-                                      <span className="text-gray-500">Not recorded</span>
-                                    )}
+                                  
+                                  {/* Temperature */}
+                                  <div className="flex items-center gap-2.5">
+                                    <span className="text-sm font-medium text-gray-600 w-[50px]">Temp:</span>
+                                    <Input 
+                                      type="number" 
+                                      step="0.1"
+                                      value={currentPatient.vitalSigns.temperature} 
+                                      onChange={e => updateCurrentPatient({ vitalSigns: { ...currentPatient.vitalSigns, temperature: e.target.value } })} 
+                                      placeholder="36.5"
+                                      className="w-[120px] border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0"
+                                    />
+                                    <span className="text-sm text-gray-500 ml-0.5">°C</span>
                                   </div>
-                                )}
-                              </div>
-                              <div>
-                                <Label className="text-sm font-medium text-gray-800">Pulse Rate (bpm)</Label>
-                                {isPatientEditMode ? (
-                                  <Input 
-                                    type="number" 
-                                    value={currentPatient.vitalSigns.pulseRate} 
-                                    onChange={e => updateCurrentPatient({ vitalSigns: { ...currentPatient.vitalSigns, pulseRate: e.target.value } })} 
-                                    placeholder="80"
-                                    className="mt-1 border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0"
-                                  />
-                                ) : (
-                                  <div className="mt-1">
-                                    {currentPatient.vitalSigns.pulseRate ? (
-                                      <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-50">
-                                        {currentPatient.vitalSigns.pulseRate} bpm
-                                      </Badge>
-                                    ) : (
-                                      <span className="text-gray-500">Not recorded</span>
-                                    )}
+                                  
+                                  {/* Pulse Rate */}
+                                  <div className="flex items-center gap-2.5">
+                                    <span className="text-sm font-medium text-gray-600 w-[50px]">Pulse:</span>
+                                    <Input 
+                                      type="number" 
+                                      value={currentPatient.vitalSigns.pulseRate} 
+                                      onChange={e => updateCurrentPatient({ vitalSigns: { ...currentPatient.vitalSigns, pulseRate: e.target.value } })} 
+                                      placeholder="80"
+                                      className="w-[120px] border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0"
+                                    />
+                                    <span className="text-sm text-gray-500 ml-0.5">bpm</span>
                                   </div>
-                                )}
-                              </div>
-                              <div>
-                                <Label className="text-sm font-medium text-gray-800">Respiratory Rate (breaths/min)</Label>
-                                {isPatientEditMode ? (
-                                  <Input 
-                                    type="number" 
-                                    value={currentPatient.vitalSigns.respiratoryRate} 
-                                    onChange={e => updateCurrentPatient({ vitalSigns: { ...currentPatient.vitalSigns, respiratoryRate: e.target.value } })} 
-                                    placeholder="16"
-                                    className="mt-1 border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0"
-                                  />
-                                ) : (
-                                  <div className="mt-1">
-                                    {currentPatient.vitalSigns.respiratoryRate ? (
-                                      <Badge className="bg-green-100 text-green-800 hover:bg-green-50">
-                                        {currentPatient.vitalSigns.respiratoryRate} breaths/min
-                                      </Badge>
-                                    ) : (
-                                      <span className="text-gray-500">Not recorded</span>
-                                    )}
+                                  
+                                  {/* Respiratory Rate */}
+                                  <div className="flex items-center gap-2.5">
+                                    <span className="text-sm font-medium text-gray-600 w-[50px]">RR:</span>
+                                    <Input 
+                                      type="number" 
+                                      value={currentPatient.vitalSigns.respiratoryRate} 
+                                      onChange={e => updateCurrentPatient({ vitalSigns: { ...currentPatient.vitalSigns, respiratoryRate: e.target.value } })} 
+                                      placeholder="16"
+                                      className="w-[120px] border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0"
+                                    />
+                                    <span className="text-sm text-gray-500 ml-0.5">/min</span>
                                   </div>
-                                )}
-                              </div>
-                              <div>
-                                <Label className="text-sm font-medium text-gray-800">Blood Pressure (mmHg)</Label>
-                                {isPatientEditMode ? (
-                                  <Input 
-                                    value={currentPatient.vitalSigns.bloodPressure} 
-                                    onChange={e => updateCurrentPatient({ vitalSigns: { ...currentPatient.vitalSigns, bloodPressure: e.target.value } })} 
-                                    placeholder="120/80"
-                                    className="mt-1 border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0"
-                                  />
-                                ) : (
-                                  <div className="mt-1">
-                                    {currentPatient.vitalSigns.bloodPressure ? (
-                                      <Badge className="bg-purple-100 text-purple-800 hover:bg-purple-50">
-                                        {currentPatient.vitalSigns.bloodPressure} mmHg
-                                      </Badge>
-                                    ) : (
-                                      <span className="text-gray-500">Not recorded</span>
-                                    )}
+                                </div>
+                                
+                                {/* Column 2 */}
+                                <div className="space-y-4">
+                                  {/* Blood Pressure */}
+                                  <div className="flex items-center gap-2.5">
+                                    <span className="text-sm font-medium text-gray-600 w-[50px]">BP:</span>
+                                    <Input 
+                                      value={currentPatient.vitalSigns.bloodPressure} 
+                                      onChange={e => updateCurrentPatient({ vitalSigns: { ...currentPatient.vitalSigns, bloodPressure: e.target.value } })} 
+                                      placeholder="120/80"
+                                      className="w-[130px] border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0"
+                                    />
+                                    <span className="text-sm text-gray-500 ml-0.5">mmHg</span>
                                   </div>
-                                )}
-                              </div>
-                              <div>
-                                <Label className="text-sm font-medium text-gray-800">SPO2 (%)</Label>
-                                {isPatientEditMode ? (
-                                  <div className="mt-1 space-y-2">
+                                  
+                                  {/* SPO2 */}
+                                  <div className="flex items-center gap-2.5">
+                                    <span className="text-sm font-medium text-gray-600 w-[50px]">SPO2:</span>
                                     <Input 
                                       type="number" 
                                       value={currentPatient.vitalSigns.spo2} 
                                       onChange={e => updateCurrentPatient({ vitalSigns: { ...currentPatient.vitalSigns, spo2: e.target.value } })} 
                                       placeholder="98"
-                                      className="w-full border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0"
+                                      className="w-[100px] border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0"
                                     />
-                                    <div className="flex items-center space-x-2">
+                                    <span className="text-sm text-gray-500 ml-0.5">%</span>
+                                    <div className="flex items-center gap-1.5 ml-2">
                                       <Checkbox
                                         id="spo2-o2-support"
                                         checked={currentPatient.vitalSigns.spo2WithO2Support}
                                         onCheckedChange={(checked) => updateCurrentPatient({ vitalSigns: { ...currentPatient.vitalSigns, spo2WithO2Support: checked as boolean } })}
+                                        className="h-4 w-4"
                                       />
-                                      <Label htmlFor="spo2-o2-support" className="text-sm text-gray-600">
-                                        With O2 Support
+                                      <Label htmlFor="spo2-o2-support" className="text-sm text-gray-600 cursor-pointer">
+                                        O2
                                       </Label>
                                     </div>
                                   </div>
-                                ) : (
-                                  <div className="mt-1">
-                                    {currentPatient.vitalSigns.spo2 ? (
-                                      <div className="flex items-center gap-2">
-                                        <Badge className="bg-cyan-100 text-cyan-800 hover:bg-cyan-50">
-                                          {currentPatient.vitalSigns.spo2}%
-                                        </Badge>
-                                        {currentPatient.vitalSigns.spo2WithO2Support && (
-                                          <Badge className="bg-orange-100 text-orange-800 hover:bg-orange-50 text-xs">
-                                            O2 Support
-                                          </Badge>
-                                        )}
-                                      </div>
-                                    ) : (
-                                      <span className="text-gray-500">Not recorded</span>
-                                    )}
+                                  
+                                  {/* Blood Sugar */}
+                                  <div className="flex items-center gap-2.5">
+                                    <span className="text-sm font-medium text-gray-600 w-[50px]">RBS:</span>
+                                    <Input 
+                                      type="number" 
+                                      value={currentPatient.vitalSigns.randomBloodSugar} 
+                                      onChange={e => updateCurrentPatient({ vitalSigns: { ...currentPatient.vitalSigns, randomBloodSugar: e.target.value } })} 
+                                      placeholder="100"
+                                      className="w-[120px] border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0"
+                                    />
+                                    <span className="text-sm text-gray-500 ml-0.5">mg/dL</span>
                                   </div>
-                                )}
+                                  
+                                  {/* Pain Scale */}
+                                  <div className="flex items-center gap-2.5">
+                                    <span className="text-sm font-medium text-gray-600 w-[50px]">Pain:</span>
+                                    <Select value={currentPatient.vitalSigns.painScale || ""} onValueChange={v => updateCurrentPatient({ vitalSigns: { ...currentPatient.vitalSigns, painScale: v } })}>
+                                      <SelectTrigger className="w-[180px] border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0">
+                                        <SelectValue placeholder="Pain scale" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {Array.from({ length: 11 }, (_, i) => (
+                                          <SelectItem key={i} value={i.toString()}>
+                                            {i} - {i === 0 ? "No pain" : i <= 3 ? "Mild" : i <= 6 ? "Moderate" : i <= 8 ? "Severe" : "Unbearable"}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                </div>
                               </div>
-                              <div>
-                                <Label className="text-sm font-medium text-gray-800">Random Blood Sugar (mg/dL)</Label>
-                                {isPatientEditMode ? (
-                                  <Input 
-                                    type="number" 
-                                    value={currentPatient.vitalSigns.randomBloodSugar} 
-                                    onChange={e => updateCurrentPatient({ vitalSigns: { ...currentPatient.vitalSigns, randomBloodSugar: e.target.value } })} 
-                                    placeholder="100"
-                                    className="mt-1 border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0"
-                                  />
-                                ) : (
-                                  <div className="mt-1">
-                                    {currentPatient.vitalSigns.randomBloodSugar ? (
-                                      <Badge className="bg-yellow-100 text-yellow-800 hover:bg-yellow-50">
+                            ) : (
+                              <div className="space-y-2">
+                                {/* First Row - Core Vitals */}
+                                <div className="flex items-center gap-3 flex-wrap">
+                                  {/* Time */}
+                                  {currentPatient.vitalSigns.timeTaken ? (
+                                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gray-50 border border-gray-200">
+                                      <span className="text-xs font-medium text-gray-600">Time:</span>
+                                      <span className="text-sm font-semibold text-gray-800">
+                                        {currentPatient.vitalSigns.timeTaken}
+                                      </span>
+                                    </div>
+                                  ) : null}
+                                  
+                                  {/* Temperature */}
+                                  {currentPatient.vitalSigns.temperature ? (
+                                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-50 border border-red-200">
+                                      <span className="text-xs font-medium text-red-600">Temp:</span>
+                                      <span className="text-sm font-semibold text-red-800">
+                                        {currentPatient.vitalSigns.temperature}°C
+                                      </span>
+                                    </div>
+                                  ) : null}
+                                  
+                                  {/* Pulse Rate */}
+                                  {currentPatient.vitalSigns.pulseRate ? (
+                                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-blue-50 border border-blue-200">
+                                      <span className="text-xs font-medium text-blue-600">Pulse:</span>
+                                      <span className="text-sm font-semibold text-blue-800">
+                                        {currentPatient.vitalSigns.pulseRate} bpm
+                                      </span>
+                                    </div>
+                                  ) : null}
+                                  
+                                  {/* Respiratory Rate */}
+                                  {currentPatient.vitalSigns.respiratoryRate ? (
+                                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-green-50 border border-green-200">
+                                      <span className="text-xs font-medium text-green-600">RR:</span>
+                                      <span className="text-sm font-semibold text-green-800">
+                                        {currentPatient.vitalSigns.respiratoryRate} /min
+                                      </span>
+                                    </div>
+                                  ) : null}
+                                </div>
+                                
+                                {/* Second Row - BP, SPO2, Blood Sugar, Pain */}
+                                <div className="flex items-center gap-3 flex-wrap">
+                                  {/* Blood Pressure */}
+                                  {currentPatient.vitalSigns.bloodPressure ? (
+                                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-purple-50 border border-purple-200">
+                                      <span className="text-xs font-medium text-purple-600">BP:</span>
+                                      <span className="text-sm font-semibold text-purple-800">
+                                        {currentPatient.vitalSigns.bloodPressure} mmHg
+                                      </span>
+                                    </div>
+                                  ) : null}
+                                  
+                                  {/* SPO2 */}
+                                  {currentPatient.vitalSigns.spo2 ? (
+                                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-cyan-50 border border-cyan-200">
+                                      <span className="text-xs font-medium text-cyan-600">SPO2:</span>
+                                      <span className="text-sm font-semibold text-cyan-800">
+                                        {currentPatient.vitalSigns.spo2}%
+                                      </span>
+                                      {currentPatient.vitalSigns.spo2WithO2Support && (
+                                        <span className="text-xs text-orange-700 ml-1">(O2)</span>
+                                      )}
+                                    </div>
+                                  ) : null}
+                                  
+                                  {/* Blood Sugar */}
+                                  {currentPatient.vitalSigns.randomBloodSugar ? (
+                                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-yellow-50 border border-yellow-200">
+                                      <span className="text-xs font-medium text-yellow-600">RBS:</span>
+                                      <span className="text-sm font-semibold text-yellow-800">
                                         {currentPatient.vitalSigns.randomBloodSugar} mg/dL
-                                      </Badge>
-                                    ) : (
-                                      <span className="text-gray-500">Not recorded</span>
-                                    )}
-                                  </div>
+                                      </span>
+                                    </div>
+                                  ) : null}
+                                  
+                                  {/* Pain Scale */}
+                                  {currentPatient.vitalSigns.painScale ? (
+                                    <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border ${
+                                      parseInt(currentPatient.vitalSigns.painScale) <= 3 ? "bg-green-50 border-green-200" :
+                                      parseInt(currentPatient.vitalSigns.painScale) <= 6 ? "bg-yellow-50 border-yellow-200" :
+                                      parseInt(currentPatient.vitalSigns.painScale) <= 8 ? "bg-orange-50 border-orange-200" :
+                                      "bg-red-50 border-red-200"
+                                    }`}>
+                                      <span className={`text-xs font-medium ${
+                                        parseInt(currentPatient.vitalSigns.painScale) <= 3 ? "text-green-600" :
+                                        parseInt(currentPatient.vitalSigns.painScale) <= 6 ? "text-yellow-600" :
+                                        parseInt(currentPatient.vitalSigns.painScale) <= 8 ? "text-orange-600" :
+                                        "text-red-600"
+                                      }`}>Pain:</span>
+                                      <span className={`text-sm font-semibold ${
+                                        parseInt(currentPatient.vitalSigns.painScale) <= 3 ? "text-green-800" :
+                                        parseInt(currentPatient.vitalSigns.painScale) <= 6 ? "text-yellow-800" :
+                                        parseInt(currentPatient.vitalSigns.painScale) <= 8 ? "text-orange-800" :
+                                        "text-red-800"
+                                      }`}>
+                                        {currentPatient.vitalSigns.painScale} - {parseInt(currentPatient.vitalSigns.painScale) === 0 ? "No pain" : parseInt(currentPatient.vitalSigns.painScale) <= 3 ? "Mild" : parseInt(currentPatient.vitalSigns.painScale) <= 6 ? "Moderate" : parseInt(currentPatient.vitalSigns.painScale) <= 8 ? "Severe" : "Unbearable"}
+                                      </span>
+                                    </div>
+                                  ) : null}
+                                </div>
+                                
+                                {/* Show message if no vital signs recorded */}
+                                {!currentPatient.vitalSigns.timeTaken && 
+                                 !currentPatient.vitalSigns.temperature && 
+                                 !currentPatient.vitalSigns.pulseRate && 
+                                 !currentPatient.vitalSigns.respiratoryRate && 
+                                 !currentPatient.vitalSigns.bloodPressure && 
+                                 !currentPatient.vitalSigns.spo2 && 
+                                 !currentPatient.vitalSigns.randomBloodSugar && 
+                                 !currentPatient.vitalSigns.painScale && (
+                                  <span className="text-gray-500 text-sm">No vital signs recorded</span>
                                 )}
                               </div>
-                              <div>
-                                <Label className="text-sm font-medium text-gray-800">Pain Scale (0-10)</Label>
-                                {isPatientEditMode ? (
-                                  <Select value={currentPatient.vitalSigns.painScale} onValueChange={v => updateCurrentPatient({ vitalSigns: { ...currentPatient.vitalSigns, painScale: v } })}>
-                                    <SelectTrigger className="mt-1 border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0">
-                                      <SelectValue placeholder="Select pain level" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {Array.from({ length: 11 }, (_, i) => (
-                                        <SelectItem key={i} value={i.toString()}>
-                                          {i} - {i === 0 ? "No pain" : i <= 3 ? "Mild" : i <= 6 ? "Moderate" : i <= 8 ? "Severe" : "Unbearable"}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                ) : (
-                                  <div className="mt-1">
-                                    {currentPatient.vitalSigns.painScale ? (
-                                      <Badge
-                                        className={
-                                          parseInt(currentPatient.vitalSigns.painScale) <= 3 ? "bg-green-100 text-green-800 hover:bg-green-50" :
-                                          parseInt(currentPatient.vitalSigns.painScale) <= 6 ? "bg-yellow-100 text-yellow-800 hover:bg-yellow-50" :
-                                          parseInt(currentPatient.vitalSigns.painScale) <= 8 ? "bg-orange-100 text-orange-800 hover:bg-orange-50" :
-                                          "bg-red-100 text-red-800 hover:bg-red-50"
-                                        }
-                                      >
-                                        {currentPatient.vitalSigns.painScale} - {
-                                          parseInt(currentPatient.vitalSigns.painScale) === 0 ? "No pain" :
-                                          parseInt(currentPatient.vitalSigns.painScale) <= 3 ? "Mild" :
-                                          parseInt(currentPatient.vitalSigns.painScale) <= 6 ? "Moderate" :
-                                          parseInt(currentPatient.vitalSigns.painScale) <= 8 ? "Severe" :
-                                          "Unbearable"
-                                        }
-                                      </Badge>
-                                    ) : (
-                                      <span className="text-gray-500">Not assessed</span>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
+                            )}
                           </TableCell>
                         </TableRow>
                       </TableBody>

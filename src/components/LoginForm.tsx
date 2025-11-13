@@ -13,6 +13,7 @@ import { Eye, EyeOff, HelpCircle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SessionManager } from "@/lib/sessionManager";
+import { logActivity, ActionType } from "@/lib/activityLogger";
 
 export function LoginForm() {
   const [email, setEmail] = useState("");
@@ -85,9 +86,25 @@ export function LoginForm() {
             email: adminData.email
           });
           
+          // Log successful login
+          await logActivity({
+            actionType: ActionType.LOGIN,
+            action: `Admin "${adminData.name || username}" logged in successfully`,
+            entityType: 'admin',
+            entityId: querySnapshot.docs[0].id,
+            entityName: adminData.name || adminData.fullName || username
+          });
+          
           toast.success(`Welcome back, ${adminData.name || username}!`);
           navigate("/dashboard");
         } else {
+          // Log failed login attempt
+          await logActivity({
+            actionType: ActionType.LOGIN_FAILED,
+            action: `Failed login attempt for admin username: "${username}"`,
+            metadata: { username, reason: 'Invalid credentials' }
+          });
+          
           setError("Invalid username or password.");
           toast.error("Invalid username or password.");
         }
@@ -124,6 +141,14 @@ export function LoginForm() {
         // User exists in Firebase Auth but not in superAdmin collection
         // Sign them out and show error
         console.log("User not found in superAdmin collection, signing out...");
+        
+        // Log failed login attempt
+        await logActivity({
+          actionType: ActionType.LOGIN_FAILED,
+          action: `Failed login attempt for super admin email: "${email}"`,
+          metadata: { email, reason: 'Not authorized (not in superAdmin collection)' }
+        });
+        
         await auth.signOut();
         setError("Access denied. You are not authorized to access the web application.");
         toast.error("Access denied. You are not authorized to access the web application.");
@@ -139,6 +164,15 @@ export function LoginForm() {
         userId: user.uid,
         name: superAdminData.fullName || superAdminData.name || 'Super Admin',
         email: user.email || ''
+      });
+      
+      // Log successful login
+      await logActivity({
+        actionType: ActionType.LOGIN,
+        action: `Super admin "${superAdminData.fullName || superAdminData.name || 'Super Admin'}" logged in successfully`,
+        entityType: 'superadmin',
+        entityId: user.uid,
+        entityName: superAdminData.fullName || superAdminData.name || 'Super Admin'
       });
       
       console.log("Login successful! Navigating to dashboard...");
@@ -163,6 +197,17 @@ export function LoginForm() {
       else if (err.code === 'auth/user-not-found' || 
                err.code === 'auth/wrong-password' ||
                err.code === 'auth/invalid-email') {
+        // Log failed login attempt
+        await logActivity({
+          actionType: ActionType.LOGIN_FAILED,
+          action: `Failed login attempt for ${userType === 'admin' ? `admin username: "${username}"` : `super admin email: "${email}"`}`,
+          metadata: { 
+            userType,
+            [userType === 'admin' ? 'username' : 'email']: userType === 'admin' ? username : email,
+            reason: err.code || 'Invalid credentials'
+          }
+        });
+        
         setError("Invalid email or password. Please check your credentials.");
         toast.error("Invalid email or password.");
       }

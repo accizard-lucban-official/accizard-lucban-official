@@ -44,6 +44,7 @@ import { toast } from "@/components/ui/use-toast";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { useUserRole } from "@/hooks/useUserRole";
+import { logActivity, ActionType, formatLogMessage } from "@/lib/activityLogger";
 
 type AnnouncementMedia = {
   url: string;
@@ -337,6 +338,20 @@ export function AnnouncementsPage() {
       resetNewAnnouncementForm();
       setIsNewAnnouncementOpen(false);
 
+      // Log activity
+      await logActivity({
+        actionType: ActionType.ANNOUNCEMENT_CREATED,
+        action: formatLogMessage('Created', 'announcement', `${newAnnouncement.type || 'Unknown'} Announcement`, docRef.id),
+        entityType: 'announcement',
+        entityId: docRef.id,
+        entityName: `${newAnnouncement.type || 'Unknown'} Announcement`,
+        metadata: {
+          type: newAnnouncement.type || 'Unknown',
+          priority: newAnnouncement.priority || 'Unknown',
+          mediaCount: uploadedMedia.length
+        }
+      });
+
       toast({
         title: "Announcement Created",
         description: selectedMediaCount
@@ -364,6 +379,16 @@ export function AnnouncementsPage() {
     if (!editingAnnouncement) return;
     setIsEditingAnnouncement(true);
     try {
+      const oldAnnouncement = announcements.find(a => a.id === editingAnnouncement.id);
+      const changes: Record<string, { from: any; to: any }> = {};
+      
+      if (oldAnnouncement) {
+        if (oldAnnouncement.type !== editingAnnouncement.type) changes.type = { from: oldAnnouncement.type, to: editingAnnouncement.type };
+        if (oldAnnouncement.priority !== editingAnnouncement.priority) changes.priority = { from: oldAnnouncement.priority, to: editingAnnouncement.priority };
+        if (oldAnnouncement.description !== editingAnnouncement.description) changes.description = { from: oldAnnouncement.description, to: editingAnnouncement.description };
+        if (oldAnnouncement.date !== editingAnnouncement.date) changes.date = { from: oldAnnouncement.date, to: editingAnnouncement.date };
+      }
+      
       await updateDoc(doc(db, "announcements", editingAnnouncement.id), {
         type: editingAnnouncement.type,
         description: editingAnnouncement.description,
@@ -371,6 +396,17 @@ export function AnnouncementsPage() {
         date: editingAnnouncement.date
       });
       setAnnouncements(announcements.map(a => a.id === editingAnnouncement.id ? editingAnnouncement : a));
+      
+      // Log activity
+      await logActivity({
+        actionType: ActionType.ANNOUNCEMENT_UPDATED,
+        action: formatLogMessage('Updated', 'announcement', `${editingAnnouncement.type || 'Unknown'} Announcement`, editingAnnouncement.id),
+        entityType: 'announcement',
+        entityId: editingAnnouncement.id,
+        entityName: `${editingAnnouncement.type || 'Unknown'} Announcement`,
+        changes: Object.keys(changes).length > 0 ? changes : undefined
+      });
+      
       setEditingAnnouncement(null);
       setEditDialogOpenId(null);
       toast({
@@ -391,8 +427,26 @@ export function AnnouncementsPage() {
   const handleDeleteAnnouncement = async (id: string) => {
     setIsDeletingAnnouncement(id);
     try {
+      const announcementToDelete = announcements.find(a => a.id === id);
+      
       await deleteDoc(doc(db, "announcements", id));
       setAnnouncements(announcements.filter(a => a.id !== id));
+      
+      // Log activity
+      if (announcementToDelete) {
+        await logActivity({
+          actionType: ActionType.ANNOUNCEMENT_DELETED,
+          action: formatLogMessage('Deleted', 'announcement', `${announcementToDelete.type || 'Unknown'} Announcement`, id),
+          entityType: 'announcement',
+          entityId: id,
+          entityName: `${announcementToDelete.type || 'Unknown'} Announcement`,
+          metadata: {
+            type: announcementToDelete.type || 'Unknown',
+            priority: announcementToDelete.priority || 'Unknown'
+          }
+        });
+      }
+      
       toast({
         title: "Announcement Deleted",
         description: "The announcement has been deleted successfully.",
@@ -414,6 +468,8 @@ export function AnnouncementsPage() {
     try {
       console.log(`Updating announcement ${announcementId} priority to ${newPriority}`);
       
+      const announcement = announcements.find(a => a.id === announcementId);
+      
       // Update in Firestore
       await updateDoc(doc(db, "announcements", announcementId), {
         priority: newPriority,
@@ -424,6 +480,20 @@ export function AnnouncementsPage() {
       setAnnouncements(announcements.map(a => 
         a.id === announcementId ? { ...a, priority: newPriority } : a
       ));
+      
+      // Log activity
+      if (announcement) {
+        await logActivity({
+          actionType: ActionType.ANNOUNCEMENT_UPDATED,
+          action: `Updated announcement "${announcement.type || 'Unknown'} Announcement" (${announcementId}) - Changed priority to "${newPriority}"`,
+          entityType: 'announcement',
+          entityId: announcementId,
+          entityName: `${announcement.type || 'Unknown'} Announcement`,
+          changes: {
+            priority: { from: announcement.priority || 'Unknown', to: newPriority }
+          }
+        });
+      }
       
       toast({
         title: "Priority Updated",
@@ -443,6 +513,10 @@ export function AnnouncementsPage() {
     if (selectedAnnouncements.size === 0) return;
     
     try {
+      // Get announcement data before deletion for logging
+      const deletedAnnouncements = announcements.filter(a => selectedAnnouncements.has(a.id));
+      const count = selectedAnnouncements.size;
+      
       // Delete all selected announcements from Firestore
       const deletePromises = Array.from(selectedAnnouncements).map(id => 
         deleteDoc(doc(db, "announcements", id))
@@ -453,9 +527,24 @@ export function AnnouncementsPage() {
       setAnnouncements(announcements.filter(a => !selectedAnnouncements.has(a.id)));
       setSelectedAnnouncements(new Set());
       
+      // Log bulk delete activity
+      await logActivity({
+        actionType: ActionType.BULK_OPERATION,
+        action: `Bulk deleted ${count} announcement(s)`,
+        entityType: 'announcement',
+        metadata: {
+          count,
+          deletedAnnouncements: deletedAnnouncements.map(a => ({ 
+            id: a.id, 
+            type: a.type || 'Unknown',
+            priority: a.priority || 'Unknown'
+          }))
+        }
+      });
+      
       toast({
         title: "Announcements Deleted",
-        description: `${selectedAnnouncements.size} announcement(s) have been deleted successfully.`,
+        description: `${count} announcement(s) have been deleted successfully.`,
       });
     } catch (error) {
       console.error("Error deleting announcements:", error);

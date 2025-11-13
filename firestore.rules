@@ -45,11 +45,6 @@ service cloud.firestore {
       return isAdmin();
     }
     
-    // Check if admin can add reports to map
-    function canAddReportToMap() {
-      return isAdmin();
-    }
-    
     // Check if admin can edit announcements
     function canEditAnnouncements() {
       return isAdmin();
@@ -85,10 +80,8 @@ service cloud.firestore {
       return isAdmin();
     }
     
-    // Check if admin can change resident status
-    function canChangeResidentStatus() {
-      return isAdmin();
-    }
+    // Note: canChangeResidentStatus is handled by canEditResidents() 
+    // (changing status is just updating the user document)
     
     // Check if user owns the document
     function isOwner(userId) {
@@ -286,6 +279,13 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Personal Notes collection (for admins and super admins)
+    match /personalNotes/{noteId} {
+      // Allow public read/write (needed for regular Admins who don't have Firebase Auth)
+      // Application-level filtering by username ensures users only access their own notes
+      allow read, write: if true;
+    }
+    
     // ========================================
     // USER-SCOPED EMERGENCY CONTACTS (PER-ACCOUNT)
     // ========================================

@@ -24,6 +24,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useUserRole } from "@/hooks/useUserRole";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { logActivity, ActionType, formatLogMessage } from "@/lib/activityLogger";
 import { DateRange } from "react-day-picker";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { Calendar } from "@/components/ui/calendar";
@@ -700,6 +701,21 @@ export function ManageUsersPage() {
         password: "",
         profilePicture: ""
       });
+      
+      // Log activity
+      await logActivity({
+        actionType: ActionType.ADMIN_CREATED,
+        action: formatLogMessage('Created', 'admin account', newAdmin.name, formattedUserId),
+        entityType: 'admin',
+        entityId: docRef.id,
+        entityName: newAdmin.name,
+        metadata: {
+          position: newAdmin.position,
+          username: newAdmin.username,
+          hasEditPermission: false
+        }
+      });
+      
       toast({
         title: 'Success',
         description: 'Admin account added successfully!'
@@ -725,6 +741,17 @@ export function ManageUsersPage() {
 
   const handleSaveAdminEdit = async () => {
     try {
+      const oldAdmin = adminUsers.find(a => a.id === editingAdmin.id);
+      const changes: Record<string, { from: any; to: any }> = {};
+      
+      if (oldAdmin) {
+        if (oldAdmin.name !== editingAdmin.name) changes.name = { from: oldAdmin.name, to: editingAdmin.name };
+        if (oldAdmin.position !== editingAdmin.position) changes.position = { from: oldAdmin.position, to: editingAdmin.position };
+        if (oldAdmin.idNumber !== editingAdmin.idNumber) changes.idNumber = { from: oldAdmin.idNumber, to: editingAdmin.idNumber };
+        if (oldAdmin.username !== editingAdmin.username) changes.username = { from: oldAdmin.username, to: editingAdmin.username };
+        if (oldAdmin.email !== editingAdmin.email) changes.email = { from: oldAdmin.email || '', to: editingAdmin.email || '' };
+      }
+      
       await updateDoc(doc(db, "admins", editingAdmin.id), {
         name: editingAdmin.name,
         position: editingAdmin.position,
@@ -733,6 +760,17 @@ export function ManageUsersPage() {
         email: editingAdmin.email || ""
       });
       setAdminUsers(adminUsers.map(a => a.id === editingAdmin.id ? editingAdmin : a));
+      
+      // Log activity
+      await logActivity({
+        actionType: ActionType.ADMIN_UPDATED,
+        action: formatLogMessage('Updated', 'admin account', editingAdmin.name, editingAdmin.userId || editingAdmin.id),
+        entityType: 'admin',
+        entityId: editingAdmin.id,
+        entityName: editingAdmin.name,
+        changes: Object.keys(changes).length > 0 ? changes : undefined
+      });
+      
       setEditingAdmin(null);
     } catch (error) {
       console.error("Error updating admin:", error);
@@ -745,16 +783,32 @@ export function ManageUsersPage() {
 
   const confirmTogglePermission = async () => {
     try {
+      const wasGranted = !confirmPermissionChange.hasEditPermission;
       await updateDoc(doc(db, "admins", confirmPermissionChange.id), {
-        hasEditPermission: !confirmPermissionChange.hasEditPermission
+        hasEditPermission: wasGranted
       });
       setAdminUsers(adminUsers.map(admin => admin.id === confirmPermissionChange.id ? {
         ...admin,
-        hasEditPermission: !admin.hasEditPermission
+        hasEditPermission: wasGranted
       } : admin));
+      
+      // Log activity
+      await logActivity({
+        actionType: wasGranted ? ActionType.ADMIN_PERMISSION_GRANTED : ActionType.ADMIN_PERMISSION_REVOKED,
+        action: wasGranted 
+          ? `Granted edit permission to admin "${confirmPermissionChange.name}" (${confirmPermissionChange.userId || confirmPermissionChange.id})`
+          : `Revoked edit permission from admin "${confirmPermissionChange.name}" (${confirmPermissionChange.userId || confirmPermissionChange.id})`,
+        entityType: 'admin',
+        entityId: confirmPermissionChange.id,
+        entityName: confirmPermissionChange.name || 'Admin',
+        changes: {
+          hasEditPermission: { from: !wasGranted, to: wasGranted }
+        }
+      });
+      
       toast({
         title: "Permission Updated",
-        description: `${confirmPermissionChange.name || 'Admin'} now ${!confirmPermissionChange.hasEditPermission ? 'has' : 'no longer has'} edit access.`
+        description: `${confirmPermissionChange.name || 'Admin'} now ${wasGranted ? 'has' : 'no longer has'} edit access.`
       });
       setConfirmPermissionChange(null);
     } catch (error) {
@@ -851,6 +905,16 @@ export function ManageUsersPage() {
       await deleteDoc(doc(db, "admins", adminId));
       setAdminUsers(adminUsers.filter(a => a.id !== adminId));
       
+      // Log activity
+      if (adminToDelete) {
+        await logActivity({
+          actionType: ActionType.ADMIN_DELETED,
+          action: formatLogMessage('Deleted', 'admin account', adminToDelete.name, adminToDelete.userId || adminId),
+          entityType: 'admin',
+          entityId: adminId,
+          entityName: adminToDelete.name
+        });
+      }
       
       toast({
         title: 'Success',
@@ -929,6 +993,17 @@ export function ManageUsersPage() {
 
   const handleSaveResidentEdit = async () => {
     try {
+      const oldResident = residents.find(r => r.id === selectedResident.id);
+      const changes: Record<string, { from: any; to: any }> = {};
+      
+      if (oldResident) {
+        if (oldResident.fullName !== selectedResident.fullName) changes.fullName = { from: oldResident.fullName, to: selectedResident.fullName };
+        if (oldResident.phoneNumber !== selectedResident.phoneNumber) changes.phoneNumber = { from: oldResident.phoneNumber, to: selectedResident.phoneNumber };
+        if (oldResident.email !== selectedResident.email) changes.email = { from: oldResident.email, to: selectedResident.email };
+        if (oldResident.barangay !== selectedResident.barangay) changes.barangay = { from: oldResident.barangay, to: selectedResident.barangay };
+        if (oldResident.cityTown !== selectedResident.cityTown) changes.cityTown = { from: oldResident.cityTown, to: selectedResident.cityTown };
+      }
+      
       const updateData: any = {
         fullName: selectedResident.fullName,
         phoneNumber: selectedResident.phoneNumber,
@@ -961,6 +1036,17 @@ export function ManageUsersPage() {
       
       await updateDoc(doc(db, "users", selectedResident.id), updateData);
       setResidents(residents.map(r => r.id === selectedResident.id ? selectedResident : r));
+      
+      // Log activity
+      await logActivity({
+        actionType: ActionType.RESIDENT_UPDATED,
+        action: formatLogMessage('Updated', 'resident account', selectedResident.fullName, selectedResident.userId || selectedResident.id),
+        entityType: 'resident',
+        entityId: selectedResident.id,
+        entityName: selectedResident.fullName,
+        changes: Object.keys(changes).length > 0 ? changes : undefined
+      });
+      
       setIsEditResidentOpen(false);
       setSelectedResident(null);
     } catch (error) {
@@ -996,16 +1082,16 @@ export function ManageUsersPage() {
         // Use resident's firebaseUid, userId, or email as identifier
         const userId = selectedResident.firebaseUid || selectedResident.userId || selectedResident.email || `resident-${selectedResident.id}`;
         const result = await uploadValidIdImage(file, userId);
-        setSelectedResident({
-          ...selectedResident,
+          setSelectedResident({
+            ...selectedResident,
           validIdUrl: result.url,
           validIdImage: result.url
-        });
-        
-        toast({
-          title: 'Success',
-          description: 'ID image uploaded successfully'
-        });
+          });
+          
+          toast({
+            title: 'Success',
+            description: 'ID image uploaded successfully'
+          });
       } catch (error: any) {
         console.error('Error uploading valid ID image:', error);
         toast({
@@ -1055,6 +1141,16 @@ export function ManageUsersPage() {
       
       setResidents(residents.filter(r => r.id !== residentId));
       
+      // Log activity
+      if (residentToDelete) {
+        await logActivity({
+          actionType: ActionType.RESIDENT_DELETED,
+          action: formatLogMessage('Deleted', 'resident account', residentToDelete.fullName, residentToDelete.userId || residentId),
+          entityType: 'resident',
+          entityId: residentId,
+          entityName: residentToDelete.fullName
+        });
+      }
       
       toast({
         title: 'Success',
@@ -1076,13 +1172,28 @@ export function ManageUsersPage() {
     try {
       const resident = residents.find(r => r.id === residentId);
       if (resident) {
+        const newVerifiedStatus = !resident.verified;
         await updateDoc(doc(db, "users", residentId), {
-          verified: !resident.verified
+          verified: newVerifiedStatus
         });
         setResidents(residents.map(resident => resident.id === residentId ? {
           ...resident,
-          verified: !resident.verified
+          verified: newVerifiedStatus
         } : resident));
+        
+        // Log activity
+        await logActivity({
+          actionType: newVerifiedStatus ? ActionType.RESIDENT_VERIFIED : ActionType.RESIDENT_UNVERIFIED,
+          action: newVerifiedStatus
+            ? formatLogMessage('Verified', 'resident account', resident.fullName, resident.userId || residentId)
+            : formatLogMessage('Unverified', 'resident account', resident.fullName, resident.userId || residentId),
+          entityType: 'resident',
+          entityId: residentId,
+          entityName: resident.fullName,
+          changes: {
+            verified: { from: !newVerifiedStatus, to: newVerifiedStatus }
+          }
+        });
       }
     } catch (error) {
       console.error("Error updating verification:", error);
@@ -1155,13 +1266,26 @@ export function ManageUsersPage() {
         case 'delete':
           if (items === selectedAdmins) {
             // Delete admins (Firestore only)
+            const deletedAdmins = adminUsers.filter(admin => items.includes(admin.id));
             for (const adminId of items) {
               await deleteDoc(doc(db, "admins", adminId));
             }
             setAdminUsers(prev => prev.filter(admin => !items.includes(admin.id)));
             setSelectedAdmins([]);
+            
+            // Log bulk delete activity
+            await logActivity({
+              actionType: ActionType.BULK_OPERATION,
+              action: `Bulk deleted ${items.length} admin account(s)`,
+              entityType: 'admin',
+              metadata: {
+                count: items.length,
+                deletedAdmins: deletedAdmins.map(a => ({ id: a.id, name: a.name, userId: a.userId }))
+              }
+            });
           } else {
             // Delete residents (both Auth and Firestore)
+            const deletedResidents = residents.filter(resident => items.includes(resident.id));
             for (const residentId of items) {
               const residentToDelete = residents.find(r => r.id === residentId);
               const email = residentToDelete?.email || '';
@@ -1182,11 +1306,23 @@ export function ManageUsersPage() {
             }
             setResidents(prev => prev.filter(resident => !items.includes(resident.id)));
             setSelectedResidents([]);
+            
+            // Log bulk delete activity
+            await logActivity({
+              actionType: ActionType.BULK_OPERATION,
+              action: `Bulk deleted ${items.length} resident account(s)`,
+              entityType: 'resident',
+              metadata: {
+                count: items.length,
+                deletedResidents: deletedResidents.map(r => ({ id: r.id, name: r.fullName, userId: r.userId }))
+              }
+            });
           }
           break;
 
         case 'permission':
           // Update admin permissions
+          const updatedAdmins = adminUsers.filter(admin => items.includes(admin.id));
           for (const adminId of items) {
             await updateDoc(doc(db, "admins", adminId), {
               hasEditPermission: value
@@ -1198,10 +1334,22 @@ export function ManageUsersPage() {
               : admin
           ));
           setSelectedAdmins([]);
+          
+          // Log bulk permission activity
+          await logActivity({
+            actionType: value ? ActionType.ADMIN_PERMISSION_GRANTED : ActionType.ADMIN_PERMISSION_REVOKED,
+            action: `Bulk ${value ? 'granted' : 'revoked'} edit permission for ${items.length} admin account(s)`,
+            entityType: 'admin',
+            metadata: {
+              count: items.length,
+              updatedAdmins: updatedAdmins.map(a => ({ id: a.id, name: a.name, userId: a.userId }))
+            }
+          });
           break;
 
         case 'verification':
           // Update resident verification
+          const updatedResidents = residents.filter(resident => items.includes(resident.id));
           for (const residentId of items) {
             await updateDoc(doc(db, "users", residentId), {
               verified: value
@@ -1213,6 +1361,17 @@ export function ManageUsersPage() {
               : resident
           ));
           setSelectedResidents([]);
+          
+          // Log bulk verification activity
+          await logActivity({
+            actionType: value ? ActionType.RESIDENT_VERIFIED : ActionType.RESIDENT_UNVERIFIED,
+            action: `Bulk ${value ? 'verified' : 'unverified'} ${items.length} resident account(s)`,
+            entityType: 'resident',
+            metadata: {
+              count: items.length,
+              updatedResidents: updatedResidents.map(r => ({ id: r.id, name: r.fullName, userId: r.userId }))
+            }
+          });
           break;
       }
       
@@ -1333,6 +1492,21 @@ export function ManageUsersPage() {
         }
       ]);
       
+      // Log activity
+      await logActivity({
+        actionType: ActionType.RESIDENT_CREATED,
+        action: formatLogMessage('Created', 'resident account', fullName, formattedUserId),
+        entityType: 'resident',
+        entityId: docRef.id,
+        entityName: fullName,
+        metadata: {
+          email: newResident.email,
+          barangay: newResident.barangay,
+          cityTown: newResident.cityTown,
+          verified: false
+        }
+      });
+      
       toast({
         title: 'Success',
         description: 'Resident account created successfully! A verification email has been sent to their email address.'
@@ -1369,13 +1543,45 @@ export function ManageUsersPage() {
   const updateAccountStatus = async (status: 'verify' | 'unverify' | 'suspend') => {
     if (!accountStatusModal.resident) return;
     const residentId = accountStatusModal.resident.id;
+    const resident = accountStatusModal.resident;
     let updates: any = {};
-    if (status === 'verify') updates.verified = true, updates.suspended = false;
-    if (status === 'unverify') updates.verified = false, updates.suspended = false;
-    if (status === 'suspend') updates.suspended = true, updates.verified = false;
+    let actionType: ActionType;
+    let actionMessage: string;
+    
+    if (status === 'verify') {
+      updates.verified = true;
+      updates.suspended = false;
+      actionType = ActionType.RESIDENT_VERIFIED;
+      actionMessage = formatLogMessage('Verified', 'resident account', resident.fullName, resident.userId || residentId);
+    } else if (status === 'unverify') {
+      updates.verified = false;
+      updates.suspended = false;
+      actionType = ActionType.RESIDENT_UNVERIFIED;
+      actionMessage = formatLogMessage('Unverified', 'resident account', resident.fullName, resident.userId || residentId);
+    } else {
+      updates.suspended = true;
+      updates.verified = false;
+      actionType = ActionType.RESIDENT_SUSPENDED;
+      actionMessage = formatLogMessage('Suspended', 'resident account', resident.fullName, resident.userId || residentId);
+    }
+    
     try {
       await updateDoc(doc(db, "users", residentId), updates);
       setResidents(residents.map(r => r.id === residentId ? { ...r, ...updates } : r));
+      
+      // Log activity
+      await logActivity({
+        actionType,
+        action: actionMessage,
+        entityType: 'resident',
+        entityId: residentId,
+        entityName: resident.fullName,
+          changes: {
+            verified: { from: resident.verified, to: (updates.verified ?? resident.verified) },
+            suspended: { from: (resident.suspended || false), to: (updates.suspended ?? (resident.suspended || false)) }
+          }
+      });
+      
       closeAccountStatusModal();
     } catch (error) {
       console.error("Error updating account status:", error);
@@ -1998,7 +2204,7 @@ export function ManageUsersPage() {
                       value={adminDateRange}
                       onChange={setAdminDateRange}
                     className="w-auto"
-                  />
+                    />
 
                   {/* Position Filter */}
                   <Select value={positionFilter} onValueChange={setPositionFilter}>
@@ -3212,7 +3418,7 @@ export function ManageUsersPage() {
                       value={residentDateRange}
                       onChange={setResidentDateRange}
                     className="w-auto"
-                  />
+                    />
 
                   {/* Barangay Filter */}
                     <Select value={barangayFilter} onValueChange={setBarangayFilter}>
@@ -3278,22 +3484,22 @@ export function ManageUsersPage() {
                       </Tooltip>
 
                       {canDeleteResidents() ? (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="destructive"
-                              size="sm"
-                              onClick={() => handleBatchDelete('resident')}
-                              className="bg-brand-red hover:bg-brand-red-700 text-white"
-                            >
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              Delete ({selectedResidents.length})
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>Delete {selectedResidents.length} selected resident(s)</p>
-                          </TooltipContent>
-                        </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                <Button
+                            variant="destructive"
+                  size="sm"
+                            onClick={() => handleBatchDelete('resident')}
+                            className="bg-brand-red hover:bg-brand-red-700 text-white"
+                >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete ({selectedResidents.length})
+                </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Delete {selectedResidents.length} selected resident(s)</p>
+                        </TooltipContent>
+                      </Tooltip>
                       ) : (
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -3489,18 +3695,18 @@ export function ManageUsersPage() {
                                   <Eye className="h-4 w-4" />
                                 </Button>
                                 {canChangeResidentStatus() ? (
-                                  <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        className={resident.suspended ? "text-gray-400" : resident.verified ? "text-green-600" : "text-yellow-600"}
-                                        title="Account Status"
-                                      >
-                                        {resident.suspended ? <ShieldOff className="h-4 w-4" /> : resident.verified ? <ShieldCheck className="h-4 w-4" /> : <ShieldX className="h-4 w-4" />}
-                                      </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end">
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className={resident.suspended ? "text-gray-400" : resident.verified ? "text-green-600" : "text-yellow-600"}
+                                      title="Account Status"
+                                    >
+                                      {resident.suspended ? <ShieldOff className="h-4 w-4" /> : resident.verified ? <ShieldCheck className="h-4 w-4" /> : <ShieldX className="h-4 w-4" />}
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
                                     <DropdownMenuItem
                                       onClick={async () => {
                                         try {
@@ -3509,6 +3715,20 @@ export function ManageUsersPage() {
                                             suspended: false
                                           });
                                           setResidents(residents.map(r => r.id === resident.id ? { ...r, verified: true, suspended: false } : r));
+                                          
+                                          // Log activity
+                                          await logActivity({
+                                            actionType: ActionType.RESIDENT_VERIFIED,
+                                            action: formatLogMessage('Verified', 'resident account', resident.fullName, resident.userId || resident.id),
+                                            entityType: 'resident',
+                                            entityId: resident.id,
+                                            entityName: resident.fullName,
+                                            changes: {
+                                              verified: { from: false, to: true },
+                                              suspended: { from: resident.suspended || false, to: false }
+                                            }
+                                          });
+                                          
                                           toast({
                                             title: 'Success',
                                             description: 'Resident account verified'
@@ -3535,6 +3755,20 @@ export function ManageUsersPage() {
                                             suspended: false
                                           });
                                           setResidents(residents.map(r => r.id === resident.id ? { ...r, verified: false, suspended: false } : r));
+                                          
+                                          // Log activity
+                                          await logActivity({
+                                            actionType: ActionType.RESIDENT_UNVERIFIED,
+                                            action: formatLogMessage('Unverified', 'resident account', resident.fullName, resident.userId || resident.id),
+                                            entityType: 'resident',
+                                            entityId: resident.id,
+                                            entityName: resident.fullName,
+                                            changes: {
+                                              verified: { from: true, to: false },
+                                              suspended: { from: resident.suspended || false, to: false }
+                                            }
+                                          });
+                                          
                                           toast({
                                             title: 'Success',
                                             description: 'Verification revoked'
@@ -3585,7 +3819,7 @@ export function ManageUsersPage() {
                                   </Tooltip>
                                 )}
                                 {canDeleteResidents() ? (
-                                  <AlertDialog>
+                                <AlertDialog>
                                   <AlertDialogTrigger asChild>
                                     <Button size="sm" variant="outline" className="text-red-600" title="Delete Resident">
                                       <Trash2 className="h-4 w-4 text-red-600" />
@@ -3943,14 +4177,14 @@ export function ManageUsersPage() {
                 {/* Edit Button - only show in view profile tab and not in edit mode */}
                 {!isEditingResidentPreview && (
                   canEditResidents() ? (
-                    <Button
-                      onClick={() => setIsEditingResidentPreview(true)}
-                      className="mt-4"
-                      variant="outline"
-                    >
-                      <Edit className="h-4 w-4 mr-2" />
-                      Edit Profile
-                    </Button>
+                  <Button
+                    onClick={() => setIsEditingResidentPreview(true)}
+                    className="mt-4"
+                    variant="outline"
+                  >
+                    <Edit className="h-4 w-4 mr-2" />
+                    Edit Profile
+                  </Button>
                   ) : (
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -4405,7 +4639,7 @@ export function ManageUsersPage() {
                                 isPWD: true
                               });
                             }}
-                          >
+                        >
                             Yes
                           </button>
                           <button
@@ -5065,6 +5299,21 @@ export function ManageUsersPage() {
                     }
                     await updateDoc(doc(db, "users", confirmSuspendResident.id), updateData);
                     setResidents(residents.map(r => r.id === confirmSuspendResident.id ? { ...r, suspended: true, verified: false, suspensionReason: suspensionReason.trim() || undefined } : r));
+                    
+                    // Log activity
+                    await logActivity({
+                      actionType: ActionType.RESIDENT_SUSPENDED,
+                      action: formatLogMessage('Suspended', 'resident account', confirmSuspendResident.fullName, confirmSuspendResident.userId || confirmSuspendResident.id),
+                      entityType: 'resident',
+                      entityId: confirmSuspendResident.id,
+                      entityName: confirmSuspendResident.fullName,
+                      changes: {
+                        suspended: { from: false, to: true },
+                        verified: { from: confirmSuspendResident.verified || false, to: false }
+                      },
+                      metadata: suspensionReason.trim() ? { suspensionReason: suspensionReason.trim() } : undefined
+                    });
+                    
                     toast({
                       title: 'Success',
                       description: 'Resident account suspended. They will be unable to log in to the mobile app.'

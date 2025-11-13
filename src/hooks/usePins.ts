@@ -24,6 +24,7 @@ import {
 } from 'firebase/firestore';
 import { Pin, CreatePinData, UpdatePinData, PinFilters, getPinCategory, generateSearchTerms } from '@/types/pin';
 import { toast } from '@/components/ui/sonner';
+import { logActivity, ActionType, formatLogMessage } from '@/lib/activityLogger';
 
 export function usePins() {
   const [loading, setLoading] = useState(false);
@@ -152,6 +153,23 @@ export function usePins() {
       
       console.log('Pin created successfully with ID:', docRef.id);
       
+      // Log activity
+      await logActivity({
+        actionType: pinData.reportId ? ActionType.REPORT_ADDED_TO_MAP : ActionType.PIN_CREATED,
+        action: pinData.reportId 
+          ? `Added report pin "${pinData.title}" to map (${docRef.id})`
+          : formatLogMessage('Created', 'pin', pinData.title, docRef.id),
+        entityType: 'pin',
+        entityId: docRef.id,
+        entityName: pinData.title,
+        metadata: {
+          type: pinData.type,
+          category,
+          locationName: pinData.locationName || 'Unknown Location',
+          reportId: pinData.reportId || undefined
+        }
+      });
+      
       setLoading(false);
       return docRef.id;
     } catch (err: any) {
@@ -225,6 +243,30 @@ export function usePins() {
 
       await updateDoc(pinRef, updateData);
       
+      // Log activity
+      const changes: Record<string, { from: any; to: any }> = {};
+      if (updates.type !== undefined && updates.type !== currentData.type) {
+        changes.type = { from: currentData.type, to: updates.type };
+      }
+      if (updates.title !== undefined && updates.title !== currentData.title) {
+        changes.title = { from: currentData.title, to: updates.title };
+      }
+      if (updates.description !== undefined && updates.description !== currentData.description) {
+        changes.description = { from: currentData.description || '', to: updates.description || '' };
+      }
+      if (updates.locationName !== undefined && updates.locationName !== currentData.locationName) {
+        changes.locationName = { from: currentData.locationName, to: updates.locationName };
+      }
+      
+      await logActivity({
+        actionType: ActionType.PIN_UPDATED,
+        action: formatLogMessage('Updated', 'pin', currentData.title, pinId),
+        entityType: 'pin',
+        entityId: pinId,
+        entityName: currentData.title,
+        changes: Object.keys(changes).length > 0 ? changes : undefined
+      });
+      
       console.log('Pin updated successfully');
       setLoading(false);
     } catch (err: any) {
@@ -245,8 +287,28 @@ export function usePins() {
     try {
       const pinRef = doc(db, "pins", pinId);
       
+      // Get pin data before deletion for logging
+      const pinSnap = await getDoc(pinRef);
+      const pinData = pinSnap.exists() ? pinSnap.data() : null;
+      
       console.log('Deleting pin:', pinId);
       await deleteDoc(pinRef);
+      
+      // Log activity
+      if (pinData) {
+        await logActivity({
+          actionType: ActionType.PIN_DELETED,
+          action: formatLogMessage('Deleted', 'pin', pinData.title, pinId),
+          entityType: 'pin',
+          entityId: pinId,
+          entityName: pinData.title,
+          metadata: {
+            type: pinData.type,
+            category: pinData.category,
+            locationName: pinData.locationName
+          }
+        });
+      }
       
       console.log('Pin deleted successfully');
       setLoading(false);
