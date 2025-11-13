@@ -11,7 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { db } from "@/lib/firebase";
 import { collection, onSnapshot, query, orderBy, getDocs, deleteDoc, doc } from "firebase/firestore";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useUserRole } from "@/hooks/useUserRole";
 import { useToast } from "@/components/ui/use-toast";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
@@ -35,9 +35,10 @@ function formatTimeNoSeconds(time: string | number | null | undefined) {
 
 export function SystemLogsPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { isSuperAdmin } = useUserRole();
   const { toast } = useToast();
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchTerm, setSearchTerm] = useState(searchParams.get("search") || "");
   const [userFilter, setUserFilter] = useState("all");
   const [actionTypeFilter, setActionTypeFilter] = useState("all");
   const [activityLogs, setActivityLogs] = useState([]);
@@ -45,6 +46,8 @@ export function SystemLogsPage() {
   const [activitySortDirection, setActivitySortDirection] = useState<'asc' | 'desc'>('desc');
   const [selectedLogs, setSelectedLogs] = useState<string[]>([]);
   const [deletingLogId, setDeletingLogId] = useState<string | null>(null);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
   
   // Pagination state
@@ -79,6 +82,14 @@ export function SystemLogsPage() {
     
     fetchAdmins();
   }, []);
+
+  // Update search term when URL parameter changes
+  useEffect(() => {
+    const searchParam = searchParams.get("search");
+    if (searchParam) {
+      setSearchTerm(searchParam);
+    }
+  }, [searchParams]);
 
   // Real-time listener for activity logs
   useEffect(() => {
@@ -186,6 +197,63 @@ export function SystemLogsPage() {
       });
     } finally {
       setDeletingLogId(null);
+    }
+  };
+
+  // Handler for bulk deleting logs
+  const handleBulkDeleteLogs = async () => {
+    if (selectedLogs.length === 0) return;
+    
+    setBulkDeleting(true);
+    const logsToDelete = [...selectedLogs];
+    let successCount = 0;
+    let failCount = 0;
+
+    try {
+      // Delete all selected logs using Promise.allSettled to handle partial failures
+      const results = await Promise.allSettled(
+        logsToDelete.map(logId => deleteDoc(doc(db, "activityLogs", logId)))
+      );
+
+      // Count successes and failures, track which logs were successfully deleted
+      const successfullyDeleted: string[] = [];
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          successCount++;
+          successfullyDeleted.push(logsToDelete[index]);
+        } else {
+          failCount++;
+          console.error(`Error deleting log ${logsToDelete[index]}:`, result.reason);
+        }
+      });
+
+      // Update state - remove only successfully deleted logs
+      setActivityLogs(prev => prev.filter(log => !successfullyDeleted.includes(log.id)));
+      setSelectedLogs(prev => prev.filter(id => !successfullyDeleted.includes(id)));
+      setShowBulkDeleteDialog(false);
+
+      // Show toast
+      if (failCount === 0) {
+        toast({
+          title: 'Success',
+          description: `Successfully deleted ${successCount} log(s).`
+        });
+      } else {
+        toast({
+          title: 'Partial Success',
+          description: `Deleted ${successCount} log(s). Failed to delete ${failCount} log(s).`,
+          variant: 'destructive'
+        });
+      }
+    } catch (error) {
+      console.error("Error bulk deleting logs:", error);
+      toast({
+        title: 'Error',
+        description: 'Failed to delete logs. Please try again.',
+        variant: 'destructive'
+      });
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -408,6 +476,75 @@ export function SystemLogsPage() {
               </Button>
             </div>
           </div>
+
+          {/* Bulk Actions Bar */}
+          {isSuperAdmin() && selectedLogs.length > 0 && (
+            <div className="border-b border-gray-200 px-6 py-3 bg-orange-50">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-gray-700 font-medium">
+                    {selectedLogs.length} log{selectedLogs.length !== 1 ? 's' : ''} selected
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelectedLogs([])}
+                    className="text-xs"
+                  >
+                    Clear selection
+                  </Button>
+                </div>
+                <AlertDialog open={showBulkDeleteDialog} onOpenChange={setShowBulkDeleteDialog}>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="flex items-center gap-2"
+                      disabled={bulkDeleting}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Delete Selected ({selectedLogs.length})
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 bg-red-100 rounded-full flex items-center justify-center">
+                          <Trash2 className="h-5 w-5 text-red-600" />
+                        </div>
+                        <div>
+                          <AlertDialogTitle className="text-red-800">Delete Selected Logs</AlertDialogTitle>
+                          <AlertDialogDescription className="text-red-600">
+                            Are you sure you want to delete {selectedLogs.length} log{selectedLogs.length !== 1 ? 's' : ''}? This action cannot be undone.
+                          </AlertDialogDescription>
+                        </div>
+                      </div>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel disabled={bulkDeleting}>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={handleBulkDeleteLogs}
+                        disabled={bulkDeleting}
+                        className="bg-red-600 hover:bg-red-700 disabled:opacity-50"
+                      >
+                        {bulkDeleting ? (
+                          <div className="flex items-center">
+                            <svg className="animate-spin -ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Deleting...
+                          </div>
+                        ) : (
+                          `Delete ${selectedLogs.length} Log${selectedLogs.length !== 1 ? 's' : ''}`
+                        )}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
+            </div>
+          )}
 
           <CardContent className="p-0">
             <div className="overflow-x-auto">

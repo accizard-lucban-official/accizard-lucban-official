@@ -17,6 +17,7 @@ import { format } from "date-fns";
 import { cn, ensureOk, getHttpStatusMessage } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -277,6 +278,9 @@ export function ManageReportsPage() {
   const [addLocationSearchQuery, setAddLocationSearchQuery] = useState("");
   const [addLocationSearchSuggestions, setAddLocationSearchSuggestions] = useState<any[]>([]);
   const [isAddLocationSearchOpen, setIsAddLocationSearchOpen] = useState(false);
+  const [locationMapSearchQuery, setLocationMapSearchQuery] = useState("");
+  const [locationMapSearchSuggestions, setLocationMapSearchSuggestions] = useState<any[]>([]);
+  const [isLocationMapSearchOpen, setIsLocationMapSearchOpen] = useState(false);
   
   // Initialize preview map center when a report is selected
   useEffect(() => {
@@ -352,6 +356,34 @@ export function ManageReportsPage() {
       setIsAddLocationSearchOpen(false);
     }
   }, []);
+
+  const handleLocationMapGeocodingSearch = useCallback(async (query: string) => {
+    if (query.trim().length < 3) {
+      setLocationMapSearchSuggestions([]);
+      setIsLocationMapSearchOpen(false);
+      return;
+    }
+
+    try {
+      const accessToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN;
+      if (!accessToken) return;
+
+      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(
+        query
+      )}.json?access_token=${accessToken}&limit=5&proximity=121.5569,14.1133&country=PH&bbox=116,4,127,21.5`;
+      const data = await ensureOk(await fetch(url)).then((r) => r.json());
+      setLocationMapSearchSuggestions(data.features || []);
+      setIsLocationMapSearchOpen(Boolean(data.features && data.features.length > 0));
+    } catch {
+      setLocationMapSearchSuggestions([]);
+      setIsLocationMapSearchOpen(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => handleLocationMapGeocodingSearch(locationMapSearchQuery), 300);
+    return () => clearTimeout(t);
+  }, [locationMapSearchQuery, handleLocationMapGeocodingSearch]);
 
   const [showBatchDeleteDialog, setShowBatchDeleteDialog] = useState(false);
   
@@ -910,6 +942,38 @@ export function ManageReportsPage() {
       console.error("Error fetching residents:", error);
     }
   };
+
+  // State for preview edit mode (declared before useEffects that use them)
+  const [previewTab, setPreviewTab] = useState("details");
+  const [isPreviewEditMode, setIsPreviewEditMode] = useState(false);
+  const [isDispatchEditMode, setIsDispatchEditMode] = useState(false);
+  const [isPatientEditMode, setIsPatientEditMode] = useState(false);
+  const [previewEditData, setPreviewEditData] = useState<any>(null);
+  const [previewResidentSearch, setPreviewResidentSearch] = useState("");
+  const [previewResidents, setPreviewResidents] = useState<any[]>([]);
+  const [previewFilteredResidents, setPreviewFilteredResidents] = useState<any[]>([]);
+  const [showPreviewResidentSearch, setShowPreviewResidentSearch] = useState(false);
+  const [barangayComboboxOpen, setBarangayComboboxOpen] = useState(false);
+  const [barangaySearchValue, setBarangaySearchValue] = useState("");
+
+  // Fetch residents for preview edit mode
+  const fetchPreviewResidents = async () => {
+    try {
+      const residentsQuery = query(collection(db, "users"), orderBy("name"));
+      const querySnapshot = await getDocs(residentsQuery);
+      const residentsData = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        name: doc.data().name || doc.data().fullName || "",
+        email: doc.data().email || "",
+        mobileNumber: doc.data().mobileNumber || doc.data().phoneNumber || "",
+        ...doc.data()
+      }));
+      setPreviewResidents(residentsData);
+      setPreviewFilteredResidents(residentsData);
+    } catch (error) {
+      console.error("Error fetching residents for preview:", error);
+    }
+  };
   
   // Filter residents based on search
   useEffect(() => {
@@ -936,6 +1000,51 @@ export function ManageReportsPage() {
       setSelectedFiles([]); // Clear selected files when modal closes
     }
   }, [showAddModal]);
+
+  // Filter preview residents based on search
+  useEffect(() => {
+    if (previewResidentSearch.trim() === "") {
+      setPreviewFilteredResidents(previewResidents);
+    } else {
+      const filtered = previewResidents.filter(resident =>
+        resident.name?.toLowerCase().includes(previewResidentSearch.toLowerCase()) ||
+        resident.email?.toLowerCase().includes(previewResidentSearch.toLowerCase()) ||
+        resident.mobileNumber?.includes(previewResidentSearch)
+      );
+      setPreviewFilteredResidents(filtered);
+    }
+  }, [previewResidentSearch, previewResidents]);
+
+  // Fetch residents when entering preview edit mode
+  useEffect(() => {
+    if (isPreviewEditMode) {
+      fetchPreviewResidents();
+    }
+    if (!isPreviewEditMode) {
+      setShowPreviewResidentSearch(false);
+      setPreviewResidentSearch("");
+    }
+  }, [isPreviewEditMode]);
+
+  // Close preview resident search when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      // Don't close if clicking on the dropdown or the input field
+      if (!target.closest('.preview-resident-search-dropdown') && 
+          target.id !== 'preview-reported-by' && 
+          !target.closest('#preview-reported-by')) {
+        setShowPreviewResidentSearch(false);
+      }
+    };
+    
+    if (showPreviewResidentSearch) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+      };
+    }
+  }, [showPreviewResidentSearch]);
   
   // Close resident search when clicking outside
   useEffect(() => {
@@ -1017,6 +1126,22 @@ useEffect(() => {
 
     setAddLocationSearchSuggestions([]);
     setIsAddLocationSearchOpen(false);
+  };
+
+  const handleSelectLocationMapSuggestion = (feature: any) => {
+    if (!feature?.geometry?.coordinates) return;
+    const [lng, lat] = feature.geometry.coordinates;
+    const address = feature.place_name || feature.text || 'Selected location';
+
+    setNewLocation({
+      lat,
+      lng,
+      address,
+    });
+
+    setLocationMapSearchSuggestions([]);
+    setIsLocationMapSearchOpen(false);
+    setLocationMapSearchQuery(address);
   };
   const handleDeleteReport = (reportId: string) => {
     setReportToDelete(reportId);
@@ -2938,11 +3063,6 @@ useEffect(() => {
   
   const [showDirectionsModal, setShowDirectionsModal] = useState(false);
   const [directionsReport, setDirectionsReport] = useState<any>(null);
-  const [previewTab, setPreviewTab] = useState("details");
-  const [isPreviewEditMode, setIsPreviewEditMode] = useState(false);
-  const [isDispatchEditMode, setIsDispatchEditMode] = useState(false);
-  const [isPatientEditMode, setIsPatientEditMode] = useState(false);
-  const [previewEditData, setPreviewEditData] = useState<any>(null);
   const [showLocationMap, setShowLocationMap] = useState(false);
   const [newLocation, setNewLocation] = useState<{lat: number, lng: number, address: string} | null>(null);
   const [showPatientLocationMap, setShowPatientLocationMap] = useState(false);
@@ -4998,6 +5118,8 @@ useEffect(() => {
             setIsDispatchEditMode(false);
             setIsPatientEditMode(false);
             setPreviewEditData(null);
+            setShowPreviewResidentSearch(false);
+            setPreviewResidentSearch("");
             // Reset dispatch data when modal is closed
             setDispatchData(createInitialDispatchState());
             // Reset patient data when modal is closed
@@ -5176,7 +5298,7 @@ useEffect(() => {
                     {isPreviewEditMode ? (
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <Button size="sm" className="bg-brand-red hover:bg-brand-red-700 text-white" onClick={() => {
+                          <Button size="sm" className="bg-brand-orange hover:bg-brand-orange-400 text-white" onClick={() => {
                             console.log('Saving changes:', previewEditData);
                             setSelectedReport(previewEditData);
                             setIsPreviewEditMode(false);
@@ -5324,7 +5446,61 @@ useEffect(() => {
                       <TableCell className="text-sm font-medium text-gray-800 align-top w-1/3 min-w-[150px]">Reported By</TableCell>
                       <TableCell>
                         {isPreviewEditMode ? (
-                          <Input value={previewEditData?.reportedBy} onChange={e => setPreviewEditData((d: any) => ({ ...d, reportedBy: e.target.value }))} />
+                          <div className="relative">
+                            <Input 
+                              id="preview-reported-by"
+                              value={previewEditData?.reportedBy || ""} 
+                              onChange={e => {
+                                const value = e.target.value;
+                                setPreviewEditData((d: any) => ({ ...d, reportedBy: value }));
+                                // Update preview resident search to trigger filtering
+                                setPreviewResidentSearch(value);
+                                // Always show suggestions when typing
+                                setShowPreviewResidentSearch(true);
+                              }}
+                              onFocus={() => {
+                                // Show suggestions when focused
+                                if ((previewEditData?.reportedBy || "").length === 0) {
+                                  setPreviewResidentSearch("");
+                                  setShowPreviewResidentSearch(true);
+                                } else {
+                                  setShowPreviewResidentSearch(true);
+                                }
+                              }}
+                              placeholder="Search or enter reporter name" 
+                            />
+                            {showPreviewResidentSearch && previewFilteredResidents.length > 0 && (
+                              <div className="preview-resident-search-dropdown absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                                {previewFilteredResidents.map((resident) => (
+                                  <div
+                                    key={resident.id}
+                                    className="px-4 py-2 hover:bg-gray-100 cursor-pointer transition-colors"
+                                    onClick={() => {
+                                      setPreviewEditData((d: any) => ({
+                                        ...d,
+                                        reportedBy: resident.name || resident.fullName || resident.email || ""
+                                      }));
+                                      setPreviewResidentSearch("");
+                                      setShowPreviewResidentSearch(false);
+                                    }}
+                                  >
+                                    <div className="text-sm font-medium">{resident.name || resident.fullName || "No name"}</div>
+                                    {resident.email && (
+                                      <div className="text-xs text-gray-500">{resident.email}</div>
+                                    )}
+                                    {resident.mobileNumber && (
+                                      <div className="text-xs text-gray-500">{resident.mobileNumber}</div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {showPreviewResidentSearch && previewFilteredResidents.length === 0 && previewResidentSearch.trim().length > 0 && (
+                              <div className="preview-resident-search-dropdown absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg p-4">
+                                <div className="text-sm text-gray-500 text-center">No residents found</div>
+                              </div>
+                            )}
+                          </div>
                         ) : (
                           selectedReport?.reportedBy ? (
                             <button
@@ -5356,12 +5532,84 @@ useEffect(() => {
                       <TableCell className="text-sm font-medium text-gray-800 align-top w-1/3 min-w-[150px]">Barangay</TableCell>
                       <TableCell>
                         {isPreviewEditMode ? (
-                          <Select value={previewEditData?.barangay} onValueChange={v => setPreviewEditData((d: any) => ({ ...d, barangay: v }))}>
-                            <SelectTrigger><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              {barangayOptions.map(barangay => <SelectItem key={barangay} value={barangay}>{barangay}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
+                          <Popover open={barangayComboboxOpen} onOpenChange={(open) => {
+                            setBarangayComboboxOpen(open);
+                            if (open) {
+                              // Initialize search value with current barangay when opening
+                              setBarangaySearchValue(previewEditData?.barangay || "");
+                            } else {
+                              setBarangaySearchValue("");
+                            }
+                          }}>
+                            <PopoverTrigger asChild>
+                              <Button
+                                variant="outline"
+                                role="combobox"
+                                aria-expanded={barangayComboboxOpen}
+                                className="w-full justify-between font-normal"
+                              >
+                                {previewEditData?.barangay || "Select or type barangay..."}
+                                <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                              <Command shouldFilter={false}>
+                                <CommandInput 
+                                  placeholder="Search or type barangay..." 
+                                  value={barangaySearchValue}
+                                  onValueChange={(value) => {
+                                    setBarangaySearchValue(value);
+                                    // Update barangay value as user types
+                                    setPreviewEditData((d: any) => ({ ...d, barangay: value }));
+                                  }}
+                                  onKeyDown={(e) => {
+                                    // Allow Enter to close and accept the typed value
+                                    if (e.key === "Enter" && barangaySearchValue.trim()) {
+                                      setBarangayComboboxOpen(false);
+                                    }
+                                  }}
+                                />
+                                <CommandList>
+                                  <CommandEmpty>
+                                    {barangaySearchValue.trim() ? (
+                                      <div className="p-2">
+                                        <div className="text-sm text-gray-600 mb-1">Press Enter to use:</div>
+                                        <div className="text-sm font-medium">{barangaySearchValue}</div>
+                                      </div>
+                                    ) : (
+                                      "Type to search or enter a custom barangay..."
+                                    )}
+                                  </CommandEmpty>
+                                  <CommandGroup>
+                                    {barangayOptions
+                                      .filter((barangay) =>
+                                        !barangaySearchValue || 
+                                        barangay.toLowerCase().includes(barangaySearchValue.toLowerCase())
+                                      )
+                                      .map((barangay) => (
+                                        <CommandItem
+                                          key={barangay}
+                                          value={barangay}
+                                          onSelect={() => {
+                                            setPreviewEditData((d: any) => ({ ...d, barangay }));
+                                            setBarangaySearchValue("");
+                                            setBarangayComboboxOpen(false);
+                                          }}
+                                        >
+                                          <Check
+                                            className={cn(
+                                              "mr-2 h-4 w-4",
+                                              previewEditData?.barangay === barangay ? "opacity-100" : "opacity-0"
+                                            )}
+                                          />
+                                          {barangay}
+                                        </CommandItem>
+                                      ))}
+                                  </CommandGroup>
+                                </CommandList>
+                              </Command>
+                            </PopoverContent>
+                          </Popover>
                         ) : (
                           selectedReport?.barangay || <span className="text-gray-400 italic">Edit to add Barangay</span>
                         )}
@@ -5520,194 +5768,319 @@ useEffect(() => {
 
                           {/* Admin Added Media Section */}
                           <div className="border-t border-gray-200 pt-4">
-                            <div className="mb-2">
-                              <h4 className="text-sm font-medium text-gray-800">Admin Added Media</h4>
-                            </div>
-                            <div className="flex flex-wrap gap-3 mb-2">
-                              {(() => {
-                                const adminMediaArray = isPreviewEditMode ? previewEditData?.adminMedia : selectedReport?.adminMedia;
-                                console.log('Admin media array:', adminMediaArray);
-                                
-                                if (!adminMediaArray || adminMediaArray.length === 0) {
-                                  return (
-                                    <div className="text-gray-400 text-sm italic">
-                                      No admin attachments
-                                    </div>
-                                  );
-                                }
-                                
-                                return adminMediaArray.map((media: string, index: number) => {
-                            // Better image detection - check URL path and query parameters
-                            const urlPath = media.split('?')[0]; // Remove query parameters
-                            const fileExtension = urlPath.split('.').pop()?.toLowerCase();
-                            const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(fileExtension || '') || 
-                                          media.includes('image') || 
-                                          media.includes('photo') ||
-                                          media.includes('img');
-                            const fileName = urlPath.split('/').pop() || media;
-                            
-                            return (
-                              <div 
-                                key={index} 
-                                className="relative group"
-                              >
-                                {isImage ? (
-                                  <div 
-                                    className="w-20 h-20 rounded-lg overflow-hidden border-2 border-gray-200 hover:border-gray-400 cursor-pointer transition-all duration-200 hover:shadow-md"
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      console.log('Opening admin image preview:', media, fileName);
-                                      handleImagePreview(media, fileName);
-                                    }}
-                                    title={`Click to preview: ${fileName} (Admin Added)`}
+                            {isPreviewEditMode ? (
+                              // Edit Mode: Show drag & drop upload field (like Add New Report form)
+                              <div>
+                                <Label>Admin Added Media</Label>
+                                <div 
+                                  className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center relative mt-2"
+                                  onDragOver={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    e.currentTarget.classList.add('border-brand-orange', 'bg-orange-50');
+                                  }}
+                                  onDragLeave={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    e.currentTarget.classList.remove('border-brand-orange', 'bg-orange-50');
+                                  }}
+                                  onDrop={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    e.currentTarget.classList.remove('border-brand-orange', 'bg-orange-50');
+                                    const files = e.dataTransfer.files;
+                                    if (files.length > 0) {
+                                      handleFileSelection(files);
+                                    }
+                                  }}
+                                >
+                                  <input 
+                                    type="file" 
+                                    id="admin-media-upload-input"
+                                    multiple 
+                                    accept="image/*,video/*" 
+                                    className="hidden"
+                                    onChange={(e) => handleFileSelection(e.target.files)}
+                                  />
+                                  <Upload className="h-8 w-8 mx-auto text-gray-400 mb-2" />
+                                  <p className="text-sm text-gray-600 mb-3">Drag & drop files here or</p>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => document.getElementById('admin-media-upload-input')?.click()}
                                   >
-                                    <img 
-                                      src={media} 
-                                      alt={fileName}
-                                      className="w-full h-full object-cover"
-                                      onLoad={() => console.log('Admin image loaded successfully:', media)}
-                                      onError={(e) => {
-                                        console.log('Admin image failed to load:', media);
-                                        // Fallback to icon if image fails to load
-                                        const target = e.target as HTMLImageElement;
-                                        target.style.display = 'none';
-                                        const parent = target.parentElement;
-                                        if (parent) {
-                                          parent.innerHTML = `
-                                            <div class="w-full h-full flex items-center justify-center bg-gray-100">
-                                              <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
-                                              </svg>
-                                            </div>
-                                          `;
-                                        }
-                                      }}
-                                    />
-                                  </div>
-                                ) : (
-                                  <div 
-                                    className="w-20 h-20 rounded-lg border-2 border-gray-200 hover:border-gray-400 cursor-pointer transition-all duration-200 hover:shadow-md flex items-center justify-center bg-gray-50"
-                                    onClick={() => window.open(media, '_blank')}
-                                    title={`Click to open: ${fileName} (Admin Added)`}
-                                  >
-                                    <FileIcon className="h-8 w-8 text-gray-400" />
-                                  </div>
-                                )}
-                                
-                                
-                                {/* Image filename overlay */}
-                                <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-60 text-white text-xs p-1 rounded-b-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                                  <div className="truncate">{fileName}</div>
+                                    Browse Files
+                                  </Button>
                                 </div>
+                                <p className="text-xs text-gray-500 mt-2">
+                                  Upload images, documents, audio, or video files up to 25 MB each.
+                                </p>
                                 
-                                {/* Delete button for edit mode */}
-                         {isPreviewEditMode && (
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleDeleteAdminImage(media, index);
-                                    }}
-                                    className="absolute -top-2 -right-2 bg-brand-red hover:bg-brand-red-700 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-                                    title="Delete admin image"
-                                  >
-                                    <X className="h-3 w-3" />
-                                  </button>
+                                {/* Show existing admin media */}
+                                {(() => {
+                                  const adminMediaArray = previewEditData?.adminMedia || [];
+                                  if (adminMediaArray.length > 0) {
+                                    return (
+                                      <div className="mt-4">
+                                        <div className="mb-2">
+                                          <h4 className="text-sm font-medium text-gray-700">Existing Admin Media ({adminMediaArray.length})</h4>
+                                        </div>
+                                        <div className="flex flex-wrap gap-3">
+                                          {adminMediaArray.map((media: string, index: number) => {
+                                            const urlPath = media.split('?')[0];
+                                            const fileExtension = urlPath.split('.').pop()?.toLowerCase();
+                                            const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(fileExtension || '') || 
+                                                          media.includes('image') || 
+                                                          media.includes('photo') ||
+                                                          media.includes('img');
+                                            const fileName = urlPath.split('/').pop() || media;
+                                            
+                                            return (
+                                              <div 
+                                                key={index} 
+                                                className="relative group"
+                                              >
+                                                {isImage ? (
+                                                  <div 
+                                                    className="w-20 h-20 rounded-lg overflow-hidden border-2 border-gray-200 hover:border-gray-400 cursor-pointer transition-all duration-200 hover:shadow-md"
+                                                    onClick={(e) => {
+                                                      e.preventDefault();
+                                                      e.stopPropagation();
+                                                      handleImagePreview(media, fileName);
+                                                    }}
+                                                    title={`Click to preview: ${fileName}`}
+                                                  >
+                                                    <img 
+                                                      src={media} 
+                                                      alt={fileName}
+                                                      className="w-full h-full object-cover"
+                                                      onError={(e) => {
+                                                        const target = e.target as HTMLImageElement;
+                                                        target.style.display = 'none';
+                                                        const parent = target.parentElement;
+                                                        if (parent) {
+                                                          parent.innerHTML = `
+                                                            <div class="w-full h-full flex items-center justify-center bg-gray-100">
+                                                              <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                                                              </svg>
+                                                            </div>
+                                                          `;
+                                                        }
+                                                      }}
+                                                    />
+                                                  </div>
+                                                ) : (
+                                                  <div 
+                                                    className="w-20 h-20 rounded-lg border-2 border-gray-200 hover:border-gray-400 cursor-pointer transition-all duration-200 hover:shadow-md flex items-center justify-center bg-gray-50"
+                                                    onClick={() => window.open(media, '_blank')}
+                                                    title={`Click to open: ${fileName}`}
+                                                  >
+                                                    <FileIcon className="h-8 w-8 text-gray-400" />
+                                                  </div>
+                                                )}
+                                                
+                                                <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-60 text-white text-xs p-1 rounded-b-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                                                  <div className="truncate">{fileName}</div>
+                                                </div>
+                                                
+                                                <button
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleDeleteAdminImage(media, index);
+                                                  }}
+                                                  className="absolute -top-2 -right-2 bg-brand-red hover:bg-brand-red-700 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                                                  title="Delete admin image"
+                                                >
+                                                  <X className="h-3 w-3" />
+                                                </button>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    );
+                                  }
+                                  return null;
+                                })()}
+                                
+                                {/* Show selected files */}
+                                {selectedFiles.length > 0 && (
+                                  <div className="mt-4 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                      <p className="text-sm font-medium text-gray-700">
+                                        Selected Files ({selectedFiles.length})
+                                      </p>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={clearSelectedFiles}
+                                        className="text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                                      >
+                                        Clear All
+                                      </Button>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto">
+                                      {selectedFiles.map((file, index) => {
+                                        const isImage = file.type.startsWith('image/');
+                                        const isVideo = file.type.startsWith('video/');
+                                        const fileUrl = filePreviewUrls[index];
+                                        
+                                        return (
+                                          <div key={`${file.name}-${file.size}-${index}`} className="relative border border-gray-200 rounded-lg p-2 bg-gray-50">
+                                            {isImage && (
+                                              <img 
+                                                src={fileUrl} 
+                                                alt={file.name}
+                                                className="w-full h-20 object-cover rounded cursor-pointer hover:opacity-80 transition-opacity"
+                                                onClick={() => {
+                                                  setPreviewImageUrl(fileUrl);
+                                                  setPreviewImageName(file.name);
+                                                  setShowImagePreview(true);
+                                                }}
+                                              />
+                                            )}
+                                            {isVideo && (
+                                              <div className="w-full h-20 bg-gray-200 rounded flex items-center justify-center">
+                                                <FileIcon className="h-8 w-8 text-gray-400" />
+                                              </div>
+                                            )}
+                                            {!isImage && !isVideo && (
+                                              <div className="w-full h-20 bg-gray-200 rounded flex items-center justify-center">
+                                                <FileIcon className="h-8 w-8 text-gray-400" />
+                                              </div>
+                                            )}
+                                            <div className="mt-1">
+                                              <p className="text-xs text-gray-600 truncate" title={file.name}>
+                                                {file.name}
+                                              </p>
+                                              <p className="text-xs text-gray-400">
+                                                {(file.size / 1024 / 1024).toFixed(2)} MB
+                                              </p>
+                                            </div>
+                                            <Button
+                                              type="button"
+                                              variant="ghost"
+                                              size="icon"
+                                              className="absolute top-1 right-1 h-6 w-6 bg-white hover:bg-red-100"
+                                              onClick={() => removeSelectedFile(index)}
+                                            >
+                                              <X className="h-3 w-3 text-red-600" />
+                                            </Button>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                    <div className="flex gap-2 justify-center pt-2">
+                                      <Button
+                                        type="button"
+                                        onClick={() => handleMediaUpload()}
+                                        disabled={uploadingMedia}
+                                        className="bg-brand-orange hover:bg-brand-orange-400 text-white"
+                                      >
+                                        {uploadingMedia ? (
+                                          <>
+                                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                                            Uploading...
+                                          </>
+                                        ) : (
+                                          "Upload Files"
+                                        )}
+                                      </Button>
+                                    </div>
+                                  </div>
                                 )}
                               </div>
-                            );
-                          });
-                          })()}
-                            </div>
+                            ) : (
+                              // View Mode: Show read-only admin media
+                              <>
+                                <div className="mb-2">
+                                  <h4 className="text-sm font-medium text-gray-800">Admin Added Media</h4>
+                                </div>
+                                <div className="flex flex-wrap gap-3 mb-2">
+                                  {(() => {
+                                    const adminMediaArray = selectedReport?.adminMedia;
+                                    console.log('Admin media array:', adminMediaArray);
+                                    
+                                    if (!adminMediaArray || adminMediaArray.length === 0) {
+                                      return (
+                                        <div className="text-gray-400 text-sm italic">
+                                          No admin attachments
+                                        </div>
+                                      );
+                                    }
+                                    
+                                    return adminMediaArray.map((media: string, index: number) => {
+                                      const urlPath = media.split('?')[0];
+                                      const fileExtension = urlPath.split('.').pop()?.toLowerCase();
+                                      const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(fileExtension || '') || 
+                                                    media.includes('image') || 
+                                                    media.includes('photo') ||
+                                                    media.includes('img');
+                                      const fileName = urlPath.split('/').pop() || media;
+                                      
+                                      return (
+                                        <div 
+                                          key={index} 
+                                          className="relative group"
+                                        >
+                                          {isImage ? (
+                                            <div 
+                                              className="w-20 h-20 rounded-lg overflow-hidden border-2 border-gray-200 hover:border-gray-400 cursor-pointer transition-all duration-200 hover:shadow-md"
+                                              onClick={(e) => {
+                                                e.preventDefault();
+                                                e.stopPropagation();
+                                                console.log('Opening admin image preview:', media, fileName);
+                                                handleImagePreview(media, fileName);
+                                              }}
+                                              title={`Click to preview: ${fileName} (Admin Added)`}
+                                            >
+                                              <img 
+                                                src={media} 
+                                                alt={fileName}
+                                                className="w-full h-full object-cover"
+                                                onLoad={() => console.log('Admin image loaded successfully:', media)}
+                                                onError={(e) => {
+                                                  console.log('Admin image failed to load:', media);
+                                                  const target = e.target as HTMLImageElement;
+                                                  target.style.display = 'none';
+                                                  const parent = target.parentElement;
+                                                  if (parent) {
+                                                    parent.innerHTML = `
+                                                      <div class="w-full h-full flex items-center justify-center bg-gray-100">
+                                                        <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                                                        </svg>
+                                                      </div>
+                                                    `;
+                                                  }
+                                                }}
+                                              />
+                                            </div>
+                                          ) : (
+                                            <div 
+                                              className="w-20 h-20 rounded-lg border-2 border-gray-200 hover:border-gray-400 cursor-pointer transition-all duration-200 hover:shadow-md flex items-center justify-center bg-gray-50"
+                                              onClick={() => window.open(media, '_blank')}
+                                              title={`Click to open: ${fileName} (Admin Added)`}
+                                            >
+                                              <FileIcon className="h-8 w-8 text-gray-400" />
+                                            </div>
+                                          )}
+                                          
+                                          <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-60 text-white text-xs p-1 rounded-b-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                                            <div className="truncate">{fileName}</div>
+                                          </div>
+                                        </div>
+                                      );
+                                    });
+                                  })()}
+                                </div>
+                              </>
+                            )}
                           </div>
                         </div>
-                         {isPreviewEditMode && (
-                           <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 mb-2 bg-gray-50">
-                             <div className="text-center mb-4">
-                               <div className="flex items-center justify-center gap-2 mb-2">
-                                 <Upload className="h-6 w-6 text-gray-600" />
-                               </div>
-                               <p className="text-sm text-gray-700 mb-2">Add additional photos or videos as admin</p>
-                             <Input 
-                               type="file" 
-                               multiple 
-                               accept="image/*,video/*" 
-                                 onChange={e => handleFileSelection(e.target.files)}
-                               className="w-full"
-                               disabled={uploadingMedia}
-                             />
-                               </div>
-                             
-                             {/* Selected Files Preview */}
-                             {selectedFiles.length > 0 && (
-                               <div className="mb-4">
-                                 <div className="flex items-center justify-between mb-2">
-                                   <h4 className="text-sm font-medium text-gray-700">
-                                     Selected Files ({selectedFiles.length})
-                                   </h4>
-                                   <Button
-                                     type="button"
-                                     variant="ghost"
-                                     size="sm"
-                                     onClick={clearSelectedFiles}
-                                     className="text-brand-red hover:text-brand-red-700 hover:bg-red-50"
-                                   >
-                                     Clear All
-                                   </Button>
-                                 </div>
-                                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                                   {selectedFiles.map((file, index) => (
-                                     <div key={index} className="relative group">
-                                       <div className="w-16 h-16 rounded-lg overflow-hidden border-2 border-gray-200 bg-gray-50 flex items-center justify-center">
-                                         {file.type.startsWith('image/') ? (
-                                           <img 
-                                             src={URL.createObjectURL(file)} 
-                                             alt={file.name}
-                                             className="w-full h-full object-cover"
-                                           />
-                                         ) : (
-                                           <FileIcon className="h-6 w-6 text-gray-400" />
-                                         )}
-                                       </div>
-                                       <div className="absolute -top-1 -right-1 bg-brand-red hover:bg-brand-red-700 text-white rounded-full p-1 cursor-pointer"
-                                            onClick={() => removeSelectedFile(index)}
-                                            title="Remove file">
-                                         <X className="h-3 w-3" />
-                                       </div>
-                                       <div className="mt-1 text-xs text-gray-600 truncate" title={file.name}>
-                                         {file.name}
-                                       </div>
-                                     </div>
-                                   ))}
-                                 </div>
-                               </div>
-                             )}
-                             
-                             {/* Upload Button */}
-                             {selectedFiles.length > 0 && (
-                               <div className="flex gap-2 justify-center">
-                                 <Button
-                                   type="button"
-                                   onClick={() => handleMediaUpload()}
-                                   disabled={uploadingMedia}
-                                   className="bg-brand-orange hover:bg-brand-orange-400 text-white"
-                                 >
-                                   {uploadingMedia ? (
-                                     <>
-                                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                                       Uploading...
-                                     </>
-                                   ) : (
-                                     <>
-                                       <Upload className="h-4 w-4 mr-2" />
-                                       Add {selectedFiles.length} Admin File{selectedFiles.length > 1 ? 's' : ''}
-                                     </>
-                                   )}
-                                 </Button>
-                               </div>
-                             )}
-                           </div>
-                         )}
                       </TableCell>
                     </TableRow>
                   </TableBody>
@@ -8178,9 +8551,20 @@ useEffect(() => {
         </Dialog>
 
         {/* Location Map Modal */}
-        <Dialog open={showLocationMap} onOpenChange={setShowLocationMap}>
-          <DialogContent className="sm:max-w-[800px] max-h-[90vh] bg-white flex flex-col overflow-hidden">
-            <DialogHeader>
+        <Dialog open={showLocationMap} onOpenChange={(open) => {
+          setShowLocationMap(open);
+          if (!open) {
+            setLocationMapSearchQuery("");
+            setLocationMapSearchSuggestions([]);
+            setIsLocationMapSearchOpen(false);
+            setNewLocation(null);
+          }
+        }}>
+          <DialogContent
+            hideOverlay
+            className="sm:max-w-[720px] max-h-[85vh] bg-white flex flex-col overflow-hidden"
+          >
+            <DialogHeader className="pb-2">
               <DialogTitle className="flex items-center gap-2">
                 <MapPin className="h-5 w-5 text-brand-orange" />
                 Select New Location
@@ -8190,14 +8574,71 @@ useEffect(() => {
               </DialogDescription>
             </DialogHeader>
             
-            <div className="flex-1 min-h-0 flex flex-col">
-              <div className="flex-1 min-h-0 border rounded-lg">
+            <div className="flex-1 min-h-0 flex flex-col py-2">
+              <div
+                className="relative flex-1 min-h-0 border rounded-lg overflow-hidden"
+                style={{ height: '420px' }}
+              >
+                <div className="pointer-events-none absolute top-4 left-4 right-4 z-10">
+                  <div className="bg-white border border-gray-200 px-4 py-3 rounded-lg shadow-lg pointer-events-auto">
+                    <Popover open={isLocationMapSearchOpen} onOpenChange={setIsLocationMapSearchOpen}>
+                      <PopoverTrigger asChild>
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500 z-10" />
+                          <Input
+                            type="text"
+                            placeholder="Search for a location..."
+                            value={locationMapSearchQuery}
+                            onChange={(e) => {
+                              setLocationMapSearchQuery(e.target.value);
+                              setIsLocationMapSearchOpen(true);
+                            }}
+                            onFocus={() => {
+                              if (locationMapSearchSuggestions.length > 0) {
+                                setIsLocationMapSearchOpen(true);
+                              }
+                            }}
+                            className="pl-9 pr-4 h-10 w-full border-gray-300"
+                          />
+                        </div>
+                      </PopoverTrigger>
+                      {locationMapSearchSuggestions.length > 0 && (
+                        <PopoverContent className="w-[420px] p-0" align="start">
+                          <div className="max-h-[320px] overflow-y-auto">
+                            {locationMapSearchSuggestions.map((suggestion: any, index: number) => (
+                              <button
+                                key={index}
+                                className="w-full text-left px-4 py-3 hover:bg-gray-100 border-b border-gray-100 last:border-b-0 transition-colors"
+                                onClick={() => handleSelectLocationMapSuggestion(suggestion)}
+                              >
+                                <div className="flex items-start gap-2">
+                                  <MapPin className="h-4 w-4 text-gray-500 mt-0.5 flex-shrink-0" />
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-medium text-gray-900 truncate">
+                                      {suggestion.text}
+                                    </p>
+                                    <p className="text-xs text-gray-500 truncate">
+                                      {suggestion.place_name}
+                                    </p>
+                                  </div>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </PopoverContent>
+                      )}
+                    </Popover>
+                  </div>
+                </div>
+
                 <MapboxMap 
                   onMapClick={handleMapClick}
-                  showOnlyCurrentLocation={true}
+                  showOnlyCurrentLocation={false}
                   clickedLocation={newLocation}
-                  showGeocoder={true}
-                  onGeocoderResult={handleMapClick}
+                  showGeocoder={false}
+                  showControls={true}
+                  showDirections={true}
+                  showUserLocationMarker={true}
                   singleMarker={selectedReport?.latitude && selectedReport?.longitude ? 
                     {
                       id: selectedReport.id || 'report-marker',
@@ -8213,10 +8654,12 @@ useEffect(() => {
                     } : 
                     undefined}
                   disableSingleMarkerPulse={true}
-                  center={selectedReport?.latitude && selectedReport?.longitude ? 
+                  center={newLocation ? 
+                    [newLocation.lng, newLocation.lat] as [number, number] :
+                    selectedReport?.latitude && selectedReport?.longitude ? 
                     [selectedReport.longitude, selectedReport.latitude] as [number, number] : 
                     [121.5556, 14.1139] as [number, number]} // Center on Lucban, Quezon
-                  zoom={14}
+                  zoom={newLocation ? 15 : 14}
                 />
               </div>
             </div>

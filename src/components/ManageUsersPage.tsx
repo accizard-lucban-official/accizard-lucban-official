@@ -1924,14 +1924,105 @@ export function ManageUsersPage() {
                             New
                   </Button>
                 </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader className="border-b border-gray-200 pb-4">
+                <DialogContent className="max-h-[90vh] flex flex-col">
+                  <DialogHeader className="border-b border-gray-200 pb-4 flex-shrink-0">
                     <DialogTitle className="flex items-center gap-2">
                       <UserPlus className="h-5 w-5 text-[#FF4F0B]" />
                       Add New Admin Account
                     </DialogTitle>
                   </DialogHeader>
-                  <div className="space-y-4">
+                  <div className="space-y-4 overflow-y-auto flex-1 pr-2">
+                    {/* Profile Picture - Moved to top and centered */}
+                    <div className="flex flex-col items-center pb-4 border-b border-gray-200">
+                      <Label className="mb-3">Profile Picture</Label>
+                      <div className="mt-1">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              // Validate file type
+                              if (!file.type.startsWith('image/')) {
+                                toast({
+                                  title: 'Invalid file type',
+                                  description: 'Please upload an image file',
+                                  variant: 'destructive'
+                                });
+                                return;
+                              }
+                              // Validate file size (max 5MB)
+                              if (file.size > 5 * 1024 * 1024) {
+                                toast({
+                                  title: 'File too large',
+                                  description: 'Please upload an image smaller than 5MB',
+                                  variant: 'destructive'
+                                });
+                                return;
+                              }
+                              try {
+                                // Use temporary ID based on email or timestamp
+                                const tempUserId = newAdmin.email || `temp-${Date.now()}`;
+                                const result = await uploadProfilePicture(file, tempUserId);
+                                setNewAdmin({ ...newAdmin, profilePicture: result.url });
+                                toast({
+                                  title: 'Success',
+                                  description: 'Profile picture uploaded successfully'
+                                });
+                              } catch (error: any) {
+                                console.error('Error uploading profile picture:', error);
+                                toast({
+                                  title: 'Upload failed',
+                                  description: error.message || 'Failed to upload profile picture. Please try again.',
+                                  variant: 'destructive'
+                                });
+                              }
+                            }
+                          }}
+                          className="hidden"
+                          id="admin-profile-picture-upload"
+                        />
+                        <div className="flex items-center justify-center">
+                          <div className="relative">
+                            {newAdmin.profilePicture ? (
+                              <>
+                                <img
+                                  src={newAdmin.profilePicture}
+                                  alt="Profile preview"
+                                  className="w-32 h-32 rounded-full object-cover border-2 border-gray-200"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setNewAdmin({ ...newAdmin, profilePicture: "" })}
+                                  className="absolute -top-1 -right-1 h-6 w-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center"
+                                >
+                                  <X className="h-4 w-4" />
+                                </button>
+                                <label
+                                  htmlFor="admin-profile-picture-upload"
+                                  className="absolute bottom-0 left-0 bg-brand-orange hover:bg-brand-orange/90 text-white p-2 rounded-full cursor-pointer shadow-lg"
+                                >
+                                  <Camera className="h-4 w-4" />
+                                </label>
+                              </>
+                            ) : (
+                              <div className="w-32 h-32 rounded-full bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center relative">
+                                <User className="h-12 w-12 text-gray-400" />
+                                <label
+                                  htmlFor="admin-profile-picture-upload"
+                                  className="absolute bottom-0 left-0 bg-brand-orange hover:bg-brand-orange/90 text-white p-2 rounded-full cursor-pointer shadow-lg"
+                                >
+                                  <Camera className="h-4 w-4" />
+                                </label>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-2 text-center">
+                          Upload a profile picture (max 5MB, JPG/PNG)
+                        </p>
+                      </div>
+                    </div>
                     <div>
                       <Label>Full Name{(showAdminFormErrors && newAdmin.name.trim() === "") && <span className="text-red-500"> *</span>}</Label>
                       <Input 
@@ -1989,12 +2080,15 @@ export function ManageUsersPage() {
                     </div>
                     <div>
                       <Label>ID Number{(showAdminFormErrors && newAdmin.idNumber.trim() === "") && <span className="text-red-500"> *</span>}</Label>
-                      <Input 
-                        value={newAdmin.idNumber} 
-                        onChange={e => setNewAdmin({...newAdmin, idNumber: e.target.value})} 
-                        className={showAdminFormErrors && newAdmin.idNumber.trim() === "" ? "border-red-500" : ""}
-                        placeholder="EMP"
-                      />
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">EMP</span>
+                        <Input 
+                          value={newAdmin.idNumber} 
+                          onChange={e => setNewAdmin({...newAdmin, idNumber: e.target.value})} 
+                          className={`pl-12 ${showAdminFormErrors && newAdmin.idNumber.trim() === "" ? "border-red-500" : ""}`}
+                          placeholder="Enter ID number"
+                        />
+                      </div>
                       {showAdminFormErrors && newAdmin.idNumber.trim() === "" && (
                         <div className="text-xs text-red-600 mt-1">ID number is required</div>
                       )}
@@ -2047,98 +2141,8 @@ export function ManageUsersPage() {
                       )}
                       {passwordError && <div className="text-xs text-red-600 mt-1">{passwordError}</div>}
                     </div>
-                    <div>
-                      <Label>Profile Picture</Label>
-                      <div className="mt-1">
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={async (e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              // Validate file type
-                              if (!file.type.startsWith('image/')) {
-                                toast({
-                                  title: 'Invalid file type',
-                                  description: 'Please upload an image file',
-                                  variant: 'destructive'
-                                });
-                                return;
-                              }
-                              // Validate file size (max 5MB)
-                              if (file.size > 5 * 1024 * 1024) {
-                                toast({
-                                  title: 'File too large',
-                                  description: 'Please upload an image smaller than 5MB',
-                                  variant: 'destructive'
-                                });
-                                return;
-                              }
-                              try {
-                                // Use temporary ID based on email or timestamp
-                                const tempUserId = newAdmin.email || `temp-${Date.now()}`;
-                                const result = await uploadProfilePicture(file, tempUserId);
-                                setNewAdmin({ ...newAdmin, profilePicture: result.url });
-                                toast({
-                                  title: 'Success',
-                                  description: 'Profile picture uploaded successfully'
-                                });
-                              } catch (error: any) {
-                                console.error('Error uploading profile picture:', error);
-                                toast({
-                                  title: 'Upload failed',
-                                  description: error.message || 'Failed to upload profile picture. Please try again.',
-                                  variant: 'destructive'
-                                });
-                              }
-                            }
-                          }}
-                          className="hidden"
-                          id="admin-profile-picture-upload"
-                        />
-                        <div className="flex items-center gap-3">
-                          <div className="relative">
-                            {newAdmin.profilePicture ? (
-                              <>
-                                <img
-                                  src={newAdmin.profilePicture}
-                                  alt="Profile preview"
-                                  className="w-32 h-32 rounded-full object-cover border-2 border-gray-200"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => setNewAdmin({ ...newAdmin, profilePicture: "" })}
-                                  className="absolute -top-1 -right-1 h-6 w-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center"
-                                >
-                                  <X className="h-4 w-4" />
-                                </button>
-                                <label
-                                  htmlFor="admin-profile-picture-upload"
-                                  className="absolute bottom-0 left-0 bg-brand-orange hover:bg-brand-orange/90 text-white p-2 rounded-full cursor-pointer shadow-lg"
-                                >
-                                  <Camera className="h-4 w-4" />
-                                </label>
-                              </>
-                            ) : (
-                              <div className="w-32 h-32 rounded-full bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center relative">
-                                <User className="h-12 w-12 text-gray-400" />
-                                <label
-                                  htmlFor="admin-profile-picture-upload"
-                                  className="absolute bottom-0 left-0 bg-brand-orange hover:bg-brand-orange/90 text-white p-2 rounded-full cursor-pointer shadow-lg"
-                                >
-                                  <Camera className="h-4 w-4" />
-                                </label>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                        <p className="text-xs text-gray-500 mt-2">
-                          Upload a profile picture (max 5MB, JPG/PNG)
-                        </p>
-                      </div>
-                    </div>
                   </div>
-                  <DialogFooter>
+                  <DialogFooter className="flex-shrink-0 border-t border-gray-200 pt-4">
                     <Button 
                       onClick={handleAddAdmin} 
                       disabled={isAddingAdmin}

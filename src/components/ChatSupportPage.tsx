@@ -549,24 +549,31 @@ export function ChatSupportPage() {
       }
 
       const querySignatures = new Set<string>();
-      const queries = [];
+      const queries: Array<{ query: any, key: string }> = [];
 
       idsToCheck.forEach((id) => {
         const lowerKey = `userId:${id}`;
         if (!querySignatures.has(lowerKey)) {
           querySignatures.add(lowerKey);
-          queries.push(query(messagesRef, where("userId", "==", id), orderBy("timestamp", "asc")));
+          queries.push({
+            query: query(messagesRef, where("userId", "==", id), orderBy("timestamp", "asc")),
+            key: lowerKey
+          });
         }
 
         const upperKey = `userID:${id}`;
         if (!querySignatures.has(upperKey)) {
           querySignatures.add(upperKey);
-          queries.push(query(messagesRef, where("userID", "==", id), orderBy("timestamp", "asc")));
+          queries.push({
+            query: query(messagesRef, where("userID", "==", id), orderBy("timestamp", "asc")),
+            key: upperKey
+          });
         }
       });
 
       const messageStore = new Map<string, ChatMessage>();
       let isMounted = true;
+      const loadedQueries = new Set<string>();
 
       const getTimestampValue = (msg: ChatMessage): number => {
         if (!msg.timestamp) return 0;
@@ -583,15 +590,28 @@ export function ChatSupportPage() {
         return 0;
       };
 
-      const handleSnapshot = async (snapshot) => {
-        snapshot.docChanges().forEach((change) => {
-          const docId = change.doc.id;
-          if (change.type === "removed") {
-            messageStore.delete(docId);
-          } else {
-            messageStore.set(docId, { id: docId, ...change.doc.data() } as ChatMessage);
-          }
-        });
+      const handleSnapshot = async (snapshot, queryKey: string) => {
+        // Check if this is the first snapshot for this query
+        const isInitialLoad = !loadedQueries.has(queryKey);
+        
+        if (isInitialLoad) {
+          // On initial load, process all documents from this query
+          snapshot.docs.forEach((docSnap) => {
+            const docId = docSnap.id;
+            messageStore.set(docId, { id: docId, ...docSnap.data() } as ChatMessage);
+          });
+          loadedQueries.add(queryKey);
+        } else {
+          // On subsequent updates, process changes
+          snapshot.docChanges().forEach((change) => {
+            const docId = change.doc.id;
+            if (change.type === "removed") {
+              messageStore.delete(docId);
+            } else {
+              messageStore.set(docId, { id: docId, ...change.doc.data() } as ChatMessage);
+            }
+          });
+        }
 
         const mergedMessages = Array.from(messageStore.values()).sort((a, b) => getTimestampValue(a) - getTimestampValue(b));
 
@@ -642,12 +662,12 @@ export function ChatSupportPage() {
         }, 100);
       };
 
-      const unsubscribers = queries.map((q) =>
-        onSnapshot(q, handleSnapshot, (error) => {
+      const unsubscribers = queries.map(({ query: q, key: queryKey }) => {
+        return onSnapshot(q, (snapshot) => handleSnapshot(snapshot, queryKey), (error) => {
           console.error("Error loading messages:", error);
           setLoadingMessages(false);
-        })
-      );
+        });
+      });
 
       return () => {
         isMounted = false;
@@ -733,13 +753,11 @@ export function ChatSupportPage() {
         // Set createdAt if it doesn't exist (for older restored chats)
         // Use merge: true so we don't overwrite existing createdAt
         console.log("📬 Restoring chat with last message:", chatData.lastMessage);
-        toast.success("Chat restored with existing messages");
       } else {
         // For brand new chats without any messages
         chatData.createdAt = serverTimestamp();
         chatData.lastMessage = "No messages yet";
         chatData.lastMessageTime = serverTimestamp(); // Set this so new chats appear at top
-        toast.success("Chat session started");
       }
 
       // Create/restore chat session in chats collection
@@ -756,6 +774,7 @@ export function ChatSupportPage() {
         mobileNumber: phoneNumber,
         profilePicture: profilePictureUrl,
         profilePictureUrl: profilePictureUrl,
+        firebaseUid: user.firebaseUid || userId,
         ...chatData,
         ...user
       };
@@ -763,6 +782,16 @@ export function ChatSupportPage() {
       console.log("✅ Session created/restored:", newSession);
       console.log("📱 Phone number stored:", phoneNumber);
       console.log("🖼️ Profile picture stored:", profilePictureUrl);
+      
+      // Update local chatSessions state immediately so the session appears in the list
+      setChatSessions(prev => {
+        const exists = prev.find(cs => cs.id === userId || cs.userId === userId);
+        if (exists) {
+          return prev.map(cs => cs.id === userId || cs.userId === userId ? newSession : cs);
+        }
+        return [newSession, ...prev];
+      });
+      
       setSelectedSession(newSession);
       setSearchTerm("");
       if (isMobileView) {
@@ -1161,18 +1190,21 @@ export function ChatSupportPage() {
           {/* Chat Sessions List */}
           {(!isMobileView || !showChatOnMobile) && (
             <Card className="border border-gray-200 shadow-none h-full flex flex-col overflow-hidden">
-              <CardHeader className="border-b bg-white rounded-t-lg sticky top-0 z-10">
+              <CardHeader className="border-b bg-white rounded-t-lg sticky top-0 z-20 flex-shrink-0">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <CardTitle>Chat Sessions</CardTitle>
+                    <CardTitle className="text-lg">Chat Sessions</CardTitle>
                     {totalUnreadSessions > 0 && (
-                      <Badge className="bg-brand-orange hover:bg-brand-orange-400 text-white text-xs px-2 py-0 h-5">
-                        {totalUnreadSessions}
-                      </Badge>
+                      <>
+                        <Badge className="bg-brand-orange hover:bg-brand-orange-400 text-white text-xs px-2 py-0 h-5">
+                          {totalUnreadSessions}
+                        </Badge>
+                        <div className="h-2 w-2 bg-brand-orange rounded-full"></div>
+                      </>
                     )}
                   </div>
                 </div>
-                <div className="relative pt-2">
+                <div className="relative mt-3">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
                   <Input
                     placeholder="Search users..."
@@ -1182,8 +1214,8 @@ export function ChatSupportPage() {
                   />
                 </div>
               </CardHeader>
-              <CardContent className="flex-1 p-0 overflow-hidden min-h-0">
-                <div className="h-full overflow-y-auto min-h-0">
+              <CardContent className="flex-1 p-0 overflow-hidden min-h-0 flex flex-col">
+                <div className="flex-1 overflow-y-auto min-h-0">
                 {/* Conditional rendering: Show search results OR chat sessions, not both */}
                 {searchTerm ? (
                   // Search Results (shown when searching)

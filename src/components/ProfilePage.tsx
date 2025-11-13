@@ -379,15 +379,20 @@ export function ProfilePage() {
     async function fetchLogs() {
       if (!profile.username) return;
       setLogsLoading(true);
-      const q = query(
-        collection(db, "activityLogs"),
-        where("username", "==", profile.username),
-        orderBy("timestamp", "desc"),
-        limit(15)
-      );
-      const snap = await getDocs(q);
-      setActivityLogs(snap.docs.map(doc => ({ ...doc.data(), id: doc.id })));
-      setLogsLoading(false);
+      try {
+        const q = query(
+          collection(db, "activityLogs"),
+          where("username", "==", profile.username),
+          orderBy("timestamp", "desc"),
+          limit(10)
+        );
+        const snap = await getDocs(q);
+        setActivityLogs(snap.docs.map(doc => ({ ...doc.data(), id: doc.id })));
+      } catch (error) {
+        console.error("Error fetching activity logs:", error);
+      } finally {
+        setLogsLoading(false);
+      }
     }
     fetchLogs();
   }, [profile.username]);
@@ -397,22 +402,49 @@ export function ProfilePage() {
     async function fetchNotes() {
       if (!profile.username) return;
       setNotesLoading(true);
-      const q = query(
-        collection(db, "personalNotes"),
-        where("username", "==", profile.username),
-        orderBy("createdAt", "desc")
-      );
-      const snap = await getDocs(q);
-      setNotes(snap.docs.map(doc => ({ ...doc.data(), id: doc.id })));
-      setNotesLoading(false);
+      try {
+        const q = query(
+          collection(db, "personalNotes"),
+          where("username", "==", profile.username),
+          orderBy("createdAt", "desc")
+        );
+        const snap = await getDocs(q);
+        setNotes(snap.docs.map(doc => ({ ...doc.data(), id: doc.id })));
+      } catch (error: any) {
+        // If composite index is missing, try without orderBy
+        if (error.code === 'failed-precondition') {
+          const q = query(
+            collection(db, "personalNotes"),
+            where("username", "==", profile.username)
+          );
+          const snap = await getDocs(q);
+          const notesData = snap.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+          // Sort manually by createdAt
+          notesData.sort((a: any, b: any) => {
+            const aTime = getTimestampMillis(a.createdAt);
+            const bTime = getTimestampMillis(b.createdAt);
+            return bTime - aTime; // desc order
+          });
+          setNotes(notesData);
+        } else {
+          console.error("Error fetching notes:", error);
+        }
+      } finally {
+        setNotesLoading(false);
+      }
     }
     fetchNotes();
   }, [profile.username]);
 
   // Notes CRUD operations
   const handleSaveNote = async () => {
-    if (!noteForm.title.trim() || !noteForm.description.trim()) {
-      toast.error("Please fill in both title and description");
+    if (!noteForm.description.trim()) {
+      toast.error("Please enter a note");
+      return;
+    }
+
+    if (!profile.username) {
+      toast.error("Username not found. Please refresh the page and try again.");
       return;
     }
 
@@ -420,7 +452,6 @@ export function ProfilePage() {
       if (editingNote) {
         // Update existing note
         await updateDoc(doc(db, "personalNotes", editingNote.id), {
-          title: noteForm.title,
           description: noteForm.description,
           updatedAt: serverTimestamp()
         });
@@ -428,7 +459,6 @@ export function ProfilePage() {
       } else {
         // Create new note
         await addDoc(collection(db, "personalNotes"), {
-          title: noteForm.title,
           description: noteForm.description,
           username: profile.username,
           createdAt: serverTimestamp(),
@@ -437,22 +467,47 @@ export function ProfilePage() {
         toast.success("Note created successfully!");
       }
       
-      // Refresh notes
-      const q = query(
-        collection(db, "personalNotes"),
-        where("username", "==", profile.username),
-        orderBy("createdAt", "desc")
-      );
-      const snap = await getDocs(q);
-      setNotes(snap.docs.map(doc => ({ ...doc.data(), id: doc.id })));
+      // Refresh notes - try with orderBy first, fallback to without if index missing
+      try {
+        const q = query(
+          collection(db, "personalNotes"),
+          where("username", "==", profile.username),
+          orderBy("createdAt", "desc")
+        );
+        const snap = await getDocs(q);
+        setNotes(snap.docs.map(doc => ({ ...doc.data(), id: doc.id })));
+      } catch (queryError: any) {
+        // If composite index is missing, try without orderBy
+        if (queryError.code === 'failed-precondition') {
+          const q = query(
+            collection(db, "personalNotes"),
+            where("username", "==", profile.username)
+          );
+          const snap = await getDocs(q);
+          const notesData = snap.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+          // Sort manually by createdAt
+          notesData.sort((a: any, b: any) => {
+            const aTime = getTimestampMillis(a.createdAt);
+            const bTime = getTimestampMillis(b.createdAt);
+            return bTime - aTime; // desc order
+          });
+          setNotes(notesData);
+        } else {
+          throw queryError;
+        }
+      }
       
       // Reset form
       setNoteForm({ title: "", description: "" });
       setEditingNote(null);
       setShowNoteDialog(false);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error saving note:", error);
-      toast.error("Failed to save note. Please try again.");
+      if (error.code === 'permission-denied') {
+        toast.error("Permission denied. Please make sure Firestore rules are deployed.");
+      } else {
+        toast.error(`Failed to save note: ${error.message || 'Unknown error'}`);
+      }
     }
   };
 
@@ -470,8 +525,8 @@ export function ProfilePage() {
   const handleEditNote = (note: any) => {
     setEditingNote(note);
     setNoteForm({
-      title: note.title,
-      description: note.description
+      title: "",
+      description: note.description || ""
     });
     setShowNoteDialog(true);
   };
@@ -684,7 +739,7 @@ export function ProfilePage() {
         {/* Two Column Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 mt-12">
           {/* Left Column - Profile Info */}
-          <div className="lg:col-span-2 space-y-6">
+          <div className="lg:col-span-2 flex flex-col">
             {/* User Name */}
             <div className="mb-6">
               <h1 className="text-2xl font-bold text-gray-900">{profile.name || "Your Name"}</h1>
@@ -692,8 +747,8 @@ export function ProfilePage() {
                     </div>
 
             {/* About Section */}
-            <Card>
-              <CardHeader>
+            <Card className="flex-1 flex flex-col">
+              <CardHeader className="pb-2">
                 <CardTitle className="text-lg font-semibold">About</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -735,10 +790,10 @@ export function ProfilePage() {
           </div>
 
           {/* Right Column - Activity Logs and Notes */}
-          <div className="lg:col-span-3 space-y-6">
+          <div className="lg:col-span-3 space-y-6 flex flex-col h-full">
             {/* Personal Notes */}
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
+            <Card className="flex flex-col">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-lg font-semibold">Personal Notes</CardTitle>
                 <Dialog open={showNoteDialog} onOpenChange={setShowNoteDialog}>
                   <DialogTrigger asChild>
@@ -756,22 +811,13 @@ export function ProfilePage() {
                     </DialogHeader>
                     <div className="space-y-4">
                       <div className="space-y-2">
-                        <Label htmlFor="note-title">Title</Label>
-                        <Input
-                          id="note-title"
-                          value={noteForm.title}
-                          onChange={(e) => setNoteForm(prev => ({ ...prev, title: e.target.value }))}
-                          placeholder="Enter note title..."
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="note-description">Description</Label>
+                        <Label htmlFor="note-description">Note</Label>
                         <Textarea
                           id="note-description"
                           value={noteForm.description}
                           onChange={(e) => setNoteForm(prev => ({ ...prev, description: e.target.value }))}
-                          placeholder="Enter note description..."
-                          rows={4}
+                          placeholder="Enter your note..."
+                          rows={6}
                         />
                       </div>
                       <div className="flex justify-end space-x-2">
@@ -786,45 +832,44 @@ export function ProfilePage() {
                   </DialogContent>
                 </Dialog>
               </CardHeader>
-              <CardContent>
+              <CardContent className="px-4 pb-4 pt-2">
                 {notesLoading ? (
-                  <div className="text-center text-gray-500 py-8">Loading notes...</div>
+                  <div className="text-center text-gray-500 py-4 text-sm">Loading notes...</div>
                 ) : notes.length === 0 ? (
-                  <div className="text-center text-gray-500 py-8">
-                    <StickyNote className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                    <p>No notes yet. Create your first note!</p>
+                  <div className="text-center text-gray-500 py-4">
+                    <StickyNote className="h-8 w-8 mx-auto mb-2 text-gray-300" />
+                    <p className="text-sm">No notes yet. Create your first note!</p>
                   </div>
                 ) : (
-                  <div className="space-y-4">
+                  <div className="space-y-2 max-h-[180px] overflow-y-auto pr-2 flex-1">
                     {notes.map((note) => (
-                      <div key={note.id} className="border rounded-lg p-4 hover:bg-gray-50 transition-colors">
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <h4 className="font-medium text-gray-900 mb-2">{note.title}</h4>
-                            <p className="text-sm text-gray-600 mb-2">{note.description}</p>
-                            <p className="text-xs text-gray-500">
-                              Created: {formatTimestamp(note.createdAt)}
+                      <div key={note.id} className="border rounded-md p-2.5 hover:bg-gray-50 transition-colors">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0 flex flex-col">
+                            <p className="text-sm text-gray-900 mb-2 line-clamp-3">{note.description || note.title}</p>
+                            <p className="text-xs text-gray-400">
+                              {formatTimestamp(note.createdAt)}
                               {note.updatedAt && getTimestampMillis(note.updatedAt) !== getTimestampMillis(note.createdAt) && (
-                                <span> • Updated: {formatTimestamp(note.updatedAt)}</span>
+                                <span> • Updated</span>
                               )}
                             </p>
                           </div>
-                          <div className="flex space-x-2 ml-4">
+                          <div className="flex space-x-1 flex-shrink-0">
                             <Button
                               size="sm"
                               variant="ghost"
                               onClick={() => handleEditNote(note)}
-                              className="h-8 w-8 p-0 text-gray-500 hover:text-blue-600 hover:bg-blue-50"
+                              className="h-7 w-7 p-0 text-gray-400 hover:text-blue-600 hover:bg-blue-50"
                             >
-                              <Edit3 className="h-4 w-4" />
+                              <Edit3 className="h-3.5 w-3.5" />
                             </Button>
                             <Button
                               size="sm"
                               variant="ghost"
                               onClick={() => handleDeleteNote(note.id)}
-                              className="h-8 w-8 p-0 text-gray-500 hover:text-red-600 hover:bg-red-50"
+                              className="h-7 w-7 p-0 text-gray-400 hover:text-red-600 hover:bg-red-50"
                             >
-                              <Trash2 className="h-4 w-4" />
+                              <Trash2 className="h-3.5 w-3.5" />
                             </Button>
                           </div>
                         </div>
@@ -836,37 +881,35 @@ export function ProfilePage() {
             </Card>
 
             {/* Personal Activity Log */}
-            <Card>
-              <CardHeader>
+            <Card className="flex-1 flex flex-col min-h-0">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-lg font-semibold">Personal Activity Log</CardTitle>
+                {activityLogs.length > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => navigate(`/system-logs?search=${encodeURIComponent(profile.name || profile.username)}`)}
+                    className="text-xs"
+                  >
+                    See all
+                  </Button>
+                )}
               </CardHeader>
-              <CardContent>
+              <CardContent className="flex-1">
                 {logsLoading ? (
-                  <div className="text-center text-gray-500 py-8">Loading activity logs...</div>
+                  <div className="text-center text-gray-500 py-8 text-sm">Loading activity logs...</div>
                 ) : activityLogs.length === 0 ? (
-                  <div className="text-center text-gray-500 py-8">No activity logs found.</div>
+                  <div className="text-center text-gray-500 py-8 text-sm">No activity logs found.</div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Created Date</TableHead>
-                          <TableHead>Action Type</TableHead>
-                          <TableHead>Action</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {activityLogs.map((log, idx) => (
-                          <TableRow key={idx}>
-                            <TableCell className="text-sm">
-                              {log.timestamp ? new Date(log.timestamp).toLocaleDateString() : '-'}
-                            </TableCell>
-                            <TableCell className="text-sm font-medium">{log.action || '-'}</TableCell>
-                            <TableCell className="text-sm">{log.details || log.description || '-'}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                  <div className="space-y-2">
+                    {activityLogs.map((log, idx) => (
+                      <div key={idx} className="border-b border-gray-100 pb-2 last:border-0">
+                        <p className="text-sm text-gray-900 mb-1">{log.action || log.details || log.description || '-'}</p>
+                        <p className="text-xs text-gray-400">
+                          {log.timestamp ? new Date(log.timestamp).toLocaleString() : '-'}
+                        </p>
+                      </div>
+                    ))}
                   </div>
                 )}
               </CardContent>
