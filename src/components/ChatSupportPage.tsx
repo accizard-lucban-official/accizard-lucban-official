@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Search, Trash2, MessageSquare, Clock, User, Paperclip, Image as ImageIcon, FileText, Send, Check, CheckCheck, Loader2, X, Download, File, ChevronUp, ChevronDown, Video, Music, ArrowLeft } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Layout } from "./Layout";
@@ -74,8 +75,6 @@ export function ChatSupportPage() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [attachmentPreviews, setAttachmentPreviews] = useState<AttachmentPreview[]>([]);
   const [uploadingFile, setUploadingFile] = useState(false);
-  const [isUserTyping, setIsUserTyping] = useState(false);
-  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [messageSearchQuery, setMessageSearchQuery] = useState("");
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [currentSearchIndex, setCurrentSearchIndex] = useState(0);
@@ -85,6 +84,7 @@ export function ChatSupportPage() {
   const [isMobileView, setIsMobileView] = useState(false);
   const [showChatOnMobile, setShowChatOnMobile] = useState(false);
   const [deletingChat, setDeletingChat] = useState(false);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const navigate = useNavigate();
   const { uploadSingleFile, uploadState } = useFileUpload();
 
@@ -437,56 +437,6 @@ export function ChatSupportPage() {
     }
   }, []);
 
-  // Real-time listener for user typing status
-  useEffect(() => {
-    const primaryUserId = selectedSession?.userId || selectedSession?.id || selectedSession?.firebaseUid;
-    if (!primaryUserId) {
-      setIsUserTyping(false);
-      return;
-    }
-
-    try {
-      const chatRef = doc(db, "chats", primaryUserId);
-      
-      const unsubscribe = onSnapshot(chatRef, (docSnapshot) => {
-        if (docSnapshot.exists()) {
-          const data = docSnapshot.data();
-          const userTyping = data.userTyping || false;
-          const typingTimestamp = data.userTypingTimestamp?.toDate?.() || null;
-          
-          // Check if typing status is recent (within last 5 seconds)
-          if (userTyping && typingTimestamp) {
-            const now = new Date();
-            const diffSeconds = (now.getTime() - typingTimestamp.getTime()) / 1000;
-            setIsUserTyping(diffSeconds < 5);
-          } else {
-            setIsUserTyping(false);
-          }
-        }
-      });
-
-      return () => unsubscribe();
-    } catch (error) {
-      console.error("Error setting up typing listener:", error);
-    }
-  }, [selectedSession?.userId, selectedSession?.id, selectedSession?.firebaseUid]);
-
-  // Update admin typing status
-  const updateAdminTypingStatus = async (isTyping: boolean) => {
-    const primaryUserId = selectedSession?.userId || selectedSession?.id || selectedSession?.firebaseUid;
-    if (!primaryUserId) return;
-    
-    try {
-      const chatRef = doc(db, "chats", primaryUserId);
-      await updateDoc(chatRef, {
-        adminTyping: isTyping,
-        adminTypingTimestamp: serverTimestamp()
-      });
-    } catch (error) {
-      console.error("Error updating typing status:", error);
-    }
-  };
-
   // Mark messages as read
   const markMessagesAsRead = async (messagesToMark: ChatMessage[]) => {
     try {
@@ -807,8 +757,6 @@ export function ChatSupportPage() {
 
   // Handler to select a chat session
   const handleSelectSession = (session: any) => {
-    console.log("📌 Selecting session:", session);
-    console.log("🖼️ Session profile picture:", session.profilePicture);
     setSelectedSession(session);
     if (isMobileView) {
       setShowChatOnMobile(true);
@@ -868,30 +816,9 @@ export function ChatSupportPage() {
     setAttachmentPreviews([]);
   };
 
-  // Handle message input change and update typing status
+  // Handle message input change
   const handleMessageChange = (value: string) => {
     setMessage(value);
-    
-    // Update typing status
-    if (value.trim()) {
-      updateAdminTypingStatus(true);
-      
-      // Clear any existing timeout
-      if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current);
-      }
-      
-      // Set timeout to clear typing status after 3 seconds of inactivity
-      typingTimeoutRef.current = setTimeout(() => {
-        updateAdminTypingStatus(false);
-      }, 3000);
-    } else {
-      // Clear typing status immediately if input is empty
-      updateAdminTypingStatus(false);
-      if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current);
-      }
-    }
   };
 
   const handleSendMessage = async () => {
@@ -1019,12 +946,6 @@ export function ChatSupportPage() {
 
       setMessage("");
       clearAllAttachments();
-      
-      // Clear typing status and timeout
-      updateAdminTypingStatus(false);
-      if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current);
-      }
     } catch (error) {
       console.error("Error sending message:", error);
       toast.error("Failed to send message");
@@ -1191,9 +1112,9 @@ export function ChatSupportPage() {
           {(!isMobileView || !showChatOnMobile) && (
             <Card className="border border-gray-200 shadow-none h-full flex flex-col overflow-hidden">
               <CardHeader className="border-b bg-white rounded-t-lg sticky top-0 z-20 flex-shrink-0">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
-                    <CardTitle className="text-lg">Chat Sessions</CardTitle>
+                    <CardTitle>Chat Sessions</CardTitle>
                     {totalUnreadSessions > 0 && (
                       <>
                         <Badge className="bg-brand-orange hover:bg-brand-orange-400 text-white text-xs px-2 py-0 h-5">
@@ -1215,12 +1136,11 @@ export function ChatSupportPage() {
                 </div>
               </CardHeader>
               <CardContent className="flex-1 p-0 overflow-hidden min-h-0 flex flex-col">
-                <div className="flex-1 overflow-y-auto min-h-0">
+                <div className="flex-1 overflow-y-auto min-h-0" style={{ overscrollBehavior: 'contain' }}>
                 {/* Conditional rendering: Show search results OR chat sessions, not both */}
                 {searchTerm ? (
                   // Search Results (shown when searching)
                   <div className="space-y-2">
-                    <div className="px-4 pt-4 pb-2 text-xs text-gray-500 font-semibold">Search Results</div>
                     {loadingUsers ? (
                       <div className="p-8 flex flex-col items-center justify-center gap-3">
                         <Loader2 className="h-8 w-8 animate-spin text-brand-orange" />
@@ -1325,8 +1245,6 @@ export function ChatSupportPage() {
                                 type="button"
                                 onClick={e => { 
                                   e.stopPropagation(); 
-                                  console.log("🖼️ Session list - Profile picture URL:", user.profilePicture);
-                                  console.log("👤 User data:", user);
                                   goToResidentProfile(user); 
                                 }}
                                 className="focus:outline-none relative"
@@ -1338,22 +1256,19 @@ export function ChatSupportPage() {
                                     alt="Profile" 
                                     className="h-8 w-8 rounded-full object-cover"
                                     onError={(e) => {
-                                      console.error("❌ Failed to load profile picture in session list:", user.profilePicture);
                                       e.currentTarget.style.display = 'none';
-                                      const parent = e.currentTarget.parentElement;
-                                      if (parent) {
-                                        const fallback = document.createElement('div');
-                                        fallback.className = 'h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center';
-                                        fallback.innerHTML = '<svg class="h-4 w-4 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
-                                        parent.appendChild(fallback);
+                                      const fallback = e.currentTarget.nextElementSibling as HTMLElement;
+                                      if (fallback) {
+                                        fallback.style.display = 'flex';
                                       }
                                     }}
                                   />
-                                ) : (
-                                  <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center">
-                                    <User className="h-4 w-4 text-gray-400" />
-                                  </div>
-                                )}
+                                ) : null}
+                                <div 
+                                  className={`h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center ${user.profilePicture ? 'hidden' : ''}`}
+                                >
+                                  <User className="h-4 w-4 text-gray-400" />
+                                </div>
                                 {/* Online status indicator */}
                                 {onlineUsers.has(user.userId) && (
                                   <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-white"></div>
@@ -1429,69 +1344,69 @@ export function ChatSupportPage() {
             <Card className="h-full flex flex-col border border-gray-200 shadow-none">
               {selectedSession ? (
                 <>
-                  <CardHeader className="border-b bg-white rounded-t-lg sticky top-0 z-10">
-                    <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                      {isMobileView && showChatOnMobile && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={handleMobileBack}
-                          className="h-9 w-9 text-gray-600 hover:text-brand-orange hover:bg-orange-50"
+                  <CardHeader className="border-b bg-white rounded-t-lg sticky top-0 z-20 flex-shrink-0">
+                    {/* User Info Section */}
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center space-x-3">
+                        {isMobileView && showChatOnMobile && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={handleMobileBack}
+                            className="h-9 w-9 text-gray-600 hover:text-brand-orange hover:bg-orange-50"
+                          >
+                            <ArrowLeft className="h-5 w-5" />
+                          </Button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => goToResidentProfile(selectedSession)}
+                          className="focus:outline-none relative"
+                          title="View Resident Profile"
                         >
-                          <ArrowLeft className="h-5 w-5" />
-                        </Button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          console.log("🖼️ Chat header - Profile picture URL:", selectedSession.profilePicture);
-                          console.log("👤 Selected session data:", selectedSession);
-                          goToResidentProfile(selectedSession);
-                        }}
-                        className="focus:outline-none relative"
-                        title="View Resident Profile"
-                      >
-                        {selectedSession.profilePicture ? (
-                          <img 
-                            src={selectedSession.profilePicture} 
-                            alt={selectedSession.fullName || selectedSession.name || selectedSession.userId} 
-                            className="h-10 w-10 rounded-full object-cover"
-                            onError={(e) => {
-                              console.error("❌ Failed to load profile picture:", selectedSession.profilePicture);
-                              e.currentTarget.style.display = 'none';
-                            }}
-                          />
-                        ) : (
-                          <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
+                          {selectedSession.profilePicture ? (
+                            <img 
+                              src={selectedSession.profilePicture} 
+                              alt={selectedSession.fullName || selectedSession.name || selectedSession.userId} 
+                              className="h-10 w-10 rounded-full object-cover"
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                                const fallback = e.currentTarget.nextElementSibling as HTMLElement;
+                                if (fallback) {
+                                  fallback.style.display = 'flex';
+                                }
+                              }}
+                            />
+                          ) : null}
+                          <div 
+                            className={`h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center ${selectedSession.profilePicture ? 'hidden' : ''}`}
+                          >
                             <User className="h-5 w-5 text-gray-400" />
                           </div>
-                        )}
-                        {/* Online status indicator */}
-                        {onlineUsers.has(selectedSession.userId) && (
-                          <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
-                        )}
-                      </button>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <CardTitle className="text-lg">{selectedSession.fullName || selectedSession.name || selectedSession.userId}</CardTitle>
                           {onlineUsers.has(selectedSession.userId) && (
-                            <div className="flex items-center gap-1 text-xs text-green-600 font-medium">
-                              <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-                              Online
-                            </div>
+                            <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
                           )}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm text-gray-500">{selectedSession.userPhoneNumber || selectedSession.mobileNumber || selectedSession.phoneNumber || 'No phone number'}</p>
-                          {!onlineUsers.has(selectedSession.userId) && userLastSeen[selectedSession.userId] && (
-                            <span className="text-xs text-gray-400">
-                              • {formatLastSeen(userLastSeen[selectedSession.userId])}
-                            </span>
-                          )}
+                        </button>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <CardTitle className="text-lg">{selectedSession.fullName || selectedSession.name || selectedSession.userId}</CardTitle>
+                            {onlineUsers.has(selectedSession.userId) && (
+                              <div className="flex items-center gap-1 text-xs text-green-600 font-medium">
+                                <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+                                Online
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm text-gray-500">{selectedSession.userPhoneNumber || selectedSession.mobileNumber || selectedSession.phoneNumber || 'No phone number'}</p>
+                            {!onlineUsers.has(selectedSession.userId) && userLastSeen[selectedSession.userId] && (
+                              <span className="text-xs text-gray-400">
+                                • {formatLastSeen(userLastSeen[selectedSession.userId])}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
                       
                       {/* Message Search */}
                       <div className="flex items-center gap-2">
@@ -1519,8 +1434,6 @@ export function ChatSupportPage() {
                             </button>
                           )}
                         </div>
-                        
-                        {/* Navigation arrows - shown when there are search results */}
                         {showSearchResults && searchMatchingMessages.length > 0 && (
                           <div className="flex items-center gap-1 bg-gray-100 rounded-lg px-2 py-1">
                             <span className="text-xs text-gray-600 px-2">
@@ -1530,7 +1443,6 @@ export function ChatSupportPage() {
                               onClick={goToPreviousSearchResult}
                               className="p-1 hover:bg-gray-200 rounded transition-colors"
                               title="Previous result"
-                              disabled={searchMatchingMessages.length === 0}
                             >
                               <ChevronUp className="h-4 w-4 text-gray-600" />
                             </button>
@@ -1538,7 +1450,6 @@ export function ChatSupportPage() {
                               onClick={goToNextSearchResult}
                               className="p-1 hover:bg-gray-200 rounded transition-colors"
                               title="Next result"
-                              disabled={searchMatchingMessages.length === 0}
                             >
                               <ChevronDown className="h-4 w-4 text-gray-600" />
                             </button>
@@ -1549,7 +1460,7 @@ export function ChatSupportPage() {
                     
                     {/* Search results count */}
                     {showSearchResults && (
-                      <div className="mt-3 pt-3 border-t">
+                      <div className="pt-3 border-t">
                         <p className="text-sm text-gray-600">
                           {searchMatchingMessages.length === 0 ? (
                             "No messages found"
@@ -1560,16 +1471,17 @@ export function ChatSupportPage() {
                       </div>
                     )}
                   </CardHeader>
-                  <CardContent className="flex-1 flex flex-col p-0 min-h-0">
-                    <div className="flex flex-col items-center justify-center gap-6 w-full px-6 pt-6 pb-4 border-b border-gray-100 bg-white flex-shrink-0">
-                      <img src="/accizard-uploads/accizard-logo-svg.svg" alt="Accizard Logo" className="w-32 h-32 mx-auto" />
-                      <img src="/accizard-uploads/accizard-logotype-svg.svg" alt="Accizard Logotype" className="w-64 h-auto mx-auto" />
-                      <div className="text-center mt-2">
+                  <CardContent className="flex-1 flex flex-col p-0 min-h-0 relative">
+                    {/* Support Banner as Faded Background */}
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 pointer-events-none opacity-5 z-0">
+                      <img src="/accizard-uploads/accizard-logo-svg.svg" alt="Accizard Logo" className="w-32 h-32" />
+                      <img src="/accizard-uploads/accizard-logotype-svg.svg" alt="Accizard Logotype" className="w-64 h-auto" />
+                      <div className="text-center">
                         <div className="text-gray-500 text-sm font-medium mb-2">Support Hours</div>
                         <div className="text-gray-500 text-sm">Office: 8:00 AM - 5:00 PM &bull; Emergency: 24/7</div>
                       </div>
                     </div>
-                    <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4 min-h-0">
+                    <div className="flex-1 overflow-y-auto px-4 pt-6 pb-4 space-y-4 min-h-0 relative z-0" style={{ overscrollBehavior: 'contain' }}>
                       {loadingMessages ? (
                         <div className="py-8 flex flex-col items-center justify-center gap-3">
                           <Loader2 className="h-8 w-8 animate-spin text-brand-orange" />
@@ -1579,9 +1491,6 @@ export function ChatSupportPage() {
                         <div className="text-center text-gray-500 py-4">No messages yet. Start the conversation!</div>
                       ) : (
                         messages.map((msg) => {
-                          console.log("🔍 Rendering message:", msg);
-                          console.log("Message content field:", msg.message);
-                          
                           // Check if message is from admin by comparing senderId with user IDs
                           // User messages: senderId matches userId/id/firebaseUid of selected session
                           // Admin messages: senderId is different (admin's uid)
@@ -1592,8 +1501,6 @@ export function ChatSupportPage() {
                           ].filter(Boolean);
                           
                           const isAdmin = !userIds.includes(msg.senderId);
-                          
-                          console.log("📧 Message ID:", msg.id, "| Sender:", msg.senderId, "| Is Admin:", isAdmin, "| User IDs:", userIds);
                           
                           // Check if this message matches the search query
                           const isSearchMatch = searchMatchingMessages.some(m => m.id === msg.id);
@@ -1625,8 +1532,8 @@ export function ChatSupportPage() {
                               }}
                               className={`flex gap-2 ${isAdmin ? 'justify-end' : 'justify-start'}`}
                             >
-                              {/* User profile picture (only for non-admin messages without attachments) */}
-                              {!isAdmin && !msg.imageUrl && !msg.videoUrl && !msg.audioUrl && !msg.fileUrl && (
+                              {/* User profile picture (for all non-admin messages) */}
+                              {!isAdmin && (
                                 <div className="flex-shrink-0">
                                   {selectedSession.profilePicture ? (
                                     <img 
@@ -1634,16 +1541,19 @@ export function ChatSupportPage() {
                                       alt={msg.senderName || 'User'} 
                                       className="h-8 w-8 rounded-full object-cover"
                                       onError={(e) => {
-                                        console.error("❌ Failed to load profile picture in message:", selectedSession.profilePicture);
-                                        console.log("📨 Message data:", msg);
                                         e.currentTarget.style.display = 'none';
+                                        const fallback = e.currentTarget.nextElementSibling as HTMLElement;
+                                        if (fallback) {
+                                          fallback.style.display = 'flex';
+                                        }
                                       }}
                                     />
-                                  ) : (
-                                    <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center">
-                                      <User className="h-4 w-4 text-gray-400" />
-                                    </div>
-                                  )}
+                                  ) : null}
+                                  <div 
+                                    className={`h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center ${selectedSession.profilePicture ? 'hidden' : ''}`}
+                                  >
+                                    <User className="h-4 w-4 text-gray-400" />
+                                  </div>
                                 </div>
                               )}
                               
@@ -1656,7 +1566,7 @@ export function ChatSupportPage() {
                                       alt="Attachment" 
                                       className="max-w-full rounded-lg cursor-pointer hover:opacity-95 transition-opacity"
                                       style={{ maxHeight: '300px', objectFit: 'contain' }}
-                                      onClick={() => window.open(msg.imageUrl, '_blank')}
+                                      onClick={() => setImagePreviewUrl(msg.imageUrl || null)}
                                     />
                                     {/* Timestamp overlay on hover */}
                                     <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/70 text-white px-2 py-1 rounded text-xs flex items-center gap-1">
@@ -1832,38 +1742,10 @@ export function ChatSupportPage() {
                           );
                         })
                       )}
-                      
-                      {/* Typing indicator */}
-                      {isUserTyping && (
-                        <div className="flex gap-2 justify-start">
-                          <div className="flex-shrink-0">
-                            {selectedSession.profilePicture ? (
-                              <img 
-                                src={selectedSession.profilePicture} 
-                                alt={selectedSession.fullName || 'User'} 
-                                className="h-8 w-8 rounded-full object-cover"
-                              />
-                            ) : (
-                              <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center">
-                                <User className="h-4 w-4 text-gray-400" />
-                              </div>
-                            )}
-                          </div>
-                          <div className="bg-white text-gray-800 rounded-lg rounded-bl-none border border-gray-200 px-4 py-3">
-                            <div className="flex items-center gap-1">
-                              <div className="flex space-x-1">
-                                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      )}
                       <div ref={messagesEndRef} />
                     </div>
                   </CardContent>
-                  <div className="border-t p-4 bg-white rounded-b-lg">
+                  <div className="border-t p-4 bg-white rounded-b-lg sticky bottom-0 z-10 flex-shrink-0">
                     {/* Attachment Previews */}
                     {attachmentPreviews.length > 0 && (
                       <div className="mb-3 space-y-2 max-h-48 overflow-y-auto">
@@ -2098,6 +1980,22 @@ export function ChatSupportPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Image Preview Modal */}
+      <Dialog open={!!imagePreviewUrl} onOpenChange={(open) => !open && setImagePreviewUrl(null)}>
+        <DialogContent className="max-w-4xl w-full p-0 bg-black/95 border-none overflow-hidden" hideOverlay={false}>
+          <div className="relative w-full h-[90vh] flex items-center justify-center p-4">
+            {imagePreviewUrl && (
+              <img 
+                src={imagePreviewUrl} 
+                alt="Image Preview" 
+                className="max-w-full max-h-full object-contain rounded-lg"
+                onClick={(e) => e.stopPropagation()}
+              />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 }
