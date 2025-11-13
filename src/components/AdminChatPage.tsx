@@ -43,6 +43,7 @@ interface AttachmentPreview {
 
 export function AdminChatPage() {
   const [message, setMessage] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -408,31 +409,117 @@ export function AdminChatPage() {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  // Filter messages based on search query
+  const filteredMessages = messages.filter(msg => {
+    if (!searchQuery.trim()) return true;
+    const query = searchQuery.toLowerCase();
+    return (
+      msg.message?.toLowerCase().includes(query) ||
+      msg.senderName?.toLowerCase().includes(query) ||
+      msg.fileName?.toLowerCase().includes(query)
+    );
+  });
+
   return (
     <Layout>
-      <div className="-m-6 -mb-6 flex flex-col flex-1 min-h-0 min-h-[calc(100vh-8rem)]">
-        <Card className="flex-1 min-h-0 flex flex-col border border-gray-200 shadow-none overflow-hidden">
-
-          <CardContent className="flex-1 flex flex-col overflow-hidden p-0 min-h-0">
-            <div className="flex flex-col items-center justify-center gap-6 w-full px-6 pt-6 pb-4 border-b border-gray-100 bg-white flex-shrink-0">
-              <img src="/accizard-uploads/accizard-logo-svg.svg" alt="AcciZard Logo" className="w-32 h-32 mx-auto" />
-              <img src="/accizard-uploads/accizard-logotype-svg.svg" alt="AcciZard Logotype" className="w-64 h-auto mx-auto" />
-              <div className="text-center mt-2">
-                <div className="text-gray-500 text-sm font-medium mb-2">Administrator Communication Channel</div>
-                <div className="text-gray-500 text-sm">For internal coordination and updates</div>
+      <div className="-m-6 -mb-6 flex flex-col h-[calc(100%+3rem)] overflow-hidden">
+        <Card className="flex-1 flex flex-col border border-gray-200 shadow-none rounded-lg overflow-hidden">
+          {/* Admin Chat Header */}
+          <div className="border-b bg-white px-6 py-4 flex-shrink-0">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex-1">
+                <h2 className="text-xl font-semibold text-gray-900">Admin Group Chat</h2>
+                <p className="text-sm text-gray-500 mt-1">Internal communication channel for administrators</p>
+              </div>
+              <div className="flex items-center gap-3">
+                {/* Search Box */}
+                <div className="relative w-64">
+                  <Input
+                    placeholder="Search messages..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10 w-full border-gray-200"
+                  />
+                  <div className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="11" cy="11" r="8"></circle>
+                      <path d="m21 21-4.35-4.35"></path>
+                    </svg>
+                  </div>
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery("")}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+                {/* Delete Button (Super Admin Only) */}
+                {isSuperAdmin && (
+                  <AlertDialog open={showClearDialog} onOpenChange={(open) => !clearingChat && setShowClearDialog(open)}>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-10 w-10 border-gray-300 hover:bg-red-50"
+                        disabled={clearingChat}
+                        title="Clear Admin Chat"
+                      >
+                        {clearingChat ? <Loader2 className="h-4 w-4 animate-spin text-red-600" /> : <Trash2 className="h-4 w-4 text-red-600" />}
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Clear Admin Group Chat</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This will permanently delete every admin chat message and remove all related media
+                          files stored in Firebase Storage. This action cannot be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel disabled={clearingChat}>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={handleClearAdminChat}
+                          className="bg-red-600 hover:bg-red-700"
+                          disabled={clearingChat}
+                        >
+                          {clearingChat ? (
+                            <>
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              Clearing...
+                            </>
+                          ) : (
+                            "Clear Chat"
+                          )}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                )}
               </div>
             </div>
+          </div>
+
+          <CardContent className="flex-1 flex flex-col overflow-hidden p-0 min-h-0 relative">
+            {/* Admin Chat Banner as Faded Background */}
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 pointer-events-none opacity-5 z-0">
+              <img src="/accizard-uploads/accizard-logo-svg.svg" alt="AcciZard Logo" className="w-32 h-32" />
+              <img src="/accizard-uploads/accizard-logotype-svg.svg" alt="AcciZard Logotype" className="w-64 h-auto" />
+            </div>
             
-            <div className="flex-1 min-h-0 overflow-y-auto px-4 py-6 pb-28 space-y-4 overscroll-contain scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent">
+            <div className="flex-1 min-h-0 overflow-y-auto px-4 py-6 pb-4 space-y-4 overscroll-contain scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent relative z-0">
               {loadingMessages ? (
                 <div className="py-8 flex flex-col items-center justify-center gap-3">
                   <Loader2 className="h-8 w-8 animate-spin text-brand-orange" />
                   <p className="text-sm text-gray-500">Loading messages...</p>
                 </div>
-              ) : messages.length === 0 ? (
-                <div className="text-center text-gray-500 py-4">No messages yet. Start the conversation!</div>
+              ) : filteredMessages.length === 0 ? (
+                <div className="text-center text-gray-500 py-4">
+                  {searchQuery ? `No messages found matching "${searchQuery}"` : "No messages yet. Start the conversation!"}
+                </div>
               ) : (
-                messages.map((msg) => {
+                filteredMessages.map((msg) => {
                   const isCurrentUser = msg.senderId === currentUser?.uid;
                   const messageTime = formatTime(msg.timestamp);
                   
@@ -555,36 +642,38 @@ export function AdminChatPage() {
                         
                         {/* Text message bubble */}
                         {!msg.fileUrl && msg.message && (
-                          <div
-                            className={`rounded-lg px-4 py-2 ${
-                              isCurrentUser
-                                ? 'bg-brand-orange text-white rounded-br-none'
-                                : 'bg-white text-gray-800 rounded-bl-none shadow-sm'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className={`text-xs font-semibold ${isCurrentUser ? 'text-orange-100' : 'text-gray-600'}`}>
-                                {msg.senderName}
-                              </span>
-                              {msg.senderRole && (
-                                <span className={`text-xs ${isCurrentUser ? 'text-orange-200' : 'text-gray-500'}`}>
-                                  ({msg.senderRole})
-                                </span>
+                          <div className="relative group">
+                            <div
+                              className={`rounded-lg px-4 py-2 ${
+                                isCurrentUser
+                                  ? 'bg-brand-orange text-white rounded-br-none'
+                                  : 'bg-white text-gray-800 rounded-bl-none shadow-sm'
+                              }`}
+                            >
+                              {/* Show sender name for other users */}
+                              {!isCurrentUser && (
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="text-xs font-semibold text-gray-600">
+                                    {msg.senderName}
+                                  </span>
+                                  {msg.senderRole && (
+                                    <span className="text-xs text-gray-500">
+                                      ({msg.senderRole})
+                                    </span>
+                                  )}
+                                </div>
                               )}
+                              <p className="text-sm whitespace-pre-wrap break-words">{msg.message}</p>
                             </div>
-                            
-                            <p className="text-sm whitespace-pre-wrap break-words">{msg.message}</p>
-                            
-                            <div className={`flex items-center gap-1 mt-1 ${isCurrentUser ? 'justify-end' : 'justify-start'}`}>
-                              <span className={`text-xs ${isCurrentUser ? 'text-orange-100' : 'text-gray-500'}`}>
-                                {messageTime}
-                              </span>
+                            {/* Timestamp on hover */}
+                            <div className={`absolute ${isCurrentUser ? 'right-0' : 'left-0'} -bottom-5 opacity-0 group-hover:opacity-100 transition-opacity bg-black/70 text-white px-2 py-1 rounded text-xs flex items-center gap-1 whitespace-nowrap`}>
+                              {messageTime}
                               {isCurrentUser && (
-                                <span className="text-xs" title={msg.isRead ? 'Read' : 'Delivered'}>
+                                <span title={msg.isRead ? 'Read' : 'Delivered'}>
                                   {msg.isRead ? (
-                                    <CheckCheck className="h-3 w-3 text-orange-100" />
+                                    <CheckCheck className="h-3 w-3 inline" />
                                   ) : (
-                                    <Check className="h-3 w-3 text-orange-200" />
+                                    <Check className="h-3 w-3 inline" />
                                   )}
                                 </span>
                               )}
@@ -601,7 +690,7 @@ export function AdminChatPage() {
             </div>
           </CardContent>
 
-          <div className="border-t p-4 bg-white rounded-b-lg sticky bottom-0 z-10">
+          <div className="border-t p-4 bg-white flex-shrink-0">
             {/* Attachment Previews */}
             {attachmentPreviews.length > 0 && (
               <div className="mb-3 space-y-2 max-h-48 overflow-y-auto">
@@ -771,55 +860,17 @@ export function AdminChatPage() {
                   </PopoverContent>
                 </Popover>
               </div>
-              <div className="flex items-center gap-2">
-                {isSuperAdmin && (
-                  <AlertDialog open={showClearDialog} onOpenChange={(open) => !clearingChat && setShowClearDialog(open)}>
-                    <AlertDialogTrigger asChild>
-                      <Button
-                        variant="destructive"
-                        size="icon"
-                        className="h-10 w-10"
-                        disabled={clearingChat}
-                      >
-                        {clearingChat ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>Clear Admin Group Chat</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          This will permanently delete every admin chat message and remove all related media
-                          files stored in Firebase Storage. This action cannot be undone.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel disabled={clearingChat}>Cancel</AlertDialogCancel>
-                        <AlertDialogAction
-                          onClick={(event) => {
-                            event.preventDefault();
-                            handleClearAdminChat();
-                          }}
-                          className="bg-red-600 hover:bg-red-500"
-                          disabled={clearingChat}
-                        >
-                          {clearingChat ? <Loader2 className="h-4 w-4 animate-spin" /> : "Clear Chat"}
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
+              <Button
+                onClick={handleSendMessage}
+                disabled={sendingMessage || uploadingFile || (!message.trim() && attachmentPreviews.length === 0)}
+                className="bg-brand-orange hover:bg-brand-orange-400 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {sendingMessage || uploadingFile ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
                 )}
-                <Button
-                  onClick={handleSendMessage}
-                  disabled={sendingMessage || uploadingFile || (!message.trim() && attachmentPreviews.length === 0)}
-                  className="bg-brand-orange hover:bg-brand-orange-400 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {sendingMessage || uploadingFile ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Send className="h-4 w-4" />
-                  )}
-                </Button>
-              </div>
+              </Button>
             </div>
           </div>
         </Card>

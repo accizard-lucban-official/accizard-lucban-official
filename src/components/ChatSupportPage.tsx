@@ -1106,12 +1106,12 @@ export function ChatSupportPage() {
 
   return (
     <Layout>
-      <div className="-m-6 -mb-6 flex-1 flex flex-col">
-        <div className={`grid grid-cols-1 gap-0 ${isMobileView ? "" : "lg:grid-cols-[360px_minmax(0,1fr)]"} flex-1 min-h-[calc(100vh-8rem)]`}>
+      <div className="-m-6 -mb-6 flex flex-col h-[calc(100%+3rem)] overflow-hidden">
+        <div className={`grid grid-cols-1 gap-0 ${isMobileView ? "" : "lg:grid-cols-[360px_minmax(0,1fr)]"} flex-1 overflow-hidden`}>
           {/* Chat Sessions List */}
           {(!isMobileView || !showChatOnMobile) && (
-            <Card className="border border-gray-200 shadow-none h-full flex flex-col overflow-hidden">
-              <CardHeader className="border-b bg-white rounded-t-lg sticky top-0 z-20 flex-shrink-0">
+            <Card className="border border-gray-200 shadow-none flex flex-col overflow-hidden">
+              <CardHeader className="border-b bg-white flex-shrink-0">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
                     <CardTitle>Chat Sessions</CardTitle>
@@ -1135,12 +1135,11 @@ export function ChatSupportPage() {
                   />
                 </div>
               </CardHeader>
-              <CardContent className="flex-1 p-0 overflow-hidden min-h-0 flex flex-col">
-                <div className="flex-1 overflow-y-auto min-h-0" style={{ overscrollBehavior: 'contain' }}>
+              <CardContent className="flex-1 p-0 overflow-y-auto min-h-0" style={{ overscrollBehavior: 'contain' }}>
                 {/* Conditional rendering: Show search results OR chat sessions, not both */}
                 {searchTerm ? (
                   // Search Results (shown when searching)
-                  <div className="space-y-2">
+                  <div className="space-y-0">
                     {loadingUsers ? (
                       <div className="p-8 flex flex-col items-center justify-center gap-3">
                         <Loader2 className="h-8 w-8 animate-spin text-brand-orange" />
@@ -1215,7 +1214,7 @@ export function ChatSupportPage() {
                   </div>
                 ) : (
                   // Chat Sessions (shown when not searching)
-                  <div className="space-y-2">
+                  <div className="space-y-0">
                     {loadingChatSessions ? (
                       <div className="p-8 flex flex-col items-center justify-center gap-3">
                         <Loader2 className="h-8 w-8 animate-spin text-brand-orange" />
@@ -1316,8 +1315,8 @@ export function ChatSupportPage() {
                             </div>
                             <Button 
                               size="icon" 
-                              variant="destructive" 
-                              className="bg-red-600 hover:bg-red-500 text-white" 
+                              variant="outline" 
+                              className="border-gray-300 hover:bg-red-50 hover:border-red-300" 
                               onClick={e => { 
                                 e.stopPropagation(); 
                                 setChatToDelete(user);
@@ -1325,7 +1324,7 @@ export function ChatSupportPage() {
                               }} 
                               title="Delete Chat Session"
                             >
-                              <Trash2 className="h-4 w-4" />
+                              <Trash2 className="h-4 w-4 text-red-600" />
                             </Button>
                           </div>
                         </div>
@@ -1334,17 +1333,16 @@ export function ChatSupportPage() {
                     )}
                   </div>
                 )}
-                </div>
               </CardContent>
             </Card>
           )}
 
           {/* Chat Window */}
           {(!isMobileView || showChatOnMobile) && (
-            <Card className="h-full flex flex-col border border-gray-200 shadow-none">
+            <Card className="flex flex-col border border-gray-200 shadow-none overflow-hidden">
               {selectedSession ? (
                 <>
-                  <CardHeader className="border-b bg-white rounded-t-lg sticky top-0 z-20 flex-shrink-0">
+                  <CardHeader className="border-b bg-white flex-shrink-0">
                     {/* User Info Section */}
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center space-x-3">
@@ -1471,15 +1469,11 @@ export function ChatSupportPage() {
                       </div>
                     )}
                   </CardHeader>
-                  <CardContent className="flex-1 flex flex-col p-0 min-h-0 relative">
+                  <CardContent className="flex-1 flex flex-col overflow-hidden p-0 min-h-0 relative">
                     {/* Support Banner as Faded Background */}
                     <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 pointer-events-none opacity-5 z-0">
                       <img src="/accizard-uploads/accizard-logo-svg.svg" alt="Accizard Logo" className="w-32 h-32" />
                       <img src="/accizard-uploads/accizard-logotype-svg.svg" alt="Accizard Logotype" className="w-64 h-auto" />
-                      <div className="text-center">
-                        <div className="text-gray-500 text-sm font-medium mb-2">Support Hours</div>
-                        <div className="text-gray-500 text-sm">Office: 8:00 AM - 5:00 PM &bull; Emergency: 24/7</div>
-                      </div>
                     </div>
                     <div className="flex-1 overflow-y-auto px-4 pt-6 pb-4 space-y-4 min-h-0 relative z-0" style={{ overscrollBehavior: 'contain' }}>
                       {loadingMessages ? (
@@ -1557,7 +1551,7 @@ export function ChatSupportPage() {
                                 </div>
                               )}
                               
-                              <div className={`flex flex-col gap-1 ${isAdmin ? 'items-end' : 'items-start'} max-w-[70%]`}>
+                              <div className={`flex flex-col gap-1 ${isAdmin ? 'ite ms-end' : 'items-start'} max-w-[70%]`}>
                                 {/* Image attachment - just the image, no background */}
                                 {msg.imageUrl && (
                                   <div className="relative group">
@@ -1690,47 +1684,49 @@ export function ChatSupportPage() {
                                 
                                 {/* Text message bubble (only if there's actual text and no file attachment) */}
                                 {!msg.fileUrl && (msg.message || (msg as any).text || (msg as any).content || (msg as any).body) && (
-                                  <div
-                                    className={`rounded-lg px-4 py-2 ${
-                                      isAdmin
-                                        ? 'bg-brand-orange text-white rounded-br-none'
-                                        : 'bg-white text-gray-800 rounded-bl-none border border-gray-200'
-                                    }`}
-                                  >
-                                    <div className="flex items-center gap-2 mb-1">
-                                      <span className={`text-xs font-semibold ${isAdmin ? 'text-orange-100' : 'text-gray-600'}`}>
-                                        {msg.senderName || (msg as any).sender || (msg as any).from || 'Unknown'}
-                                      </span>
+                                  <div className="relative group">
+                                    <div
+                                      className={`rounded-lg px-4 py-2 ${
+                                        isAdmin
+                                          ? 'bg-brand-orange text-white rounded-br-none'
+                                          : 'bg-white text-gray-800 rounded-bl-none border border-gray-200'
+                                      }`}
+                                    >
+                                      {/* Show sender name for non-admin messages (residents) */}
+                                      {!isAdmin && (
+                                        <div className="flex items-center gap-2 mb-1">
+                                          <span className="text-xs font-semibold text-gray-600">
+                                            {msg.senderName || (msg as any).sender || (msg as any).from || 'Unknown'}
+                                          </span>
+                                        </div>
+                                      )}
+                                      {/* Text message */}
+                                      {messageSearchQuery.trim() ? (
+                                        <p 
+                                          className="text-sm whitespace-pre-wrap break-words"
+                                          dangerouslySetInnerHTML={{ 
+                                            __html: highlightText(
+                                              msg.message || (msg as any).text || (msg as any).content || (msg as any).body || '', 
+                                              messageSearchQuery
+                                            )
+                                          }}
+                                        />
+                                      ) : (
+                                        <p className="text-sm whitespace-pre-wrap break-words">
+                                          {msg.message || (msg as any).text || (msg as any).content || (msg as any).body || ''}
+                                        </p>
+                                      )}
                                     </div>
-                                    
-                                    {/* Text message */}
-                                    {messageSearchQuery.trim() ? (
-                                      <p 
-                                        className="text-sm whitespace-pre-wrap break-words"
-                                        dangerouslySetInnerHTML={{ 
-                                          __html: highlightText(
-                                            msg.message || (msg as any).text || (msg as any).content || (msg as any).body || '', 
-                                            messageSearchQuery
-                                          )
-                                        }}
-                                      />
-                                    ) : (
-                                      <p className="text-sm whitespace-pre-wrap break-words">
-                                        {msg.message || (msg as any).text || (msg as any).content || (msg as any).body || ''}
-                                      </p>
-                                    )}
-                                    
-                                    <div className={`flex items-center gap-1 mt-1 ${isAdmin ? 'justify-end' : 'justify-start'}`}>
-                                      <span className={`text-xs ${isAdmin ? 'text-orange-100' : 'text-gray-500'}`}>
-                                        {messageTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                      </span>
+                                    {/* Timestamp on hover */}
+                                    <div className={`absolute ${isAdmin ? 'right-0' : 'left-0'} -bottom-5 opacity-0 group-hover:opacity-100 transition-opacity bg-black/70 text-white px-2 py-1 rounded text-xs flex items-center gap-1 whitespace-nowrap`}>
+                                      {messageTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                       {/* Read receipt indicator (only for admin messages) */}
                                       {isAdmin && (
-                                        <span className="text-xs" title={msg.isRead ? 'Read' : 'Delivered'}>
+                                        <span title={msg.isRead ? 'Read' : 'Delivered'}>
                                           {msg.isRead ? (
-                                            <CheckCheck className="h-3 w-3 text-orange-100" />
+                                            <CheckCheck className="h-3 w-3 inline" />
                                           ) : (
-                                            <Check className="h-3 w-3 text-orange-200" />
+                                            <Check className="h-3 w-3 inline" />
                                           )}
                                         </span>
                                       )}
@@ -1745,7 +1741,7 @@ export function ChatSupportPage() {
                       <div ref={messagesEndRef} />
                     </div>
                   </CardContent>
-                  <div className="border-t p-4 bg-white rounded-b-lg sticky bottom-0 z-10 flex-shrink-0">
+                  <div className="border-t p-4 bg-white flex-shrink-0">
                     {/* Attachment Previews */}
                     {attachmentPreviews.length > 0 && (
                       <div className="mb-3 space-y-2 max-h-48 overflow-y-auto">
