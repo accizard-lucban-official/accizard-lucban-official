@@ -314,7 +314,6 @@ export function AdminChatPage() {
 
       setMessage("");
       clearAllAttachments();
-      toast.success("Message sent");
     } catch (error) {
       console.error("Error sending admin message:", error);
       toast.error("Failed to send message");

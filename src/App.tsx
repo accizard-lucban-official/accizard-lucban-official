@@ -165,6 +165,15 @@ function PrivateRoute() {
   return user || isAuthenticated ? <Outlet /> : <Navigate to="/login" replace />;
 }
 
+function PublicRoute() {
+  const { user, loading } = useAuth();
+  const isAuthenticated = SessionManager.isAuthenticated();
+  
+  if (loading) return <SpinnerOverlay />;
+  // Redirect to dashboard if already logged in
+  return user || isAuthenticated ? <Navigate to="/dashboard" replace /> : <Outlet />;
+}
+
 const queryClient = new QueryClient();
 
 const App = () => (
@@ -177,9 +186,11 @@ const App = () => (
           <BrowserRouter>
             <Suspense fallback={<RouteLoader />}>
               <Routes>
-                <Route path="/" element={<LoginForm />} />
-                <Route path="/login" element={<LoginForm />} />
-                <Route path="/password-recovery" element={<PasswordRecoveryPage />} />
+                <Route element={<PublicRoute />}>
+                  <Route path="/" element={<LoginForm />} />
+                  <Route path="/login" element={<LoginForm />} />
+                  <Route path="/password-recovery" element={<PasswordRecoveryPage />} />
+                </Route>
                 <Route element={<PrivateRoute />}>
                   <Route path="/dashboard" element={<Index />} />
                   <Route path="/profile" element={<ProfilePage />} />

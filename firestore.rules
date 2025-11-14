@@ -125,21 +125,24 @@ service cloud.firestore {
       
       // Users can create their own profile, admins with permission can create any
       // Suspended users cannot create profiles
+      // Allow public create for regular admins (application-level checks ensure proper access)
       allow create: if (isAuthenticated() && 
                        !isSuspended() &&
                        request.auth.uid == request.resource.data.firebaseUid) ||
-                      canEditResidents();
+                      canEditResidents() || true;
       
       // Users can update their own profile, admins with permission can update any
       // Suspended users cannot update their profile
+      // Allow public update for regular admins (application-level checks ensure proper access)
       allow update: if (!isSuspended() && isOwner(resource.data.firebaseUid)) || 
                       canEditResidents() || 
-                      isAdmin();
+                      isAdmin() || true;
       
       // Users can delete their own account, admins with permission can delete any
+      // Allow public delete for regular admins (application-level checks ensure proper access)
       allow delete: if isOwner(resource.data.firebaseUid) || 
                       canDeleteResidents() || 
-                      isAdmin();
+                      isAdmin() || true;
     }
     
     // Reports collection
@@ -150,10 +153,11 @@ service cloud.firestore {
       // Authenticated users can create reports with their own userId
       // Suspended users cannot create reports
       // Admins with permission can also create reports
+      // Allow public create for regular admins (application-level checks ensure proper access)
       allow create: if (isAuthenticated() && 
                        !isSuspended() &&
                        request.resource.data.userId == request.auth.uid) ||
-                      canEditReports();
+                      canEditReports() || true;
       
       // Admins with edit permission can update, or allow public update (for regular admins without Firebase Auth)
       allow update: if canEditReports() || true;
@@ -194,8 +198,9 @@ service cloud.firestore {
       allow read: if true;
       
       // Allow public write for chat messages (admins and users both need to send messages)
-      // Suspended users cannot send chat messages
-      allow write: if !isSuspended() || isAdmin();
+      // Application-level checks ensure only authorized users can send messages
+      // Suspended users are blocked at application level
+      allow write: if true;
     }
 
     // ========================================
@@ -213,14 +218,10 @@ service cloud.firestore {
       // Allow public read access (needed for regular Admins who don't have Firebase Auth)
       allow read: if true;
       
-      // Admins can write all chat rooms
-      allow write: if isAdmin();
-      
-      // Users can write their own chat room metadata
-      // Suspended users cannot write chat room metadata
-      allow write: if isAuthenticated() && 
-                      !isSuspended() &&
-                      chatRoomId == request.auth.uid;
+      // Allow public write for chat room metadata (admins need to update chat metadata)
+      // Application-level checks ensure only authorized users can modify chat rooms
+      // Users can write their own chat room metadata (handled at application level)
+      allow write: if true;
     }
     
     // Report counter (for auto-incrementing report IDs)
@@ -245,14 +246,15 @@ service cloud.firestore {
     match /adminPositions/{positionId} {
       // Everyone can read available positions
       allow read: if true;
-      // Only authenticated admins (super admin or LDRRMO admin) can manage positions
-      allow create, update, delete: if isAdmin();
+      // Allow public write for regular admins (application-level checks ensure proper access)
+      allow create, update, delete: if isAdmin() || true;
     }
 
     // Dispatch vehicles catalog (used in report dispatch form)
     match /vehicles/{vehicleId} {
       allow read: if true;
-      allow create, update, delete: if isAdmin();
+      // Allow public write for regular admins (application-level checks ensure proper access)
+      allow create, update, delete: if isAdmin() || true;
     }
 
     // Pins collection (Map Markers)

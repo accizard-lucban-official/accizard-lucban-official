@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SessionManager } from "@/lib/sessionManager";
 import { logActivity, ActionType } from "@/lib/activityLogger";
+import { onAuthStateChanged } from "firebase/auth";
 
 export function LoginForm() {
   const [email, setEmail] = useState("");
@@ -21,9 +22,32 @@ export function LoginForm() {
   const [userType, setUserType] = useState("super-admin");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+
+  // Check if user is already logged in and redirect
+  useEffect(() => {
+    const isAuthenticated = SessionManager.isAuthenticated();
+    
+    // Check Firebase Auth state
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      if (firebaseUser || isAuthenticated) {
+        // User is already logged in, redirect to dashboard
+        navigate("/dashboard", { replace: true });
+      } else {
+        setCheckingSession(false);
+      }
+    });
+
+    // If no Firebase Auth user and no session, allow login immediately
+    if (!isAuthenticated && !auth.currentUser) {
+      setCheckingSession(false);
+    }
+
+    return () => unsubscribe();
+  }, [navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -225,7 +249,19 @@ export function LoginForm() {
     navigate("/password-recovery");
   };
 
-    return <div className="min-h-screen flex items-center justify-center p-4 sm:p-8">
+  // Show loading spinner while checking session
+  if (checkingSession) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-orange mx-auto mb-4"></div>
+          <p className="text-gray-600">Checking session...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <div className="min-h-screen flex items-center justify-center p-4 sm:p-8">
       {/* Floating Container */}
       <div className="w-full max-w-5xl bg-white rounded-2xl shadow-md overflow-hidden border border-gray-200">
         <div className="flex flex-col lg:flex-row min-h-[500px]">

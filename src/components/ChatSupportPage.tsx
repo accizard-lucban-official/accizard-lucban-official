@@ -505,8 +505,9 @@ export function ChatSupportPage() {
         const lowerKey = `userId:${id}`;
         if (!querySignatures.has(lowerKey)) {
           querySignatures.add(lowerKey);
+          // Remove orderBy to avoid composite index requirement - we sort client-side anyway
           queries.push({
-            query: query(messagesRef, where("userId", "==", id), orderBy("timestamp", "asc")),
+            query: query(messagesRef, where("userId", "==", id)),
             key: lowerKey
           });
         }
@@ -514,16 +515,17 @@ export function ChatSupportPage() {
         const upperKey = `userID:${id}`;
         if (!querySignatures.has(upperKey)) {
           querySignatures.add(upperKey);
+          // Remove orderBy to avoid composite index requirement - we sort client-side anyway
           queries.push({
-            query: query(messagesRef, where("userID", "==", id), orderBy("timestamp", "asc")),
+            query: query(messagesRef, where("userID", "==", id)),
             key: upperKey
           });
         }
       });
 
-      const messageStore = new Map<string, ChatMessage>();
+      // Store messages from each query separately, then merge
+      const queryStores = new Map<string, Map<string, ChatMessage>>();
       let isMounted = true;
-      const loadedQueries = new Set<string>();
 
       const getTimestampValue = (msg: ChatMessage): number => {
         if (!msg.timestamp) return 0;
@@ -540,30 +542,16 @@ export function ChatSupportPage() {
         return 0;
       };
 
-      const handleSnapshot = async (snapshot, queryKey: string) => {
-        // Check if this is the first snapshot for this query
-        const isInitialLoad = !loadedQueries.has(queryKey);
-        
-        if (isInitialLoad) {
-          // On initial load, process all documents from this query
-          snapshot.docs.forEach((docSnap) => {
-            const docId = docSnap.id;
-            messageStore.set(docId, { id: docId, ...docSnap.data() } as ChatMessage);
+      const mergeAndUpdateMessages = async () => {
+        // Merge all messages from all query stores
+        const mergedStore = new Map<string, ChatMessage>();
+        queryStores.forEach((store) => {
+          store.forEach((msg, docId) => {
+            mergedStore.set(docId, msg);
           });
-          loadedQueries.add(queryKey);
-        } else {
-          // On subsequent updates, process changes
-          snapshot.docChanges().forEach((change) => {
-            const docId = change.doc.id;
-            if (change.type === "removed") {
-              messageStore.delete(docId);
-            } else {
-              messageStore.set(docId, { id: docId, ...change.doc.data() } as ChatMessage);
-            }
-          });
-        }
+        });
 
-        const mergedMessages = Array.from(messageStore.values()).sort((a, b) => getTimestampValue(a) - getTimestampValue(b));
+        const mergedMessages = Array.from(mergedStore.values()).sort((a, b) => getTimestampValue(a) - getTimestampValue(b));
 
         if (!isMounted) return;
 
@@ -581,14 +569,14 @@ export function ChatSupportPage() {
           const latestMessage = mergedMessages[mergedMessages.length - 1];
           const chatRef = doc(db, "chats", primaryUserId);
 
-          let previewText = latestMessage.message || "Message";
-          if (latestMessage.imageUrl && !latestMessage.message) {
+          let previewText = latestMessage.message || latestMessage.content || "Message";
+          if (latestMessage.imageUrl && !latestMessage.message && !latestMessage.content) {
             previewText = "📷 Photo";
-          } else if (latestMessage.videoUrl && !latestMessage.message) {
+          } else if (latestMessage.videoUrl && !latestMessage.message && !latestMessage.content) {
             previewText = "🎥 Video";
-          } else if (latestMessage.audioUrl && !latestMessage.message) {
+          } else if (latestMessage.audioUrl && !latestMessage.message && !latestMessage.content) {
             previewText = "🎵 Audio";
-          } else if (latestMessage.fileUrl && !latestMessage.message) {
+          } else if (latestMessage.fileUrl && !latestMessage.message && !latestMessage.content) {
             previewText = `📎 ${latestMessage.fileName || "File"}`;
           }
 
@@ -612,11 +600,52 @@ export function ChatSupportPage() {
         }, 100);
       };
 
-      const unsubscribers = queries.map(({ query: q, key: queryKey }) => {
-        return onSnapshot(q, (snapshot) => handleSnapshot(snapshot, queryKey), (error) => {
-          console.error("Error loading messages:", error);
-          setLoadingMessages(false);
+      const handleSnapshot = async (snapshot, queryKey: string) => {
+        console.log(`📥 Snapshot received for query ${queryKey}:`, snapshot.docs.length, "documents");
+        
+        // Process ALL documents from snapshot (like AdminChatPage) - more reliable than docChanges()
+        const queryStore = new Map<string, ChatMessage>();
+        snapshot.docs.forEach((docSnap) => {
+          const docId = docSnap.id;
+          const data = docSnap.data();
+          console.log(`📨 Processing message ${docId}:`, {
+            userId: data.userId,
+            userID: data.userID,
+            senderId: data.senderId,
+            senderName: data.senderName,
+            message: data.message?.substring(0, 30) || data.content?.substring(0, 30),
+            timestamp: data.timestamp
+          });
+          queryStore.set(docId, { id: docId, ...data } as ChatMessage);
         });
+        
+        // Update the store for this query
+        queryStores.set(queryKey, queryStore);
+        
+        console.log(`💾 Query stores after update:`, Array.from(queryStores.keys()));
+        console.log(`📊 Total messages across all queries:`, Array.from(queryStores.values()).reduce((sum, store) => sum + store.size, 0));
+        
+        // Merge and update messages from all queries
+        await mergeAndUpdateMessages();
+      };
+
+      console.log(`🔍 Setting up ${queries.length} message listeners for userId: ${primaryUserId}`);
+      queries.forEach(({ query: q, key: queryKey }) => {
+        console.log(`📡 Creating listener for query: ${queryKey}`);
+      });
+
+      const unsubscribers = queries.map(({ query: q, key: queryKey }) => {
+        return onSnapshot(q, 
+          (snapshot) => {
+            console.log(`✅ Snapshot callback fired for ${queryKey}`);
+            handleSnapshot(snapshot, queryKey);
+          }, 
+          (error) => {
+            console.error(`❌ Error in listener for ${queryKey}:`, error);
+            console.error("Error details:", error.code, error.message);
+            setLoadingMessages(false);
+          }
+        );
       });
 
       return () => {
@@ -667,15 +696,35 @@ export function ChatSupportPage() {
       const userId = user.firebaseUid || user.id;
       
       // Check if there are existing messages for this user
+      // Query both userId and userID fields to catch all messages
       const messagesRef = collection(db, "chat_messages");
-      const messagesQuery = query(
-        messagesRef,
-        where("userId", "==", userId),
-        orderBy("timestamp", "desc")
-      );
-      const messagesSnapshot = await getDocs(messagesQuery);
       
-      console.log(`📨 Found ${messagesSnapshot.size} existing messages for user ${userId}`);
+      // Try userId field first
+      let messagesQuery = query(messagesRef, where("userId", "==", userId));
+      let messagesSnapshot = await getDocs(messagesQuery);
+      
+      // Also check userID field (mobile app might use this)
+      const messagesQuery2 = query(messagesRef, where("userID", "==", userId));
+      const messagesSnapshot2 = await getDocs(messagesQuery2);
+      
+      // Merge results and deduplicate
+      const allMessages = new Map();
+      messagesSnapshot.docs.forEach(doc => allMessages.set(doc.id, doc));
+      messagesSnapshot2.docs.forEach(doc => allMessages.set(doc.id, doc));
+      
+      // Sort by timestamp client-side to get the latest message
+      const sortedMessages = Array.from(allMessages.values()).sort((a, b) => {
+        const getTimestamp = (doc: any) => {
+          const ts = doc.data().timestamp;
+          if (ts?.toDate) return ts.toDate().getTime();
+          if (ts instanceof Date) return ts.getTime();
+          if (typeof ts === 'number') return ts;
+          return 0;
+        };
+        return getTimestamp(b) - getTimestamp(a); // Descending order
+      });
+      
+      console.log(`📨 Found ${allMessages.size} existing messages for user ${userId}`);
       
       // Prepare chat metadata with all user information
       // Handle different field names for profile picture
@@ -695,8 +744,8 @@ export function ChatSupportPage() {
       };
       
       // If messages exist, populate with last message info
-      if (!messagesSnapshot.empty) {
-        const lastMessage = messagesSnapshot.docs[0].data();
+      if (sortedMessages.length > 0) {
+        const lastMessage = sortedMessages[0].data();
         chatData.lastMessage = lastMessage.message || lastMessage.content || "";
         chatData.lastMessageTime = lastMessage.timestamp || serverTimestamp();
         chatData.lastMessageSenderName = lastMessage.senderName || "";
@@ -1551,7 +1600,7 @@ export function ChatSupportPage() {
                                 </div>
                               )}
                               
-                              <div className={`flex flex-col gap-1 ${isAdmin ? 'ite ms-end' : 'items-start'} max-w-[70%]`}>
+                              <div className={`flex flex-col gap-1 ${isAdmin ? 'items-end' : 'items-start'} max-w-[70%]`}>
                                 {/* Image attachment - just the image, no background */}
                                 {msg.imageUrl && (
                                   <div className="relative group">

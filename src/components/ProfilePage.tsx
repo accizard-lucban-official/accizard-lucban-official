@@ -9,12 +9,13 @@ import { User, Camera, Check, X, Briefcase, Building, MapPin, Hash, AtSign, Plus
 import { Layout } from "./Layout";
 import { useNavigate } from "react-router-dom";
 import { db, auth, storage } from "@/lib/firebase";
-import { updateProfile, updateEmail } from "firebase/auth";
+import { updateProfile, updateEmail, signOut } from "firebase/auth";
 import { collection, query, where, getDocs, doc, updateDoc, addDoc, deleteDoc, orderBy, limit, serverTimestamp, Timestamp } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { toast } from "@/components/ui/sonner";
 import { useUserRole } from "@/hooks/useUserRole";
 import { SUPER_ADMIN_EMAIL } from "@/lib/utils";
+import { SessionManager } from "@/lib/sessionManager";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   Dialog,
@@ -158,9 +159,20 @@ export function ProfilePage() {
     }
   };
 
-  const handleSignOut = () => {
-    console.log("Signing out...");
-    navigate('/login');
+  const handleSignOut = async () => {
+    try {
+      // Clear session using SessionManager
+      SessionManager.clearSession();
+      
+      // Sign out from Firebase Auth (for super admins)
+      await signOut(auth);
+      
+      toast.success("You have been logged out successfully");
+      navigate("/login");
+    } catch (error) {
+      console.error("Sign out error:", error);
+      toast.error("Error during logout. Please try again.");
+    }
   };
 
   // Confirm profile picture change
