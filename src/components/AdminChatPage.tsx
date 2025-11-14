@@ -13,6 +13,7 @@ import { useFileUpload } from "@/hooks/useFileUpload";
 import { formatFileSize, isImageFile, isVideoFile, isAudioFile } from "@/lib/storage";
 import { useUserRole } from "@/hooks/useUserRole";
 import { getStorage, ref, deleteObject, listAll } from "firebase/storage";
+import { SessionManager } from "@/lib/sessionManager";
 
 interface ChatMessage {
   id: string;
@@ -68,7 +69,8 @@ export function AdminChatPage() {
     
     try {
       const messagesRef = collection(db, "admin_chat_messages");
-      const q = query(messagesRef, orderBy("timestamp", "asc"));
+      // Remove orderBy to avoid composite index requirement - we sort client-side anyway
+      const q = query(messagesRef);
 
       const unsubscribe = onSnapshot(q, async (snapshot) => {
         console.log("📨 Admin chat - Raw snapshot data:", snapshot.docs.length, "messages");
@@ -132,11 +134,20 @@ export function AdminChatPage() {
   // Mark messages as read (from other admins)
   const markMessagesAsRead = async (messagesToMark: ChatMessage[]) => {
     try {
-      if (!currentUser) return;
+      // Check both Firebase Auth and SessionManager for authentication
+      const currentUser = auth.currentUser;
+      const sessionUser = SessionManager.getCurrentUser();
+      const isAuthenticated = currentUser || SessionManager.isAuthenticated();
+      
+      if (!isAuthenticated) return;
+
+      // Get current admin identifier (Firebase UID or SessionManager userId/username)
+      const currentAdminId = currentUser?.uid || (sessionUser ? `admin-${sessionUser.userId || sessionUser.username}` : null);
+      if (!currentAdminId) return;
 
       // Filter messages that are from other admins and not already read
       const unreadMessages = messagesToMark.filter(
-        msg => msg.senderId !== currentUser.uid && !msg.isRead
+        msg => msg.senderId !== currentAdminId && !msg.isRead
       );
 
       if (unreadMessages.length === 0) return;
@@ -207,21 +218,29 @@ export function AdminChatPage() {
       return;
     }
 
+    // Check authentication - support both Firebase Auth and SessionManager
+    const currentUser = auth.currentUser;
+    const sessionUser = SessionManager.getCurrentUser();
+    const isAuthenticated = currentUser || SessionManager.isAuthenticated();
+    
+    if (!isAuthenticated) {
+      toast.error("You must be logged in to send messages");
+      return;
+    }
+
     setSendingMessage(true);
     setUploadingFile(true);
     
     try {
-      if (!currentUser) {
-        toast.error("You must be logged in to send messages");
-        return;
-      }
-
       const adminName =
         (userRole?.name && userRole.name.trim().length > 0 ? userRole.name : null) ||
-        currentUser.displayName ||
-        currentUser.email ||
+        sessionUser?.name ||
+        currentUser?.displayName ||
+        currentUser?.email ||
+        sessionUser?.username ||
         "Admin";
-      const adminId = currentUser.uid;
+      // Use Firebase Auth UID if available, otherwise use SessionManager userId/username with admin- prefix
+      const adminId = currentUser?.uid || (sessionUser ? `admin-${sessionUser.userId || sessionUser.username}` : "admin");
       const senderRole =
         userRole?.position ||
         (userRole?.userType === "superadmin"
@@ -519,7 +538,9 @@ export function AdminChatPage() {
                 </div>
               ) : (
                 filteredMessages.map((msg) => {
-                  const isCurrentUser = msg.senderId === currentUser?.uid;
+                  // Check if message is from current admin (support both Firebase Auth and SessionManager)
+                  const currentAdminId = currentUser?.uid || (SessionManager.getCurrentUser() ? `admin-${SessionManager.getCurrentUser()?.userId || SessionManager.getCurrentUser()?.username}` : null);
+                  const isCurrentUser = msg.senderId === currentAdminId;
                   const messageTime = formatTime(msg.timestamp);
                   
                   return (
@@ -527,8 +548,8 @@ export function AdminChatPage() {
                       key={msg.id}
                       className={`flex gap-2 ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
                     >
-                      {/* Admin profile picture (only for other admins' messages without attachments) */}
-                      {!isCurrentUser && !msg.imageUrl && !msg.videoUrl && !msg.audioUrl && !msg.fileUrl && (
+                      {/* Admin profile picture (for all other admins' messages) */}
+                      {!isCurrentUser && (
                         <div className="flex-shrink-0">
                           {msg.profilePictureUrl ? (
                             <img
@@ -550,7 +571,7 @@ export function AdminChatPage() {
                       <div className={`flex flex-col gap-1 ${isCurrentUser ? 'items-end' : 'items-start'} max-w-[70%]`}>
                         {/* Image attachment */}
                         {msg.imageUrl && (
-                          <div className="relative group">
+                          <div className="relative group" title={messageTime}>
                             <img 
                               src={msg.imageUrl} 
                               alt="Attachment" 
@@ -571,7 +592,7 @@ export function AdminChatPage() {
                         
                         {/* Video attachment */}
                         {msg.videoUrl && (
-                          <div className="relative group">
+                          <div className="relative group" title={messageTime}>
                             <video 
                               controls 
                               className="max-w-full rounded-lg"
@@ -593,7 +614,7 @@ export function AdminChatPage() {
                         
                         {/* Audio attachment */}
                         {msg.audioUrl && (
-                          <div className="relative group">
+                          <div className="relative group" title={messageTime}>
                             <audio 
                               controls 
                               className="max-w-full rounded-lg"
@@ -614,7 +635,7 @@ export function AdminChatPage() {
                         
                         {/* File attachment */}
                         {msg.fileUrl && (
-                          <div className="relative group">
+                          <div className="relative group" title={messageTime}>
                             <a 
                               href={msg.fileUrl} 
                               target="_blank" 
@@ -641,7 +662,7 @@ export function AdminChatPage() {
                         
                         {/* Text message bubble */}
                         {!msg.fileUrl && msg.message && (
-                          <div className="relative group">
+                          <div className="relative group" title={messageTime}>
                             <div
                               className={`rounded-lg px-4 py-2 ${
                                 isCurrentUser

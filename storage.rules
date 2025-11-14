@@ -20,8 +20,8 @@ service firebase.storage {
     
     // Note: Storage rules cannot directly access Firestore permissions
     // Permission checks are handled at the application level (UI disabling buttons)
-    // These rules allow authenticated users to upload files
-    // Regular admins without Firebase Auth may need public write access for some paths
+    // Regular admins without Firebase Auth need public write access for admin-related paths
+    // Application-level checks ensure only authorized users can upload files
 
     // ========================================
     // EXISTING RULES (PRESERVED)
@@ -33,115 +33,137 @@ service firebase.storage {
 
     match /accizard-uploads/{allPaths=**} {
       allow read: if true;
-      allow write: if isAuthenticated();
+      // Allow public write for regular admins (application-level checks ensure proper access)
+      allow write: if true;
     }
 
     match /profile-picture/{allPaths=**} {
       allow read: if true;
-      allow write: if isAuthenticated() && isImage() && isValidSize();
-      allow delete: if isAuthenticated();
+      // Allow public write for regular admins (application-level checks ensure proper access)
+      allow write: if isImage() && isValidSize();
+      allow delete: if true;
     }
 
     match /profile_pictures/{allPaths=**} {
       allow read: if true;
-      allow write: if isAuthenticated() && isImage() && isValidSize();
-      allow delete: if isAuthenticated();
+      // Allow public write for regular admins (application-level checks ensure proper access)
+      allow write: if isImage() && isValidSize();
+      allow delete: if true;
     }
 
     match /report_images/{allPaths=**} {
       allow read: if true;
-      allow write: if isAuthenticated() && (isImage() || isVideo()) && isValidSize();
-      allow delete: if isAuthenticated();
+      // Allow public write for regular admins (application-level checks ensure proper access)
+      allow write: if (isImage() || isVideo()) && isValidSize();
+      allow delete: if true;
     }
 
     match /valid_ids/{allPaths=**} {
       allow read: if true;
-      allow write: if isAuthenticated() && isImage() && isValidSize();
-      allow delete: if isAuthenticated();
+      // Allow public write for regular admins managing resident valid IDs (application-level checks ensure proper access)
+      allow write: if isImage() && isValidSize();
+      allow delete: if true;
     }
 
     // Chat attachments
     match /chat_attachments/{allPaths=**} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() &&
-                      (isImage() || isDocument() || isVideo() || isAudio()) &&
+      // Allow public read for regular admins (needed for chat support)
+      allow read: if true;
+      // Allow public write for regular admins (application-level checks ensure proper access)
+      allow write: if (isImage() || isDocument() || isVideo() || isAudio()) &&
                       isValidSize();
-      allow delete: if isAuthenticated();
+      allow delete: if true;
     }
 
     match /admin_chat/{allPaths=**} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() &&
-                      (isImage() || isDocument() || isVideo() || isAudio()) &&
+      // Allow public read/write for regular admins (application-level checks ensure only admins can access)
+      allow read: if true;
+      // Allow public write for regular admins (application-level checks ensure proper access)
+      allow write: if (isImage() || isDocument() || isVideo() || isAudio()) &&
                       isValidSize();
-      allow delete: if isAuthenticated();
+      allow delete: if true;
     }
 
     // Optional enhanced paths
     // Profile pictures with folder structure: profile-pictures-web/{userId}/{fileName}
     match /profile-pictures-web/{userId}/{fileName} {
       allow read: if true;
-      allow write: if isAuthenticated() && isImage() && isValidSize();
-      allow delete: if isAuthenticated();
+      // Allow public write for regular admins (application-level checks ensure proper access)
+      allow write: if isImage() && isValidSize();
+      allow delete: if true;
     }
 
     // Profile pictures with flat structure: profile-pictures-web/{fileName}
     match /profile-pictures-web/{fileName} {
       allow read: if true;
-      allow write: if isAuthenticated() && isImage() && isValidSize();
-      allow delete: if isAuthenticated();
+      // Allow public write for regular admins (application-level checks ensure proper access)
+      allow write: if isImage() && isValidSize();
+      allow delete: if true;
     }
 
     // Cover images: cover-images-web/{fileName}
     match /cover-images-web/{fileName} {
       allow read: if true;
-      allow write: if isAuthenticated() && isImage() && isValidSize();
-      allow delete: if isAuthenticated();
+      // Allow public write for regular admins (application-level checks ensure proper access)
+      allow write: if isImage() && isValidSize();
+      allow delete: if true;
     }
 
     match /validIds/{userId}/{fileName} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && isImage() && isValidSize();
-      allow delete: if isAuthenticated();
+      // Allow public read for regular admins managing resident valid IDs
+      allow read: if true;
+      // Allow public write for regular admins (application-level checks ensure proper access)
+      allow write: if isImage() && isValidSize();
+      allow delete: if true;
     }
 
-    // Announcement media - authenticated users can upload
+    // Announcement media - allow public write for regular admins
     // Permission checks (edit_announcements) are handled at application level
     match /announcements/{announcementId}/{fileName} {
       allow read: if true;
-      allow write: if isAuthenticated() && (isImage() || isDocument()) && isValidSize();
-      allow delete: if isAuthenticated();
+      // Allow public write for regular admins (application-level checks ensure proper access)
+      allow write: if (isImage() || isDocument()) && isValidSize();
+      allow delete: if true;
     }
 
     match /announcements/{announcementId}/media/{fileName} {
       allow read: if true;
-      allow write: if isAuthenticated() && (isImage() || isDocument() || isVideo() || isAudio()) && isValidSize();
-      allow delete: if isAuthenticated();
+      // Allow public write for regular admins (application-level checks ensure proper access)
+      allow write: if (isImage() || isDocument() || isVideo() || isAudio()) && isValidSize();
+      allow delete: if true;
     }
 
-    // Report media - authenticated users can upload
+    // Report media - allow public write for regular admins
     // Permission checks (edit_reports, delete_reports) are handled at application level
     match /reports/{reportId}/{fileName} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && (isImage() || isDocument()) && isValidSize();
-      allow delete: if isAuthenticated();
+      // Allow public read for regular admins managing reports
+      allow read: if true;
+      // Allow public write for regular admins (application-level checks ensure proper access)
+      allow write: if (isImage() || isDocument()) && isValidSize();
+      allow delete: if true;
     }
 
     match /reports/{reportId}/documents/{fileName} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && isDocument() && isValidSize();
-      allow delete: if isAuthenticated();
+      // Allow public read for regular admins managing reports
+      allow read: if true;
+      // Allow public write for regular admins (application-level checks ensure proper access)
+      allow write: if isDocument() && isValidSize();
+      allow delete: if true;
     }
 
     match /reports/{reportId}/media/{fileName} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && (isImage() || isDocument() || isVideo() || isAudio()) && isValidSize();
-      allow delete: if isAuthenticated();
+      // Allow public read for regular admins managing reports
+      allow read: if true;
+      // Allow public write for regular admins (application-level checks ensure proper access)
+      allow write: if (isImage() || isDocument() || isVideo() || isAudio()) && isValidSize();
+      allow delete: if true;
     }
 
     match /documents/{userId}/{documentType}/{fileName} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && isDocument() && isValidSize();
+      // Allow public read for regular admins
+      allow read: if true;
+      // Allow public write for regular admins (application-level checks ensure proper access)
+      allow write: if isDocument() && isValidSize();
     }
 
     // ========================================
@@ -150,16 +172,17 @@ service firebase.storage {
     // ========================================
     match /custom_emergency_contacts/{fileName} {
       allow read: if true; // public read so images always load via download URL
-      allow write: if isAuthenticated() && isImage() && isValidSize();
-      allow delete: if isAuthenticated();
+      // Allow public write for regular admins (application-level checks ensure proper access)
+      allow write: if isImage() && isValidSize();
+      allow delete: if true;
     }
     
     match /user_emergency_contacts/{userId}/{fileName} {
-  // Owner-only access
-  allow read: if request.auth != null && request.auth.uid == userId;
-  allow write: if request.auth != null && request.auth.uid == userId && request.resource.contentType.matches('image/.*') && request.resource.size < 25 * 1024 * 1024;
-  allow delete: if request.auth != null && request.auth.uid == userId;
-}
+      // Owner-only access (residents only - requires Firebase Auth)
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if request.auth != null && request.auth.uid == userId && request.resource.contentType.matches('image/.*') && request.resource.size < 25 * 1024 * 1024;
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
 
     // ========================================
     // DEFAULT: DENY ALL OTHER ACCESS

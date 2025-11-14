@@ -15,6 +15,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "@/components/ui/sonner";
 import { useFileUpload } from "@/hooks/useFileUpload";
 import { formatFileSize, isImageFile, isVideoFile, isAudioFile } from "@/lib/storage";
+import { SessionManager } from "@/lib/sessionManager";
 
 interface ChatMessage {
   id: string;
@@ -440,8 +441,12 @@ export function ChatSupportPage() {
   // Mark messages as read
   const markMessagesAsRead = async (messagesToMark: ChatMessage[]) => {
     try {
+      // Check both Firebase Auth and SessionManager for authentication
       const currentUser = auth.currentUser;
-      if (!currentUser) return;
+      const sessionUser = SessionManager.getCurrentUser();
+      const isAuthenticated = currentUser || SessionManager.isAuthenticated();
+      
+      if (!isAuthenticated) return;
 
       const sessionUserIds = Array.from(
         new Set(
@@ -875,14 +880,25 @@ export function ChatSupportPage() {
       return;
     }
 
+    // Check authentication - support both Firebase Auth and SessionManager
+    const currentUser = auth.currentUser;
+    const sessionUser = SessionManager.getCurrentUser();
+    const isAuthenticated = currentUser || SessionManager.isAuthenticated();
+    
+    if (!isAuthenticated) {
+      toast.error("You must be logged in to send messages");
+      return;
+    }
+
     setSendingMessage(true);
     setUploadingFile(true);
     
     try {
-      const currentUser = auth.currentUser;
       // All admin messages show as "AcciZard Lucban" for consistent branding
       const adminName = "AcciZard Lucban";
-      const adminId = currentUser?.uid || "admin";
+      // Use a consistent admin identifier: Firebase Auth UID if available, otherwise use "admin-{userId}" format
+      // This ensures admin messages are always identified correctly and don't conflict with user IDs
+      const adminId = currentUser?.uid || (sessionUser ? `admin-${sessionUser.userId || sessionUser.username}` : "admin");
 
       // Upload all attachments
       const uploadedFiles: Array<{url: string, fileName: string, fileSize: number, fileType: string, isImage: boolean, isVideo: boolean, isAudio: boolean}> = [];
@@ -1536,14 +1552,20 @@ export function ChatSupportPage() {
                         messages.map((msg) => {
                           // Check if message is from admin by comparing senderId with user IDs
                           // User messages: senderId matches userId/id/firebaseUid of selected session
-                          // Admin messages: senderId is different (admin's uid)
+                          // Admin messages: senderId is different (admin's uid) or starts with "admin-"
                           const userIds = [
                             selectedSession?.userId,
                             selectedSession?.id,
                             selectedSession?.firebaseUid
                           ].filter(Boolean);
                           
-                          const isAdmin = !userIds.includes(msg.senderId);
+                          // Message is from admin if:
+                          // 1. senderId doesn't match any user ID, OR
+                          // 2. senderId starts with "admin-", OR
+                          // 3. senderName is "AcciZard Lucban" (admin branding)
+                          const isAdmin = !userIds.includes(msg.senderId) || 
+                                         (typeof msg.senderId === 'string' && msg.senderId.startsWith('admin-')) ||
+                                         msg.senderName === "AcciZard Lucban";
                           
                           // Check if this message matches the search query
                           const isSearchMatch = searchMatchingMessages.some(m => m.id === msg.id);
