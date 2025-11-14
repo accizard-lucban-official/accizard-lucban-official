@@ -67,18 +67,52 @@ export function AdminChatPage() {
   useEffect(() => {
     setLoadingMessages(true);
     
+    // Log authentication status for debugging
+    const sessionUser = SessionManager.getCurrentUser();
+    const isAuthenticated = currentUser || SessionManager.isAuthenticated();
+    console.log("🔐 Admin chat - Auth status:", {
+      hasFirebaseAuth: !!currentUser,
+      hasSessionAuth: !!sessionUser,
+      isAuthenticated,
+      userId: currentUser?.uid || sessionUser?.userId || sessionUser?.username
+    });
+    
     try {
       const messagesRef = collection(db, "admin_chat_messages");
       // Remove orderBy to avoid composite index requirement - we sort client-side anyway
       const q = query(messagesRef);
 
+      console.log("📡 Admin chat - Setting up listener for admin_chat_messages collection");
+
       const unsubscribe = onSnapshot(q, async (snapshot) => {
-        console.log("📨 Admin chat - Raw snapshot data:", snapshot.docs.length, "messages");
+        console.log("📨 Admin chat - Snapshot received:", {
+          hasPendingWrites: snapshot.metadata.hasPendingWrites,
+          fromCache: snapshot.metadata.fromCache,
+          docCount: snapshot.docs.length,
+          empty: snapshot.empty
+        });
         
-        const messagesData = snapshot.docs.map(msgDoc => ({
-          id: msgDoc.id,
-          ...msgDoc.data()
-        })) as ChatMessage[];
+        if (snapshot.empty) {
+          console.log("⚠️ Admin chat - Snapshot is empty (no messages found)");
+          setMessages([]);
+          setLoadingMessages(false);
+          return;
+        }
+        
+        const messagesData = snapshot.docs.map(msgDoc => {
+          const data = msgDoc.data();
+          console.log("📝 Admin chat - Message data:", {
+            id: msgDoc.id,
+            senderId: data.senderId,
+            senderName: data.senderName,
+            hasMessage: !!data.message,
+            hasTimestamp: !!data.timestamp
+          });
+          return {
+            id: msgDoc.id,
+            ...data
+          };
+        }) as ChatMessage[];
         
         // CLIENT-SIDE SORTING: Ensure messages are properly sorted by timestamp
         messagesData.sort((a, b) => {
@@ -103,7 +137,7 @@ export function AdminChatPage() {
           return timeA - timeB; // Sort ascending (oldest first)
         });
         
-        console.log("💬 Admin chat - Sorted messages:", messagesData.length);
+        console.log("💬 Admin chat - Processed and sorted messages:", messagesData.length);
         setMessages(messagesData);
         setLoadingMessages(false);
         
@@ -115,13 +149,26 @@ export function AdminChatPage() {
           messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
         }, 100);
       }, (error) => {
-        console.error("Error loading admin chat messages:", error);
+        console.error("❌ Admin chat - Error in snapshot listener:", {
+          code: error.code,
+          message: error.message,
+          stack: error.stack
+        });
+        toast.error(`Failed to load messages: ${error.message}`);
         setLoadingMessages(false);
       });
 
-      return () => unsubscribe();
-    } catch (error) {
-      console.error("❌ Error setting up admin chat listener:", error);
+      return () => {
+        console.log("🛑 Admin chat - Cleaning up listener");
+        unsubscribe();
+      };
+    } catch (error: any) {
+      console.error("❌ Admin chat - Error setting up listener:", {
+        error,
+        message: error?.message,
+        stack: error?.stack
+      });
+      toast.error(`Failed to set up message listener: ${error?.message || 'Unknown error'}`);
       setLoadingMessages(false);
     }
   }, []);
@@ -292,7 +339,7 @@ export function AdminChatPage() {
           message: message.trim() || "Message",
           timestamp: serverTimestamp(),
           isRead: false,
-          profilePictureUrl: userRole?.profilePicture || currentUser.photoURL || ""
+          profilePictureUrl: userRole?.profilePicture || currentUser?.photoURL || sessionUser?.profilePicture || ""
         };
 
         await addDoc(collection(db, "admin_chat_messages"), messageData);
@@ -315,7 +362,7 @@ export function AdminChatPage() {
           fileName: file.fileName,
           fileSize: file.fileSize,
           fileType: file.fileType,
-          profilePictureUrl: userRole?.profilePicture || currentUser.photoURL || ""
+          profilePictureUrl: userRole?.profilePicture || currentUser?.photoURL || sessionUser?.profilePicture || ""
         };
 
         if (file.isImage) {

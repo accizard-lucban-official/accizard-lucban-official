@@ -9,12 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useEffect, useState } from "react";
-import { getAuth } from "firebase/auth";
-import { db } from "@/lib/firebase";
-import { collection, query, orderBy, limit, getDocs, where } from "firebase/firestore";
-import { Bell } from "lucide-react";
 import { useUserRole } from "@/hooks/useUserRole";
-import { SUPER_ADMIN_EMAIL } from "@/lib/utils";
 
 interface PageHeaderProps {
   title: string;
@@ -33,10 +28,6 @@ export function PageHeader({
   });
   const { userRole, loading: roleLoading } = useUserRole();
 
-  // Notifications state
-  const [notifications, setNotifications] = useState<any[]>([]);
-  const [notifLoading, setNotifLoading] = useState(false);
-
   useEffect(() => {
     if (userRole && !roleLoading) {
       setUser({
@@ -47,48 +38,6 @@ export function PageHeader({
     }
   }, [userRole, roleLoading]);
 
-  useEffect(() => {
-    async function fetchNotifications() {
-      setNotifLoading(true);
-      // Fetch latest 3 reports
-      const reportsSnap = await getDocs(query(collection(db, "reports"), orderBy("createdAt", "desc"), limit(3)));
-      const reports = reportsSnap.docs.map(doc => ({
-        type: "report",
-        id: doc.id,
-        ...doc.data()
-      }));
-      // Fetch latest 3 users
-      const usersSnap = await getDocs(query(collection(db, "users"), orderBy("createdDate", "desc"), limit(3)));
-      const users = usersSnap.docs.map(doc => ({
-        type: "user",
-        id: doc.id,
-        ...doc.data()
-      }));
-      // Fetch latest 3 chat notifications (mocked as 'chats' collection)
-      let chats: any[] = [];
-      try {
-        const chatsSnap = await getDocs(query(collection(db, "chats"), orderBy("createdAt", "desc"), limit(3)));
-        chats = chatsSnap.docs.map(doc => ({
-          type: "chat",
-          id: doc.id,
-          ...doc.data()
-        }));
-      } catch {}
-      setNotifications([
-        ...reports,
-        ...users,
-        ...chats
-      ].sort((a, b) => {
-        // Sort by createdAt/createdDate desc
-        const aDate = a.createdAt || a.createdDate || 0;
-        const bDate = b.createdAt || b.createdDate || 0;
-        return bDate > aDate ? 1 : bDate < aDate ? -1 : 0;
-      }));
-      setNotifLoading(false);
-    }
-    fetchNotifications();
-  }, []);
-
   return (
     <div className="px-8 py-4 bg-brand-orange">
       <div className="flex justify-between items-center">
@@ -97,53 +46,6 @@ export function PageHeader({
         </div>
 
         <div className="flex items-center gap-4">
-          {/* Notifications Button */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button className="relative p-2 rounded-full hover:bg-white/20 focus:outline-none">
-                <Bell className="h-6 w-6 text-white" />
-                {notifications.length > 0 && (
-                  <span className="absolute top-1 right-1 block h-2 w-2 rounded-full bg-red-500"></span>
-                )}
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-80 max-w-xs">
-              <DropdownMenuLabel>Notifications</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              {notifLoading ? (
-                <div className="p-4 text-center text-gray-500 text-sm">Loading...</div>
-              ) : notifications.length === 0 ? (
-                <div className="p-4 text-center text-gray-500 text-sm">No notifications</div>
-              ) : (
-                notifications.slice(0, 9).map((notif, i) => (
-                  <DropdownMenuItem key={notif.type + notif.id + i} className="flex flex-col items-start gap-1 py-2">
-                    {notif.type === "report" && (
-                      <>
-                        <span className="font-medium text-orange-600">New Report Submitted</span>
-                        <span className="text-xs text-gray-700 truncate w-full">{notif.title || notif.description || notif.type}</span>
-                        <span className="text-xs text-gray-400">{notif.createdAt ? new Date(notif.createdAt).toLocaleString() : ""}</span>
-                      </>
-                    )}
-                    {notif.type === "user" && (
-                      <>
-                        <span className="font-medium text-blue-600">New User Registered</span>
-                        <span className="text-xs text-gray-700 truncate w-full">{notif.fullName || notif.name || notif.username}</span>
-                        <span className="text-xs text-gray-400">{notif.createdDate ? notif.createdDate : ""}</span>
-                      </>
-                    )}
-                    {notif.type === "chat" && (
-                      <>
-                        <span className="font-medium text-green-600">New Chat Message</span>
-                        <span className="text-xs text-gray-700 truncate w-full">{notif.message || notif.lastMessage || notif.type}</span>
-                        <span className="text-xs text-gray-400">{notif.createdAt ? new Date(notif.createdAt).toLocaleString() : ""}</span>
-                      </>
-                    )}
-                  </DropdownMenuItem>
-                ))
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-
           <DropdownMenu>
             <DropdownMenuTrigger className="flex items-center space-x-3 hover:bg-white/20 rounded-lg px-3 py-2 transition-colors">
               <div className="text-sm text-right">

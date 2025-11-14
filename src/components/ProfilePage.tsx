@@ -16,7 +16,7 @@ import { toast } from "@/components/ui/sonner";
 import { useUserRole } from "@/hooks/useUserRole";
 import { SUPER_ADMIN_EMAIL } from "@/lib/utils";
 import { SessionManager } from "@/lib/sessionManager";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { logActivity, ActionType } from "@/lib/activityLogger";
 import {
   Dialog,
   DialogContent,
@@ -161,6 +161,16 @@ export function ProfilePage() {
 
   const handleSignOut = async () => {
     try {
+      // Log logout activity before clearing session (so we can still get user info)
+      await logActivity({
+        actionType: ActionType.LOGOUT,
+        action: "User logged out",
+        entityType: "session",
+        metadata: {
+          logoutMethod: "manual"
+        }
+      });
+      
       // Clear session using SessionManager
       SessionManager.clearSession();
       
@@ -389,17 +399,117 @@ export function ProfilePage() {
   // Fetch personal activity logs
   useEffect(() => {
     async function fetchLogs() {
-      if (!profile.username) return;
+      if (!profile.name && !profile.username) return;
       setLogsLoading(true);
       try {
-        const q = query(
-          collection(db, "activityLogs"),
-          where("username", "==", profile.username),
-          orderBy("timestamp", "desc"),
-          limit(10)
-        );
-        const snap = await getDocs(q);
-        setActivityLogs(snap.docs.map(doc => ({ ...doc.data(), id: doc.id })));
+        // Activity logs store the name in 'admin' or 'actor' fields
+        const userName = profile.name || profile.username;
+        if (!userName) return;
+        
+        // Fetch logs where admin OR actor matches the user's name
+        // Since Firestore doesn't support OR in a single query, we'll fetch both and merge
+        const allLogs: any[] = [];
+        const seenIds = new Set<string>();
+        
+        const convertTimestamp = (timestamp: any): Date | null => {
+          if (!timestamp) return null;
+          if (timestamp instanceof Date) return timestamp;
+          if (timestamp?.toDate && typeof timestamp.toDate === 'function') {
+            return timestamp.toDate();
+          }
+          if (timestamp instanceof Timestamp) {
+            return timestamp.toDate();
+          }
+          if (timestamp?.seconds) {
+            return new Date(timestamp.seconds * 1000);
+          }
+          try {
+            return new Date(timestamp);
+          } catch {
+            return null;
+          }
+        };
+        
+        // Fetch logs by admin field
+        try {
+          const q1 = query(
+            collection(db, "activityLogs"),
+            where("admin", "==", userName),
+            orderBy("timestamp", "desc"),
+            limit(20)
+          );
+          const snap1 = await getDocs(q1);
+          snap1.docs.forEach(doc => {
+            if (!seenIds.has(doc.id)) {
+              const data = doc.data();
+              const timestamp = convertTimestamp(data.timestamp);
+              allLogs.push({ ...data, id: doc.id, timestamp });
+              seenIds.add(doc.id);
+            }
+          });
+        } catch (error: any) {
+          // If query fails (e.g., missing index), try without orderBy
+          if (error.code === 'failed-precondition') {
+            const q1b = query(
+              collection(db, "activityLogs"),
+              where("admin", "==", userName)
+            );
+            const snap1b = await getDocs(q1b);
+            snap1b.docs.forEach(doc => {
+              if (!seenIds.has(doc.id)) {
+                const data = doc.data();
+                const timestamp = convertTimestamp(data.timestamp);
+                allLogs.push({ ...data, id: doc.id, timestamp });
+                seenIds.add(doc.id);
+              }
+            });
+          }
+        }
+        
+        // Fetch logs by actor field (in case some logs use actor instead of admin)
+        try {
+          const q2 = query(
+            collection(db, "activityLogs"),
+            where("actor", "==", userName),
+            orderBy("timestamp", "desc"),
+            limit(20)
+          );
+          const snap2 = await getDocs(q2);
+          snap2.docs.forEach(doc => {
+            if (!seenIds.has(doc.id)) {
+              const data = doc.data();
+              const timestamp = convertTimestamp(data.timestamp);
+              allLogs.push({ ...data, id: doc.id, timestamp });
+              seenIds.add(doc.id);
+            }
+          });
+        } catch (error: any) {
+          // If query fails, try without orderBy
+          if (error.code === 'failed-precondition') {
+            const q2b = query(
+              collection(db, "activityLogs"),
+              where("actor", "==", userName)
+            );
+            const snap2b = await getDocs(q2b);
+            snap2b.docs.forEach(doc => {
+              if (!seenIds.has(doc.id)) {
+                const data = doc.data();
+                const timestamp = convertTimestamp(data.timestamp);
+                allLogs.push({ ...data, id: doc.id, timestamp });
+                seenIds.add(doc.id);
+              }
+            });
+          }
+        }
+        
+        // Sort all logs by timestamp (descending) and limit to 20
+        allLogs.sort((a: any, b: any) => {
+          const aTime = a.timestamp instanceof Date ? a.timestamp.getTime() : 0;
+          const bTime = b.timestamp instanceof Date ? b.timestamp.getTime() : 0;
+          return bTime - aTime; // desc order
+        });
+        
+        setActivityLogs(allLogs.slice(0, 20));
       } catch (error) {
         console.error("Error fetching activity logs:", error);
       } finally {
@@ -407,7 +517,7 @@ export function ProfilePage() {
       }
     }
     fetchLogs();
-  }, [profile.username]);
+  }, [profile.name, profile.username]);
 
   // Fetch personal notes
   useEffect(() => {
@@ -907,21 +1017,43 @@ export function ProfilePage() {
                   </Button>
                 )}
               </CardHeader>
-              <CardContent className="flex-1">
+              <CardContent className="flex-1 overflow-y-auto">
                 {logsLoading ? (
                   <div className="text-center text-gray-500 py-8 text-sm">Loading activity logs...</div>
                 ) : activityLogs.length === 0 ? (
                   <div className="text-center text-gray-500 py-8 text-sm">No activity logs found.</div>
                 ) : (
-                  <div className="space-y-2">
-                    {activityLogs.map((log, idx) => (
-                      <div key={idx} className="border-b border-gray-100 pb-2 last:border-0">
-                        <p className="text-sm text-gray-900 mb-1">{log.action || log.details || log.description || '-'}</p>
-                        <p className="text-xs text-gray-400">
-                          {log.timestamp ? new Date(log.timestamp).toLocaleString() : '-'}
-                        </p>
-                      </div>
-                    ))}
+                  <div className="space-y-3">
+                    {activityLogs.map((log, idx) => {
+                      // Format timestamp
+                      let logDate: Date | null = null;
+                      if (log.timestamp instanceof Date) {
+                        logDate = log.timestamp;
+                      } else if (log.timestamp?.toDate && typeof log.timestamp.toDate === 'function') {
+                        logDate = log.timestamp.toDate();
+                      } else if (log.timestamp instanceof Timestamp) {
+                        logDate = log.timestamp.toDate();
+                      } else if (log.timestamp?.seconds) {
+                        logDate = new Date(log.timestamp.seconds * 1000);
+                      } else if (log.timestamp) {
+                        logDate = new Date(log.timestamp);
+                      }
+                      
+                      const formattedDate = logDate ? logDate.toLocaleDateString() : '-';
+                      const formattedTime = logDate ? logDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : '-';
+                      const logMessage = log.action || log.details || log.description || '-';
+                      
+                      return (
+                        <div key={log.id || idx} className="border-b border-gray-100 pb-3 last:border-0">
+                          <p className="text-xs text-gray-500 mb-1">
+                            {formattedDate} • {formattedTime}
+                          </p>
+                          <p className="text-sm text-gray-900 break-words whitespace-normal">
+                            {logMessage}
+                          </p>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </CardContent>

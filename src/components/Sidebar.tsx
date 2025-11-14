@@ -10,6 +10,7 @@ import { preloadRoute } from "@/utils/routePreloader";
 import { useUserRole } from "@/hooks/useUserRole";
 import { SessionManager } from "@/lib/sessionManager";
 import { toast } from "@/components/ui/sonner";
+import { logActivity, ActionType } from "@/lib/activityLogger";
 
 interface SidebarProps {
   isCollapsed: boolean;
@@ -85,6 +86,16 @@ export function Sidebar({ isCollapsed, onCollapse, manageUsersBadge, manageRepor
 
   const handleSignOut = async () => {
     try {
+      // Log logout activity before clearing session (so we can still get user info)
+      await logActivity({
+        actionType: ActionType.LOGOUT,
+        action: "User logged out",
+        entityType: "session",
+        metadata: {
+          logoutMethod: "manual"
+        }
+      });
+      
       // Clear session using SessionManager
       SessionManager.clearSession();
       

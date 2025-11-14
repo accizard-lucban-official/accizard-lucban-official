@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Calendar as DatePickerCalendar } from "@/components/ui/calendar";
-import { Eye, Edit, Trash2, Plus, FileText, Calendar as CalendarIcon, Clock, MapPin, Upload, FileIcon, Image, Printer, Download, X, Search, FileDown, Car, Flame, Ambulance, Waves, Mountain, CircleAlert, Users, ShieldAlert, Activity, ArrowUpRight, ArrowUpDown, ArrowUp, ArrowDown, Layers, ZoomIn, ZoomOut, LocateFixed, Wrench, AlertTriangle, Zap, Leaf, Check, ChevronDown, Info } from "lucide-react";
+import { Eye, Edit, Trash2, Plus, FileText, Calendar as CalendarIcon, Clock, MapPin, Upload, FileIcon, Image, Printer, Download, X, Search, FileDown, Car, Flame, Ambulance, Waves, Mountain, CircleAlert, Users, ShieldAlert, Activity, ArrowUpRight, ArrowUpDown, ArrowUp, ArrowDown, Layers, ZoomIn, ZoomOut, LocateFixed, Wrench, AlertTriangle, Zap, Leaf, Check, ChevronDown, Info, CheckSquare } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -4292,40 +4292,9 @@ useEffect(() => {
                 </SelectContent>
               </Select>
 
-              {/* Action Buttons */}
-              {selectedReports.length > 0 && (
-                canDeleteReports() ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button onClick={handleBatchDelete} variant="destructive" size="sm" className="bg-brand-red hover:bg-brand-red-700 text-white">
-                        <Trash2 className="h-4 w-4 mr-2" />
-                        Delete ({selectedReports.length})
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Delete {selectedReports.length} selected report(s)</p>
-                    </TooltipContent>
-                  </Tooltip>
-                ) : (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span>
-                        <Button disabled variant="destructive" size="sm" className="bg-brand-red hover:bg-brand-red-700 text-white opacity-50 cursor-not-allowed">
-                          <Trash2 className="h-4 w-4 mr-2" />
-                          Delete ({selectedReports.length})
-                        </Button>
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>You don't have permission to delete reports. Contact your super admin for access.</p>
-                    </TooltipContent>
-                  </Tooltip>
-                )
-              )}
-
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button onClick={handleExportCSV} size="sm" variant="outline" className="ml-auto">
+                  <Button onClick={handleExportCSV} size="sm" className="ml-auto bg-green-600 hover:bg-green-700 text-white border-green-600 hover:border-green-700">
                     <FileDown className="h-4 w-4 mr-2" />
                     Export
                   </Button>
@@ -4336,6 +4305,64 @@ useEffect(() => {
               </Tooltip>
             </div>
           </div>
+
+          {/* Bulk Actions Bar */}
+          {selectedReports.length > 0 && (
+            <div className="border-t border-b border-gray-200 bg-white px-6 py-4 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <div className="h-8 w-8 rounded-full bg-brand-orange/10 flex items-center justify-center">
+                      <CheckSquare className="h-4 w-4 text-brand-orange" />
+                    </div>
+                    <div>
+                      <span className="text-sm font-semibold text-gray-900">
+                        {selectedReports.length} report{selectedReports.length !== 1 ? 's' : ''} selected
+                      </span>
+                      <p className="text-xs text-gray-500">Batch actions available</p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelectedReports([])}
+                    className="text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+                  >
+                    Clear selection
+                  </Button>
+                </div>
+                <div className="flex items-center gap-2">
+                  {canDeleteReports() ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button onClick={handleBatchDelete} variant="destructive" size="sm" className="bg-brand-red hover:bg-brand-red-700 text-white">
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Delete ({selectedReports.length})
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>Delete {selectedReports.length} selected report(s)</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span>
+                          <Button disabled variant="destructive" size="sm" className="bg-brand-red hover:bg-brand-red-700 text-white opacity-50 cursor-not-allowed">
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete ({selectedReports.length})
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>You don't have permission to delete reports. Contact your super admin for access.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           <CardContent className="p-0">
             <div className="overflow-x-auto">

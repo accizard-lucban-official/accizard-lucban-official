@@ -4,13 +4,13 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { ChevronUp, ChevronDown, Search, Activity, Users, Clock, Trash2, Download } from "lucide-react";
+import { ChevronUp, ChevronDown, Search, Activity, Users, Clock, Trash2, Download, CheckSquare, ArrowUpRight } from "lucide-react";
 import { Layout } from "./Layout";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { db } from "@/lib/firebase";
-import { collection, onSnapshot, query, orderBy, getDocs, deleteDoc, doc } from "firebase/firestore";
+import { collection, query, orderBy, getDocs, deleteDoc, doc } from "firebase/firestore";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useUserRole } from "@/hooks/useUserRole";
 import { useToast } from "@/components/ui/use-toast";
@@ -18,17 +18,37 @@ import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { DateRange } from "react-day-picker";
 
 // Helper function to format time without seconds
-function formatTimeNoSeconds(time: string | number | null | undefined) {
+function formatTimeNoSeconds(time: string | number | Date | null | undefined | any) {
   if (!time) return '-';
-  let dateObj;
-  if (typeof time === 'number') {
+  let dateObj: Date;
+  
+  // Handle Firestore Timestamp objects
+  if (time?.toDate && typeof time.toDate === 'function') {
+    dateObj = time.toDate();
+  } else if (time instanceof Date) {
+    dateObj = time;
+  } else if (typeof time === 'number') {
     dateObj = new Date(time);
-  } else if (/\d{1,2}:\d{2}:\d{2}/.test(time)) { // e.g. '14:23:45'
-    const today = new Date();
-    dateObj = new Date(`${today.toDateString()} ${time}`);
+  } else if (typeof time === 'string') {
+    if (/\d{1,2}:\d{2}:\d{2}/.test(time)) { // e.g. '14:23:45'
+      const today = new Date();
+      dateObj = new Date(`${today.toDateString()} ${time}`);
+    } else {
+      dateObj = new Date(time);
+    }
   } else {
-    dateObj = new Date(time);
+    // Try to convert if it's a Firestore Timestamp object
+    try {
+      if (time?.toDate && typeof time.toDate === 'function') {
+        dateObj = time.toDate();
+      } else {
+        dateObj = new Date(time);
+      }
+    } catch (e) {
+      return '-';
+    }
   }
+  
   if (isNaN(dateObj.getTime())) return '-';
   return dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
 }
@@ -43,6 +63,7 @@ export function SystemLogsPage() {
   const [actionTypeFilter, setActionTypeFilter] = useState("all");
   const [activityLogs, setActivityLogs] = useState([]);
   const [adminUsers, setAdminUsers] = useState<any[]>([]);
+  const [superAdmins, setSuperAdmins] = useState<any[]>([]);
   const [activitySortDirection, setActivitySortDirection] = useState<'asc' | 'desc'>('desc');
   const [selectedLogs, setSelectedLogs] = useState<string[]>([]);
   const [deletingLogId, setDeletingLogId] = useState<string | null>(null);
@@ -83,6 +104,24 @@ export function SystemLogsPage() {
     fetchAdmins();
   }, []);
 
+  // Fetch super admins for ID number display
+  useEffect(() => {
+    async function fetchSuperAdmins() {
+      try {
+        const querySnapshot = await getDocs(collection(db, "superAdmin"));
+        const superAdminsList = querySnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        setSuperAdmins(superAdminsList);
+      } catch (error) {
+        console.error("Error fetching super admins:", error);
+      }
+    }
+    
+    fetchSuperAdmins();
+  }, []);
+
   // Update search term when URL parameter changes
   useEffect(() => {
     const searchParam = searchParams.get("search");
@@ -91,14 +130,45 @@ export function SystemLogsPage() {
     }
   }, [searchParams]);
 
-  // Real-time listener for activity logs
+  // Fetch activity logs (polling every 30 seconds)
   useEffect(() => {
-    const q = query(collection(db, "activityLogs"), orderBy("timestamp", "desc"));
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      const logs = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setActivityLogs(logs);
-    });
-    return () => unsubscribe();
+    const fetchActivityLogs = async () => {
+      try {
+        const q = query(collection(db, "activityLogs"), orderBy("timestamp", "desc"));
+        const querySnapshot = await getDocs(q);
+        const logs = querySnapshot.docs.map(doc => {
+          const data = doc.data();
+          // Convert Firestore Timestamp to Date if needed
+          let timestamp = data.timestamp;
+          if (timestamp?.toDate && typeof timestamp.toDate === 'function') {
+            timestamp = timestamp.toDate();
+          } else if (timestamp && !(timestamp instanceof Date) && typeof timestamp !== 'number' && typeof timestamp !== 'string') {
+            // Try to convert if it's a Firestore Timestamp object
+            try {
+              timestamp = timestamp.toDate();
+            } catch (e) {
+              // If conversion fails, keep original
+            }
+          }
+          return { 
+            id: doc.id, 
+            ...data,
+            timestamp 
+          };
+        });
+        setActivityLogs(logs);
+      } catch (error) {
+        console.error("Error fetching activity logs:", error);
+      }
+    };
+
+    // Initial fetch
+    fetchActivityLogs();
+
+    // Poll every 30 seconds
+    const interval = setInterval(fetchActivityLogs, 30000);
+
+    return () => clearInterval(interval);
   }, []);
 
   // Filter activity logs based on search and filters
@@ -106,12 +176,18 @@ export function SystemLogsPage() {
     const search = searchTerm.toLowerCase();
     const admin = adminUsers.find(a => a.name === log.admin || a.name === log.actor);
     const adminName = log.admin || log.actor || "";
+    const isSuperAdminUser = log.userRole === 'superadmin';
+    const superAdmin = isSuperAdminUser 
+      ? superAdmins.find(sa => sa.fullName === adminName || sa.name === adminName)
+      : null;
     const adminUserId = admin?.userId || "";
+    const superAdminIdNumber = superAdmin?.idNumber || "";
+    const displayUserId = isSuperAdminUser && superAdminIdNumber ? superAdminIdNumber : adminUserId;
     
     const matchesSearch = 
       log.action?.toLowerCase().includes(search) ||
       adminName.toLowerCase().includes(search) ||
-      adminUserId.toLowerCase().includes(search) ||
+      displayUserId.toLowerCase().includes(search) ||
       log.actionType?.toLowerCase().includes(search) ||
       (admin?.position || admin?.role || "").toLowerCase().includes(search);
     const matchesUser = userFilter === "all" || log.admin === userFilter || log.actor === userFilter;
@@ -120,7 +196,18 @@ export function SystemLogsPage() {
     // Date range filter
     let matchesDateRange = true;
     if (dateRange?.from || dateRange?.to) {
-      const logDate = typeof log.timestamp === 'number' ? new Date(log.timestamp) : new Date(log.timestamp);
+      let logDate: Date;
+      if (log.timestamp instanceof Date) {
+        logDate = log.timestamp;
+      } else if (log.timestamp?.toDate && typeof log.timestamp.toDate === 'function') {
+        logDate = log.timestamp.toDate();
+      } else if (typeof log.timestamp === 'number') {
+        logDate = new Date(log.timestamp);
+      } else if (typeof log.timestamp === 'string') {
+        logDate = new Date(log.timestamp);
+      } else {
+        logDate = new Date();
+      }
       logDate.setHours(0, 0, 0, 0);
       
       if (dateRange.from) {
@@ -141,8 +228,23 @@ export function SystemLogsPage() {
   
   // Sort activity logs
   const sortedActivityLogs = [...filteredActivityLogs].sort((a, b) => {
-    const aTime = typeof a.timestamp === 'number' ? a.timestamp : Date.parse(a.timestamp);
-    const bTime = typeof b.timestamp === 'number' ? b.timestamp : Date.parse(b.timestamp);
+    const getTimestamp = (timestamp: any): number => {
+      if (timestamp instanceof Date) {
+        return timestamp.getTime();
+      } else if (timestamp?.toDate && typeof timestamp.toDate === 'function') {
+        return timestamp.toDate().getTime();
+      } else if (typeof timestamp === 'number') {
+        return timestamp;
+      } else if (typeof timestamp === 'string') {
+        return Date.parse(timestamp);
+      } else {
+        return 0;
+      }
+    };
+    
+    const aTime = getTimestamp(a.timestamp);
+    const bTime = getTimestamp(b.timestamp);
+    
     if (activitySortDirection === 'asc') {
       return aTime - bTime;
     } else {
@@ -288,14 +390,33 @@ export function SystemLogsPage() {
     const rows = filteredActivityLogs.map(log => {
       const admin = adminUsers.find(a => a.name === log.admin || a.name === log.actor);
       const adminName = log.admin || log.actor || "-";
-      const adminUserId = admin?.userId || "-";
-      const role = admin ? admin.position || admin.role || "-" : "-";
-      const logDate = log.timestamp ? new Date(log.timestamp).toLocaleDateString() : "-";
-      const logTime = log.timestamp ? formatTimeNoSeconds(log.timestamp) : "-";
+      const isSuperAdminUser = log.userRole === 'superadmin';
+      const superAdmin = isSuperAdminUser 
+        ? superAdmins.find(sa => sa.fullName === adminName || sa.name === adminName)
+        : null;
+      const displayUserId = isSuperAdminUser && superAdmin?.idNumber 
+        ? superAdmin.idNumber 
+        : (admin?.userId || "-");
+      const role = isSuperAdminUser ? "Super Admin" : (admin ? admin.position || admin.role || "-" : "-");
+      
+      // Convert timestamp to Date for CSV export
+      let logDateObj: Date | null = null;
+      if (log.timestamp instanceof Date) {
+        logDateObj = log.timestamp;
+      } else if (log.timestamp?.toDate && typeof log.timestamp.toDate === 'function') {
+        logDateObj = log.timestamp.toDate();
+      } else if (typeof log.timestamp === 'number') {
+        logDateObj = new Date(log.timestamp);
+      } else if (typeof log.timestamp === 'string') {
+        logDateObj = new Date(log.timestamp);
+      }
+      
+      const logDate = logDateObj ? logDateObj.toLocaleDateString() : "-";
+      const logTime = logDateObj ? formatTimeNoSeconds(logDateObj) : "-";
       
       return [
         log.id || "",
-        adminUserId,
+        displayUserId,
         adminName,
         role,
         logDate,
@@ -380,7 +501,18 @@ export function SystemLogsPage() {
                 <div className="text-right">
                   <p className="text-3xl font-bold text-gray-900">
                     {activityLogs.filter(log => {
-                      const logDate = typeof log.timestamp === 'number' ? new Date(log.timestamp) : new Date(log.timestamp);
+                      let logDate: Date;
+                      if (log.timestamp instanceof Date) {
+                        logDate = log.timestamp;
+                      } else if (log.timestamp?.toDate && typeof log.timestamp.toDate === 'function') {
+                        logDate = log.timestamp.toDate();
+                      } else if (typeof log.timestamp === 'number') {
+                        logDate = new Date(log.timestamp);
+                      } else if (typeof log.timestamp === 'string') {
+                        logDate = new Date(log.timestamp);
+                      } else {
+                        return false;
+                      }
                       const today = new Date();
                       return logDate.toDateString() === today.toDateString();
                     }).length}
@@ -445,6 +577,14 @@ export function SystemLogsPage() {
                       {admin.name}
                     </SelectItem>
                   ))}
+                  {superAdmins.map(superAdmin => {
+                    const name = superAdmin.fullName || superAdmin.name;
+                    return (
+                      <SelectItem key={superAdmin.id} value={name}>
+                        {name}
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
 
@@ -467,8 +607,7 @@ export function SystemLogsPage() {
               {/* Export Button */}
               <Button
                 onClick={handleExportLogs}
-                variant="outline"
-                className="flex items-center gap-2"
+                className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white border-green-600 hover:border-green-700"
                 disabled={filteredActivityLogs.length === 0}
               >
                 <Download className="h-4 w-4" />
@@ -479,17 +618,25 @@ export function SystemLogsPage() {
 
           {/* Bulk Actions Bar */}
           {isSuperAdmin() && selectedLogs.length > 0 && (
-            <div className="border-b border-gray-200 px-6 py-3 bg-orange-50">
+            <div className="border-t border-b border-gray-200 bg-white px-6 py-4 shadow-sm">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <span className="text-sm text-gray-700 font-medium">
-                    {selectedLogs.length} log{selectedLogs.length !== 1 ? 's' : ''} selected
-                  </span>
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <div className="h-8 w-8 rounded-full bg-brand-orange/10 flex items-center justify-center">
+                      <CheckSquare className="h-4 w-4 text-brand-orange" />
+                    </div>
+                    <div>
+                      <span className="text-sm font-semibold text-gray-900">
+                        {selectedLogs.length} log{selectedLogs.length !== 1 ? 's' : ''} selected
+                      </span>
+                      <p className="text-xs text-gray-500">Batch actions available</p>
+                    </div>
+                  </div>
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => setSelectedLogs([])}
-                    className="text-xs"
+                    className="text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-100"
                   >
                     Clear selection
                   </Button>
@@ -547,7 +694,7 @@ export function SystemLogsPage() {
           )}
 
           <CardContent className="p-0">
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto overflow-y-visible">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -568,7 +715,7 @@ export function SystemLogsPage() {
                         {activitySortDirection === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                       </div>
                     </TableHead>
-                    <TableHead>Log Message</TableHead>
+                    <TableHead className="min-w-[300px]">Log Message</TableHead>
                     {isSuperAdmin() && <TableHead>Actions</TableHead>}
                   </TableRow>
                 </TableHeader>
@@ -585,9 +732,16 @@ export function SystemLogsPage() {
                       const admin = adminUsers.find(a => a.name === log.admin || a.name === log.actor);
                       const adminName = log.admin || log.actor || "-";
                       const adminId = admin?.id || "";
-                      const adminUserId = admin?.userId || "-";
                       // Check if user is super admin (from log.userRole field)
                       const isSuperAdminUser = log.userRole === 'superadmin';
+                      // Find super admin by name if it's a super admin
+                      const superAdmin = isSuperAdminUser 
+                        ? superAdmins.find(sa => sa.fullName === adminName || sa.name === adminName)
+                        : null;
+                      // Use idNumber for super admins, otherwise use admin userId
+                      const displayUserId = isSuperAdminUser && superAdmin?.idNumber 
+                        ? superAdmin.idNumber 
+                        : (admin?.userId || "-");
                       const role = isSuperAdminUser ? "Super Admin" : (admin ? admin.position || admin.role || "-" : "-");
                       const logIdNumber = (activityPage - 1) * activityRowsPerPage + index + 1;
                       
@@ -605,28 +759,56 @@ export function SystemLogsPage() {
                             LID - {logIdNumber}
                           </TableCell>
                           <TableCell className="font-medium">
-                            {isSuperAdmin() && adminId ? (
+                            {isSuperAdmin() && (adminId || (isSuperAdminUser && superAdmin?.id)) ? (
                               <button
-                                onClick={() => handleNavigateToAdmin(adminId, adminName)}
-                                className="text-brand-orange hover:text-brand-orange-400 hover:underline transition-colors"
+                                onClick={() => handleNavigateToAdmin(
+                                  isSuperAdminUser && superAdmin?.id ? superAdmin.id : adminId, 
+                                  adminName
+                                )}
+                                className="text-gray-600 hover:text-gray-700 hover:underline transition-colors flex items-center gap-1.5 group"
                               >
-                                {adminUserId} - {adminName}
+                                <span>{displayUserId} - {adminName}</span>
+                                <ArrowUpRight className="h-3.5 w-3.5 text-gray-400 group-hover:text-gray-600 transition-colors flex-shrink-0" />
                               </button>
                             ) : (
-                              <span>{adminUserId} - {adminName}</span>
+                              <span className="text-gray-600">{displayUserId} - {adminName}</span>
                             )}
                           </TableCell>
                           <TableCell>{role}</TableCell>
                           <TableCell>
-                            {log.timestamp ? (
-                              <>
-                                <span>{new Date(log.timestamp).toLocaleDateString()}</span>
-                                <br />
-                                <span className="text-xs text-gray-500">{formatTimeNoSeconds(log.timestamp)}</span>
-                              </>
-                            ) : "-"}
+                            {log.timestamp ? (() => {
+                              // Convert timestamp to Date if needed
+                              let dateObj: Date;
+                              if (log.timestamp instanceof Date) {
+                                dateObj = log.timestamp;
+                              } else if (log.timestamp?.toDate && typeof log.timestamp.toDate === 'function') {
+                                dateObj = log.timestamp.toDate();
+                              } else if (typeof log.timestamp === 'number') {
+                                dateObj = new Date(log.timestamp);
+                              } else if (typeof log.timestamp === 'string') {
+                                dateObj = new Date(log.timestamp);
+                              } else {
+                                try {
+                                  dateObj = log.timestamp?.toDate ? log.timestamp.toDate() : new Date(log.timestamp);
+                                } catch (e) {
+                                  return "-";
+                                }
+                              }
+                              
+                              if (isNaN(dateObj.getTime())) return "-";
+                              
+                              return (
+                                <>
+                                  <span>{dateObj.toLocaleDateString()}</span>
+                                  <br />
+                                  <span className="text-xs text-gray-500">{formatTimeNoSeconds(dateObj)}</span>
+                                </>
+                              );
+                            })() : "-"}
                           </TableCell>
-                          <TableCell className="max-w-xs truncate" title={log.action}>{log.action || '-'}</TableCell>
+                          <TableCell className="min-w-[300px] max-w-md break-words whitespace-normal" title={log.action}>
+                            {log.action || '-'}
+                          </TableCell>
                           {isSuperAdmin() && (
                             <TableCell>
                               <AlertDialog>

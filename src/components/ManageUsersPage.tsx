@@ -1780,15 +1780,59 @@ export function ManageUsersPage() {
   const pagedResidents = filteredResidents.slice((residentPage - 1) * residentRowsPerPage, residentPage * residentRowsPerPage);
   const residentTotalPages = Math.ceil(filteredResidents.length / residentRowsPerPage);
 
+  // Track viewed residents (similar to viewedReports in ManageReportsPage)
+  const [viewedResidents, setViewedResidents] = useState<Set<string>>(() => {
+    // Initialize from localStorage
+    const stored = localStorage.getItem("viewedResidents");
+    return stored ? new Set(JSON.parse(stored)) : new Set();
+  });
+
+  // Save viewed residents to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem("viewedResidents", JSON.stringify(Array.from(viewedResidents)));
+  }, [viewedResidents]);
+
+  // Function to check if a resident is new (within 24 hours and not viewed)
+  const isNewResident = (resident: any) => {
+    try {
+      // Check if resident has already been viewed
+      if (viewedResidents.has(resident.id)) {
+        return false;
+      }
+
+      // Check if resident was created within the last 24 hours
+      if (!resident.createdTime) return false;
+      
+      const createdTime = typeof resident.createdTime === 'number' 
+        ? resident.createdTime 
+        : new Date(resident.createdTime).getTime();
+      
+      const now = Date.now();
+      const diffInHours = (now - createdTime) / (1000 * 60 * 60);
+      
+      return diffInHours <= 24;
+    } catch (error) {
+      console.error("Error checking if resident is new:", error);
+      return false;
+    }
+  };
+
   // Tab click handlers to update last seen timestamps
   const handleResidentsTabClick = () => {
     localStorage.setItem('lastSeenResidentsTab', Date.now().toString());
+    // Mark all visible new residents as viewed when tab is opened
+    pagedResidents.forEach(resident => {
+      if (isNewResident(resident)) {
+        setViewedResidents(prev => new Set(prev).add(resident.id));
+      }
+    });
     setBadgeResetKey(k => k + 1); // force re-render
   };
 
-  // Calculate badge counts (depend on badgeResetKey)
-  const lastSeenResidents = Number(localStorage.getItem('lastSeenResidentsTab') || 0);
-  const newResidentsCount = useMemo(() => residents.filter(r => Number(r.createdTime) > lastSeenResidents).length, [residents, lastSeenResidents, badgeResetKey]);
+  // Calculate badge counts (depend on badgeResetKey) - count unviewed new residents
+  const newResidentsCount = useMemo(() => {
+    return residents.filter(r => isNewResident(r)).length;
+  }, [residents, viewedResidents, badgeResetKey]);
   const manageUsersBadge = newResidentsCount;
 
   // Manage active tab state
@@ -2240,69 +2284,12 @@ export function ManageUsersPage() {
                     </SelectContent>
                   </Select>
 
-                  {/* Batch Action Buttons */}
-            {selectedAdmins.length > 0 && (
-                    <>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                            onClick={() => handleBatchPermission(true)}
-                            className="ml-auto text-green-600 border-green-600 hover:bg-green-50"
-                >
-                            <ShieldCheck className="h-4 w-4 mr-2" />
-                            Grant ({selectedAdmins.length})
-                </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Grant edit permission to {selectedAdmins.length} admin(s)</p>
-                        </TooltipContent>
-                      </Tooltip>
-
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                            onClick={() => handleBatchPermission(false)}
-                            className="text-yellow-600 border-yellow-600 hover:bg-yellow-50"
-                >
-                            <ShieldOff className="h-4 w-4 mr-2" />
-                            Revoke ({selectedAdmins.length})
-                </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Revoke edit permission from {selectedAdmins.length} admin(s)</p>
-                        </TooltipContent>
-                      </Tooltip>
-
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                <Button
-                            variant="destructive"
-                  size="sm"
-                            onClick={() => handleBatchDelete('admin')}
-                            className="bg-brand-red hover:bg-brand-red-700 text-white"
-                >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            Delete ({selectedAdmins.length})
-                </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Delete {selectedAdmins.length} selected admin(s)</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </>
-                  )}
-
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
-                        variant="outline"
                         size="sm"
                         onClick={exportAdminsToCSV}
-                        className="ml-auto flex items-center gap-2"
+                        className="ml-auto flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white border-green-600 hover:border-green-700"
                       >
                         <FileDown className="h-4 w-4" />
                         Export CSV
@@ -2314,6 +2301,87 @@ export function ManageUsersPage() {
                   </Tooltip>
                 </div>
               </div>
+
+              {/* Bulk Actions Bar */}
+              {selectedAdmins.length > 0 && (
+                <div className="border-t border-b border-gray-200 bg-white px-6 py-4 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <div className="h-8 w-8 rounded-full bg-brand-orange/10 flex items-center justify-center">
+                          <CheckSquare className="h-4 w-4 text-brand-orange" />
+                        </div>
+                        <div>
+                          <span className="text-sm font-semibold text-gray-900">
+                            {selectedAdmins.length} admin{selectedAdmins.length !== 1 ? 's' : ''} selected
+                          </span>
+                          <p className="text-xs text-gray-500">Batch actions available</p>
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setSelectedAdmins([])}
+                        className="text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+                      >
+                        Clear selection
+                      </Button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleBatchPermission(true)}
+                            className="text-green-600 border-green-600 hover:bg-green-50"
+                          >
+                            <ShieldCheck className="h-4 w-4 mr-2" />
+                            Grant ({selectedAdmins.length})
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Grant edit permission to {selectedAdmins.length} admin(s)</p>
+                        </TooltipContent>
+                      </Tooltip>
+
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleBatchPermission(false)}
+                            className="text-yellow-600 border-yellow-600 hover:bg-yellow-50"
+                          >
+                            <ShieldOff className="h-4 w-4 mr-2" />
+                            Revoke ({selectedAdmins.length})
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Revoke edit permission from {selectedAdmins.length} admin(s)</p>
+                        </TooltipContent>
+                      </Tooltip>
+
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={() => handleBatchDelete('admin')}
+                            className="bg-brand-red hover:bg-brand-red-700 text-white"
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete ({selectedAdmins.length})
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Delete {selectedAdmins.length} selected admin(s)</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <CardContent className="p-0">
                 <div className="overflow-x-auto">
@@ -3450,20 +3518,61 @@ export function ManageUsersPage() {
                       </SelectContent>
                     </Select>
 
-                  {/* Batch Action Buttons */}
-            {selectedResidents.length > 0 && (
-                    <>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="sm"
+                        onClick={exportResidentsToCSV}
+                        className="ml-auto flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white border-green-600 hover:border-green-700"
+                      >
+                        <FileDown className="h-4 w-4" />
+                        Export CSV
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Download resident accounts as CSV</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+              </div>
+
+              {/* Bulk Actions Bar */}
+              {selectedResidents.length > 0 && (
+                <div className="border-t border-b border-gray-200 bg-white px-6 py-4 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <div className="h-8 w-8 rounded-full bg-brand-orange/10 flex items-center justify-center">
+                          <CheckSquare className="h-4 w-4 text-brand-orange" />
+                        </div>
+                        <div>
+                          <span className="text-sm font-semibold text-gray-900">
+                            {selectedResidents.length} resident{selectedResidents.length !== 1 ? 's' : ''} selected
+                          </span>
+                          <p className="text-xs text-gray-500">Batch actions available</p>
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setSelectedResidents([])}
+                        className="text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+                      >
+                        Clear selection
+                      </Button>
+                    </div>
+                    <div className="flex items-center gap-2">
                       <Tooltip>
                         <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
+                          <Button
+                            variant="outline"
+                            size="sm"
                             onClick={() => handleBatchVerification(true)}
-                            className="ml-auto text-green-600 border-green-600 hover:bg-green-50"
-                >
+                            className="text-green-600 border-green-600 hover:bg-green-50"
+                          >
                             <ShieldCheck className="h-4 w-4 mr-2" />
                             Verify ({selectedResidents.length})
-                </Button>
+                          </Button>
                         </TooltipTrigger>
                         <TooltipContent>
                           <p>Verify {selectedResidents.length} selected resident(s)</p>
@@ -3472,15 +3581,15 @@ export function ManageUsersPage() {
 
                       <Tooltip>
                         <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
+                          <Button
+                            variant="outline"
+                            size="sm"
                             onClick={() => handleBatchVerification(false)}
                             className="text-yellow-600 border-yellow-600 hover:bg-yellow-50"
-                >
+                          >
                             <ShieldX className="h-4 w-4 mr-2" />
                             Revoke ({selectedResidents.length})
-                </Button>
+                          </Button>
                         </TooltipTrigger>
                         <TooltipContent>
                           <p>Revoke verification from {selectedResidents.length} resident(s)</p>
@@ -3488,22 +3597,22 @@ export function ManageUsersPage() {
                       </Tooltip>
 
                       {canDeleteResidents() ? (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                <Button
-                            variant="destructive"
-                  size="sm"
-                            onClick={() => handleBatchDelete('resident')}
-                            className="bg-brand-red hover:bg-brand-red-700 text-white"
-                >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            Delete ({selectedResidents.length})
-                </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Delete {selectedResidents.length} selected resident(s)</p>
-                        </TooltipContent>
-                      </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => handleBatchDelete('resident')}
+                              className="bg-brand-red hover:bg-brand-red-700 text-white"
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Delete ({selectedResidents.length})
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p>Delete {selectedResidents.length} selected resident(s)</p>
+                          </TooltipContent>
+                        </Tooltip>
                       ) : (
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -3524,27 +3633,10 @@ export function ManageUsersPage() {
                           </TooltipContent>
                         </Tooltip>
                       )}
-                    </>
-                  )}
-
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={exportResidentsToCSV}
-                        className="ml-auto flex items-center gap-2"
-                      >
-                        <FileDown className="h-4 w-4" />
-                        Export CSV
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Download resident accounts as CSV</p>
-                    </TooltipContent>
-                  </Tooltip>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
 
               <CardContent className="p-0">
                 <div className="overflow-x-auto">
@@ -3679,6 +3771,11 @@ export function ManageUsersPage() {
                             <TableCell>
                               <span className="flex items-center gap-2">
                                 {resident.fullName}
+                                {isNewResident(resident) && (
+                                  <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-50 font-semibold animate-pulse">
+                                    NEW
+                                  </Badge>
+                                )}
                                 {resident.isOnline && <span className="inline-block h-2 w-2 rounded-full bg-green-500" title="Online"></span>}
                               </span>
                             </TableCell>
@@ -3693,7 +3790,11 @@ export function ManageUsersPage() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => handlePreviewResident(resident)}
+                                  onClick={() => {
+                                    handlePreviewResident(resident);
+                                    // Mark resident as viewed when previewed
+                                    setViewedResidents(prev => new Set(prev).add(resident.id));
+                                  }}
                                   title="View Details"
                                 >
                                   <Eye className="h-4 w-4" />

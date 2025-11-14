@@ -19,7 +19,7 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import { usePins } from "@/hooks/usePins";
 import { Pin } from "@/types/pin";
 import { db } from "@/lib/firebase";
-import { collection, query, orderBy, onSnapshot, where, Timestamp, limit } from "firebase/firestore";
+import { collection, query, orderBy, getDocs, where, Timestamp, limit } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import html2canvas from 'html2canvas';
 
@@ -814,74 +814,101 @@ export function DashboardStats() {
     fetchWeatherData();
   }, []);
 
-  // Fetch reports from Firestore
+  // Fetch reports from Firestore (polling every 60 seconds)
   useEffect(() => {
-    const reportsQuery = query(collection(db, "reports"), orderBy("timestamp", "desc"));
-    const unsubscribe = onSnapshot(reportsQuery, (snapshot) => {
-      const fetched = snapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          ...data,
-          timestamp: data.timestamp?.toDate() || new Date()
-        };
-      });
-      setReports(fetched);
-    }, (error) => {
-      console.error("Error fetching reports:", error);
-    });
+    const fetchReports = async () => {
+      try {
+        const reportsQuery = query(collection(db, "reports"), orderBy("timestamp", "desc"));
+        const snapshot = await getDocs(reportsQuery);
+        const fetched = snapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            ...data,
+            timestamp: data.timestamp?.toDate() || new Date()
+          };
+        });
+        setReports(fetched);
+      } catch (error) {
+        console.error("Error fetching reports:", error);
+      }
+    };
 
-    return () => unsubscribe();
+    // Initial fetch
+    fetchReports();
+
+    // Poll every 60 seconds
+    const interval = setInterval(fetchReports, 60000);
+
+    return () => clearInterval(interval);
   }, []);
 
-  // Fetch users from Firestore
+  // Fetch users from Firestore (polling every 60 seconds)
   useEffect(() => {
-    const usersQuery = query(collection(db, "users"));
-    const unsubscribe = onSnapshot(usersQuery, (snapshot) => {
-      const fetched = snapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          ...data
-        } as any; // Type assertion to handle dynamic Firestore data
-      });
-      setUsers(fetched);
-      
-      // Count online admins
-      const adminUsers = fetched.filter(user => user.role === 'admin');
-      const onlineAdmins = adminUsers.filter(admin => admin.isOnline === true || admin.isOnline === 'true');
-      setOnlineAdminsCount(onlineAdmins.length);
-    }, (error) => {
-      console.error("Error fetching users:", error);
-    });
+    const fetchUsers = async () => {
+      try {
+        const usersQuery = query(collection(db, "users"));
+        const snapshot = await getDocs(usersQuery);
+        const fetched = snapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            ...data
+          } as any; // Type assertion to handle dynamic Firestore data
+        });
+        setUsers(fetched);
+        
+        // Count online admins
+        const adminUsers = fetched.filter(user => user.role === 'admin');
+        const onlineAdmins = adminUsers.filter(admin => admin.isOnline === true || admin.isOnline === 'true');
+        setOnlineAdminsCount(onlineAdmins.length);
+      } catch (error) {
+        console.error("Error fetching users:", error);
+      }
+    };
 
-    return () => unsubscribe();
+    // Initial fetch
+    fetchUsers();
+
+    // Poll every 60 seconds
+    const interval = setInterval(fetchUsers, 60000);
+
+    return () => clearInterval(interval);
   }, []);
 
-  // Subscribe to PAGASA bulletins from Firestore
+  // Fetch PAGASA bulletins from Firestore (polling every 60 seconds)
   useEffect(() => {
-    const bulletinsQuery = query(
-      collection(db, "pagasa_bulletins"),
-      orderBy("parsedAt", "desc"),
-      limit(5)
-    );
-    
-    const unsubscribe = onSnapshot(bulletinsQuery, (snapshot) => {
-      const fetched = snapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          ...data,
-          parsedAt: data.parsedAt?.toDate() || new Date(),
-          issueDate: data.issueDate?.toDate() || new Date()
-        };
-      });
-      setPagasaBulletins(fetched);
-    }, (erroric) => {
-      console.error("Error fetching PAGASA bulletins:", erroric);
-    });
+    const fetchBulletins = async () => {
+      try {
+        const bulletinsQuery = query(
+          collection(db, "pagasa_bulletins"),
+          orderBy("parsedAt", "desc"),
+          limit(5)
+        );
+        
+        const snapshot = await getDocs(bulletinsQuery);
+        const fetched = snapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            ...data,
+            parsedAt: data.parsedAt?.toDate() || new Date(),
+            issueDate: data.issueDate?.toDate() || new Date()
+          };
+        });
+        setPagasaBulletins(fetched);
+      } catch (error) {
+        console.error("Error fetching PAGASA bulletins:", error);
+      }
+    };
 
-    return () => unsubscribe();
+    // Initial fetch
+    fetchBulletins();
+
+    // Poll every 60 seconds
+    const interval = setInterval(fetchBulletins, 60000);
+
+    return () => clearInterval(interval);
   }, []);
 
   // Function to manually fetch PAGASA bulletins

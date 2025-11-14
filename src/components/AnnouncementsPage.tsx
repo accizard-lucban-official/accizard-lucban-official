@@ -913,8 +913,7 @@ export function AnnouncementsPage() {
                   <Button
                     onClick={handleExportAnnouncements}
                     size="sm"
-                    variant="outline"
-                    className="ml-auto"
+                    className="ml-auto bg-green-600 hover:bg-green-700 text-white border-green-600 hover:border-green-700"
                   >
                     <Download className="h-4 w-4 mr-2" />
                     Export CSV
