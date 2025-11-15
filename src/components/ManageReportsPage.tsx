@@ -269,6 +269,17 @@ export function ManageReportsPage() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [reportToDelete, setReportToDelete] = useState<string | null>(null);
   
+  // Pin confirmation modal state
+  const [showPinConfirmationModal, setShowPinConfirmationModal] = useState(false);
+  const [reportToPin, setReportToPin] = useState<any>(null);
+  const [isPinModalReady, setIsPinModalReady] = useState(false);
+  const [isChangingLocation, setIsChangingLocation] = useState(false);
+  const [updatedLocation, setUpdatedLocation] = useState<{ lat: number; lng: number; locationName: string } | null>(null);
+  const [isSavingPinLocation, setIsSavingPinLocation] = useState(false);
+  const [pinSearchQuery, setPinSearchQuery] = useState("");
+  const [pinSearchSuggestions, setPinSearchSuggestions] = useState<any[]>([]);
+  const [isPinSearchOpen, setIsPinSearchOpen] = useState(false);
+  
   // Preview Map (Report Modal - Directions Tab) state
   const [previewMapCenter, setPreviewMapCenter] = useState<[number, number]>([121.5556, 14.1139]);
   const [previewMapZoom, setPreviewMapZoom] = useState(14);
@@ -282,6 +293,22 @@ export function ManageReportsPage() {
   const [locationMapSearchSuggestions, setLocationMapSearchSuggestions] = useState<any[]>([]);
   const [isLocationMapSearchOpen, setIsLocationMapSearchOpen] = useState(false);
   
+  // Handle pin confirmation modal ready state
+  useEffect(() => {
+    if (showPinConfirmationModal && reportToPin) {
+      // Small delay to ensure modal is fully rendered before showing map
+      const timer = setTimeout(() => {
+        setIsPinModalReady(true);
+      }, 150);
+      return () => {
+        clearTimeout(timer);
+        setIsPinModalReady(false);
+      };
+    } else {
+      setIsPinModalReady(false);
+    }
+  }, [showPinConfirmationModal, reportToPin]);
+
   // Initialize preview map center when a report is selected
   useEffect(() => {
     if (selectedReport && selectedReport.latitude && selectedReport.longitude) {
@@ -1647,8 +1674,196 @@ useEffect(() => {
     }
   };
   const handlePinOnMap = (report: any) => {
-    console.log("Redirecting to map for report:", report.id);
-    navigate("/risk-map", { state: { report } });
+    console.log("Opening pin confirmation modal for report:", report.id);
+    setReportToPin(report);
+    setUpdatedLocation(null);
+    setIsChangingLocation(false);
+    setPinSearchQuery("");
+    setPinSearchSuggestions([]);
+    setIsPinSearchOpen(false);
+    setShowPinConfirmationModal(true);
+  };
+  
+  const handleConfirmPin = () => {
+    if (reportToPin) {
+      // Use updated location if available, otherwise use original
+      const reportToNavigate = updatedLocation ? {
+        ...reportToPin,
+        latitude: updatedLocation.lat,
+        longitude: updatedLocation.lng,
+        location: updatedLocation.locationName
+      } : reportToPin;
+      
+      console.log("Redirecting to map for report:", reportToNavigate.id);
+      navigate("/risk-map", { state: { report: reportToNavigate } });
+      setShowPinConfirmationModal(false);
+      setReportToPin(null);
+      setIsPinModalReady(false);
+      setIsChangingLocation(false);
+      setUpdatedLocation(null);
+    }
+  };
+  
+  const handleCancelPin = () => {
+    setShowPinConfirmationModal(false);
+    setReportToPin(null);
+    setIsPinModalReady(false);
+    setIsChangingLocation(false);
+    setUpdatedLocation(null);
+    setPinSearchQuery("");
+    setPinSearchSuggestions([]);
+    setIsPinSearchOpen(false);
+  };
+  
+  const handleChangeLocation = () => {
+    setIsChangingLocation(true);
+    setUpdatedLocation(null);
+    setPinSearchQuery("");
+    setPinSearchSuggestions([]);
+    setIsPinSearchOpen(false);
+  };
+  
+  const handlePinMapClick = async (lngLat: { lng: number; lat: number }) => {
+    if (!isChangingLocation) return;
+    
+    try {
+      const address = await reverseGeocode(lngLat.lat, lngLat.lng);
+      setUpdatedLocation({
+        lat: lngLat.lat,
+        lng: lngLat.lng,
+        locationName: address
+      });
+    } catch (error) {
+      console.error('Error getting address for clicked location:', error);
+      toast.error('Failed to get address for selected location');
+    }
+  };
+  
+  const handleGeocoderResult = async (result: { lat: number; lng: number; address: string }) => {
+    if (!isChangingLocation) return;
+    
+    setUpdatedLocation({
+      lat: result.lat,
+      lng: result.lng,
+      locationName: result.address
+    });
+  };
+  
+  // Pin modal geocoding search
+  const handlePinGeocodingSearch = useCallback(async (query: string) => {
+    if (query.length < 3) {
+      setPinSearchSuggestions([]);
+      setIsPinSearchOpen(false);
+      return;
+    }
+
+    try {
+      const accessToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN;
+      if (!accessToken) {
+        console.error('Mapbox access token not found');
+        return;
+      }
+
+      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${accessToken}&limit=5&proximity=121.5569,14.1133&country=PH&bbox=116,4,127,21.5`;
+      const data = await ensureOk(await fetch(url)).then(r => r.json());
+      setPinSearchSuggestions(data.features || []);
+      setIsPinSearchOpen(data.features && data.features.length > 0);
+    } catch (error: any) {
+      console.error('Error fetching geocoding results:', error);
+      setPinSearchSuggestions([]);
+      setIsPinSearchOpen(false);
+    }
+  }, []);
+
+  // Debounce pin search
+  useEffect(() => {
+    if (!isChangingLocation) {
+      setPinSearchQuery("");
+      setPinSearchSuggestions([]);
+      setIsPinSearchOpen(false);
+      return;
+    }
+    
+    const timeoutId = setTimeout(() => {
+      handlePinGeocodingSearch(pinSearchQuery);
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [pinSearchQuery, handlePinGeocodingSearch, isChangingLocation]);
+
+  // Handle selecting a pin search result
+  const handleSelectPinSearchResult = async (feature: any) => {
+    const [lng, lat] = feature.geometry.coordinates;
+    const placeName = feature.place_name || feature.text || 'Selected location';
+    
+    setUpdatedLocation({
+      lat,
+      lng,
+      locationName: placeName
+    });
+    
+    setPinSearchQuery(placeName);
+    setIsPinSearchOpen(false);
+  };
+  
+  const handleSavePinLocation = async () => {
+    if (!updatedLocation || !reportToPin) return;
+    
+    setIsSavingPinLocation(true);
+    try {
+      // Update Firestore with new location
+      await updateDoc(doc(db, "reports", reportToPin.firestoreId), {
+        latitude: updatedLocation.lat,
+        longitude: updatedLocation.lng,
+        location: updatedLocation.locationName,
+        locationName: updatedLocation.locationName,
+        coordinates: `${updatedLocation.lat}, ${updatedLocation.lng}`,
+        updatedAt: serverTimestamp(),
+        lastModifiedBy: currentUser?.id
+      });
+      
+      // Log activity
+      await logActivity({
+        actionType: ActionType.REPORT_UPDATED,
+        action: `Updated report "${reportToPin.type || 'Unknown'} Incident" (${reportToPin.firestoreId}) - Changed location`,
+        entityType: 'report',
+        entityId: reportToPin.firestoreId,
+        entityName: `${reportToPin.type || 'Unknown'} Incident`,
+        changes: {
+          location: { from: reportToPin.location || '', to: updatedLocation.locationName },
+          latitude: { from: reportToPin.latitude, to: updatedLocation.lat },
+          longitude: { from: reportToPin.longitude, to: updatedLocation.lng }
+        },
+        metadata: {
+          coordinates: `${updatedLocation.lat}, ${updatedLocation.lng}`
+        }
+      });
+      
+      // Update local state
+      setReportToPin({
+        ...reportToPin,
+        latitude: updatedLocation.lat,
+        longitude: updatedLocation.lng,
+        location: updatedLocation.locationName
+      });
+      
+      setIsChangingLocation(false);
+      setUpdatedLocation(null);
+      toast.success("Location updated successfully!");
+    } catch (error: any) {
+      console.error("Error updating location:", error);
+      toast.error(error.message || "Failed to update location. Please try again.");
+    } finally {
+      setIsSavingPinLocation(false);
+    }
+  };
+  
+  const handleCancelLocationChange = () => {
+    setIsChangingLocation(false);
+    setUpdatedLocation(null);
+    setPinSearchQuery("");
+    setPinSearchSuggestions([]);
+    setIsPinSearchOpen(false);
   };
   const handleViewLocation = (location: string) => {
     console.log("Viewing location:", location);
@@ -9079,6 +9294,197 @@ useEffect(() => {
                 className="bg-brand-orange hover:bg-brand-orange-400 text-white"
               >
                 Save Location
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Pin Confirmation Modal */}
+        <Dialog open={showPinConfirmationModal} onOpenChange={(open) => {
+          setShowPinConfirmationModal(open);
+          if (!open) {
+            setReportToPin(null);
+            setIsPinModalReady(false);
+            setIsChangingLocation(false);
+            setUpdatedLocation(null);
+            setPinSearchQuery("");
+            setPinSearchSuggestions([]);
+            setIsPinSearchOpen(false);
+          }
+        }}>
+          <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+            <DialogHeader className="border-b pb-4">
+              <DialogTitle className="flex items-center gap-2">
+                <MapPin className="h-5 w-5 text-brand-orange" />
+                Confirm Pin Location on Map
+              </DialogTitle>
+              <DialogDescription>
+                Review the location details before pinning this report on the map.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex-1 min-h-0 flex flex-col mt-4">
+              {reportToPin && reportToPin.latitude && reportToPin.longitude && isPinModalReady ? (
+                <>
+                  <div className="flex-1 relative min-h-[500px] rounded-lg overflow-hidden border border-gray-200">
+                    {/* Map Toolbar */}
+                    <div className="absolute top-4 left-4 right-4 z-10 flex items-center gap-2">
+                      <div className="flex-1 relative">
+                        {isChangingLocation ? (
+                          <>
+                            <div className="relative">
+                              <Input
+                                type="text"
+                                placeholder="Search for a location..."
+                                value={pinSearchQuery}
+                                onChange={(e) => setPinSearchQuery(e.target.value)}
+                                onFocus={() => {
+                                  if (pinSearchSuggestions.length > 0) {
+                                    setIsPinSearchOpen(true);
+                                  }
+                                }}
+                                onBlur={() => {
+                                  // Delay closing to allow click on suggestion
+                                  setTimeout(() => setIsPinSearchOpen(false), 200);
+                                }}
+                                className="w-full pr-10 bg-white shadow-lg"
+                              />
+                              <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                            </div>
+                            {isPinSearchOpen && pinSearchSuggestions.length > 0 && (
+                              <div 
+                                className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-20 max-h-60 overflow-y-auto"
+                                onMouseDown={(e) => e.preventDefault()}
+                              >
+                                {pinSearchSuggestions.map((feature, index) => (
+                                  <div
+                                    key={index}
+                                    onClick={() => {
+                                      handleSelectPinSearchResult(feature);
+                                      setIsPinSearchOpen(false);
+                                    }}
+                                    className="px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
+                                  >
+                                    <p className="text-sm font-medium text-gray-900">
+                                      {feature.text || feature.place_name}
+                                    </p>
+                                    {feature.place_name && feature.place_name !== feature.text && (
+                                      <p className="text-xs text-gray-500 mt-0.5">{feature.place_name}</p>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <div className="px-4 py-2 bg-white rounded-lg shadow-lg border border-gray-200">
+                            <p className="text-sm text-gray-600">
+                              {reportToPin.location || 'Unknown Location'}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                      {!isChangingLocation ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleChangeLocation}
+                          className="flex items-center gap-2 bg-white shadow-lg"
+                        >
+                          <MapPin className="h-4 w-4" />
+                          Change Location
+                        </Button>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleCancelLocationChange}
+                            disabled={isSavingPinLocation}
+                            className="bg-white shadow-lg"
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={handleSavePinLocation}
+                            disabled={!updatedLocation || isSavingPinLocation}
+                            className="bg-brand-orange hover:bg-brand-orange-400 text-white shadow-lg"
+                          >
+                            {isSavingPinLocation ? "Saving..." : "Save"}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                    {isChangingLocation && (
+                      <div className="absolute top-16 left-4 z-10">
+                        <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-300 shadow-lg">
+                          Click on map or search to select new location
+                        </Badge>
+                      </div>
+                    )}
+                    <MapboxMap
+                      key={`pin-confirm-${reportToPin.id}-${isPinModalReady}-${updatedLocation ? 'updated' : 'original'}`}
+                      center={updatedLocation 
+                        ? [updatedLocation.lng, updatedLocation.lat]
+                        : [Number(reportToPin.longitude), Number(reportToPin.latitude)]
+                      }
+                      zoom={14}
+                      showControls={true}
+                      showGeocoder={false}
+                      onMapClick={isChangingLocation ? handlePinMapClick : undefined}
+                      singleMarker={updatedLocation ? {
+                        id: 'pin-confirmation-marker-updated',
+                        type: reportToPin.type || 'Report',
+                        title: reportToPin.type || 'Report Location',
+                        description: updatedLocation.locationName,
+                        coordinates: [updatedLocation.lng, updatedLocation.lat] as [number, number],
+                        latitude: updatedLocation.lat,
+                        longitude: updatedLocation.lng,
+                        locationName: updatedLocation.locationName
+                      } : {
+                        id: 'pin-confirmation-marker',
+                        type: reportToPin.type || 'Report',
+                        title: reportToPin.type || 'Report Location',
+                        description: reportToPin.location || 'Report Location',
+                        coordinates: [Number(reportToPin.longitude), Number(reportToPin.latitude)] as [number, number],
+                        latitude: Number(reportToPin.latitude),
+                        longitude: Number(reportToPin.longitude),
+                        locationName: reportToPin.location || 'Unknown Location'
+                      }}
+                      disableSingleMarkerPulse={false}
+                      hideStyleToggle={false}
+                    />
+                  </div>
+                  {updatedLocation && (
+                    <div className="mt-2 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                      <p className="text-sm font-medium text-blue-900 mb-1">New Location:</p>
+                      <p className="text-sm text-blue-800">{updatedLocation.locationName}</p>
+                      <p className="text-xs text-blue-600 mt-1">
+                        Coordinates: {updatedLocation.lat.toFixed(6)}, {updatedLocation.lng.toFixed(6)}
+                      </p>
+                    </div>
+                  )}
+                </>
+              ) : reportToPin && reportToPin.latitude && reportToPin.longitude ? (
+                <div className="flex items-center justify-center min-h-[500px] text-gray-500">
+                  <p>Loading map...</p>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center min-h-[500px] text-gray-500">
+                  <p>No location data available for this report.</p>
+                </div>
+              )}
+            </div>
+            <DialogFooter className="border-t pt-4 mt-4">
+              <Button variant="outline" onClick={handleCancelPin}>
+                Cancel
+              </Button>
+              <Button 
+                onClick={handleConfirmPin}
+                disabled={!reportToPin || !reportToPin.latitude || !reportToPin.longitude}
+                className="bg-brand-orange hover:bg-brand-orange-400 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Confirm & Pin on Map
               </Button>
             </DialogFooter>
           </DialogContent>
