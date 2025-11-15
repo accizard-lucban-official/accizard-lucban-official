@@ -834,55 +834,89 @@ ${placemarks}
             {/* Map Container */}
             <div className="flex-1 bg-gray-100 relative overflow-hidden min-h-0 rounded-xl">
               {/* Map Toolbar - Positioned inside map at top */}
-              <div className="absolute top-4 left-4 right-4 z-10 bg-white border border-gray-200 px-4 py-3 flex items-center gap-3 shadow-lg rounded-lg">
+              <div className="absolute top-4 left-4 right-4 z-40 bg-white border border-gray-200 px-4 py-3 flex items-center gap-3 shadow-lg rounded-lg">
+                {/* Filters Button */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-9 px-3"
+                      onClick={() => {
+                        setIsFiltersOpen(true);
+                        setIsPinModalOpen(false); // Close pin modal when filter panel opens
+                        setIsAddPlacemarkMode(false); // Exit add placemark mode
+                      }}
+                    >
+                      <Filter className="h-4 w-4 mr-2" />
+                      Filters
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Filter pins by type and date</p>
+                  </TooltipContent>
+                </Tooltip>
+
                 <div className="flex-1 relative">
-                  <Popover open={isSearchOpen} onOpenChange={setIsSearchOpen}>
-                    <PopoverTrigger asChild>
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500 z-10" />
-                        <Input
-                          type="text"
-                          placeholder="Search for a location..."
-                          value={searchQuery}
-                          onChange={(e) => {
-                            setSearchQuery(e.target.value);
-                            setIsSearchOpen(true);
-                          }}
-                          onFocus={() => {
-                            if (searchSuggestions.length > 0) {
-                              setIsSearchOpen(true);
-                            }
-                          }}
-                          className="pl-9 pr-4 h-9 w-full border-gray-300"
-                        />
-                      </div>
-                    </PopoverTrigger>
-                    {searchSuggestions.length > 0 && (
-                      <PopoverContent className="w-[400px] p-0" align="start">
-                        <div className="max-h-[300px] overflow-y-auto">
-                          {searchSuggestions.map((suggestion, index) => (
-                            <button
-                              key={index}
-                              className="w-full text-left px-4 py-3 hover:bg-gray-100 transition-colors"
-                              onClick={() => handleSelectSearchResult(suggestion)}
-                            >
-                              <div className="flex items-start gap-2">
-                                <MapPin className="h-4 w-4 text-gray-500 mt-0.5 flex-shrink-0" />
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-medium text-gray-900 truncate">
-                                    {suggestion.text}
-                                  </p>
-                                  <p className="text-xs text-gray-500 truncate">
-                                    {suggestion.place_name}
-                                  </p>
-                                </div>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500 z-10" />
+                    <Input
+                      type="text"
+                      placeholder="Search for a location..."
+                      value={searchQuery}
+                      onChange={(e) => {
+                        setSearchQuery(e.target.value);
+                        // Keep suggestions open while typing
+                        if (e.target.value.length >= 3) {
+                          setIsSearchOpen(true);
+                        } else {
+                          setIsSearchOpen(false);
+                        }
+                      }}
+                      onFocus={() => {
+                        if (searchSuggestions.length > 0) {
+                          setIsSearchOpen(true);
+                        }
+                      }}
+                      onBlur={(e) => {
+                        // Don't close if clicking on a suggestion
+                        const relatedTarget = e.relatedTarget as HTMLElement;
+                        if (!relatedTarget || !relatedTarget.closest('.search-suggestions')) {
+                          // Delay closing to allow click events to fire
+                          setTimeout(() => setIsSearchOpen(false), 200);
+                        }
+                      }}
+                      className="pl-9 pr-4 h-9 w-full border-gray-300"
+                    />
+                    {isSearchOpen && searchSuggestions.length > 0 && (
+                      <div className="absolute top-full left-0 mt-1 w-[400px] bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-[300px] overflow-y-auto search-suggestions">
+                        {searchSuggestions.map((suggestion, index) => (
+                          <button
+                            key={index}
+                            type="button"
+                            className="w-full text-left px-4 py-3 hover:bg-gray-100 transition-colors"
+                            onMouseDown={(e) => {
+                              // Prevent input blur when clicking suggestion
+                              e.preventDefault();
+                              handleSelectSearchResult(suggestion);
+                            }}
+                          >
+                            <div className="flex items-start gap-2">
+                              <MapPin className="h-4 w-4 text-gray-500 mt-0.5 flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-gray-900 truncate">
+                                  {suggestion.text}
+                                </p>
+                                <p className="text-xs text-gray-500 truncate">
+                                  {suggestion.place_name}
+                                </p>
                               </div>
-                            </button>
-                          ))}
-                        </div>
-                      </PopoverContent>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
                     )}
-                  </Popover>
+                  </div>
                 </div>
 
                 {/* Add Placemark Button */}
@@ -893,8 +927,8 @@ ${placemarks}
                         variant="outline"
                         size="sm"
                         className={cn(
-                          "h-9 px-3",
-                          isAddPlacemarkMode && "bg-brand-orange text-white hover:bg-brand-orange/90"
+                          "h-9 px-3 bg-brand-orange text-white hover:bg-brand-orange/90 border-brand-orange",
+                          isAddPlacemarkMode && "ring-2 ring-brand-orange ring-offset-2"
                         )}
                         onClick={() => {
                           if (isAddPlacemarkMode) {
@@ -935,28 +969,6 @@ ${placemarks}
                     </TooltipContent>
                   </Tooltip>
                 )}
-
-                {/* Filters Button */}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-9 px-3"
-                      onClick={() => {
-                        setIsFiltersOpen(true);
-                        setIsPinModalOpen(false); // Close pin modal when filter panel opens
-                        setIsAddPlacemarkMode(false); // Exit add placemark mode
-                      }}
-                    >
-                      <Filter className="h-4 w-4 mr-2" />
-                      Filters
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Filter pins by type and date</p>
-                  </TooltipContent>
-                </Tooltip>
                 
                 {/* Map Legend Dialog */}
                 <Dialog open={isLegendDialogOpen} onOpenChange={setIsLegendDialogOpen}>
@@ -1070,7 +1082,7 @@ ${placemarks}
                         <Button
                           variant="outline"
                           size="sm"
-                          className="h-9 px-3"
+                          className="h-9 px-3 bg-green-600 text-white hover:bg-green-700 border-green-600 hover:border-green-700"
                         >
                           <Download className="h-4 w-4 mr-2" />
                           Export
@@ -1195,8 +1207,8 @@ ${placemarks}
             {isFiltersOpen && (
               <div
                 className={cn(
-                  "bg-white transition-transform duration-300 ease-in-out",
-                  "absolute left-0 top-0 h-full w-[450px] z-50 flex flex-col overflow-hidden"
+                  "bg-white shadow-2xl transition-all duration-300 ease-in-out",
+                  "absolute left-4 top-20 bottom-4 w-[450px] z-50 flex flex-col overflow-hidden rounded-lg border border-gray-200"
                 )}
               >
                 <style>{`

@@ -19,13 +19,15 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { MapPin, X, Type, FileText, MapPin as MapPinIcon, Navigation, Trash2 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { MapPin, X, Type, FileText, MapPin as MapPinIcon, Navigation, Trash2, Plus } from "lucide-react";
 import { Pin, PinType } from "@/types/pin";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { toast } from "@/components/ui/sonner";
 
 // Pin type icons mapping (for the select dropdown)
-import { Car, Flame, Ambulance, Waves, Mountain, CircleAlert, Users, ShieldAlert, Activity, Building, Building2, Wrench, AlertTriangle, Zap, Leaf, HelpCircle } from "lucide-react";
+import { Car, Flame, Ambulance, Waves, Mountain, CircleAlert, Users, ShieldAlert, Activity, Building, Building2, Wrench, AlertTriangle, Zap, Leaf, HelpCircle, AlertCircle } from "lucide-react";
 
 const pinTypeIcons: Record<string, any> = {
   "Road Crash": Car,
@@ -42,7 +44,7 @@ const pinTypeIcons: Record<string, any> = {
   "Obstructions": AlertTriangle,
   "Electrical Hazard": Zap,
   "Environmental Hazard": Leaf,
-  "Others": HelpCircle,
+  "Others": AlertCircle,
   "Evacuation Centers": Building,
   "Health Facilities": Building2,
   "Police Stations": ShieldAlert,
@@ -78,7 +80,7 @@ export interface PinFormData {
 const accidentHazardTypes = [
   "Road Crash", "Fire", "Medical Emergency", "Flooding", "Volcanic Activity",
   "Landslide", "Earthquake", "Civil Disturbance", "Armed Conflict", "Infectious Disease",
-  "Poor Infrastructure", "Obstructions", "Electrical Hazard", "Environmental Hazard"
+  "Poor Infrastructure", "Obstructions", "Electrical Hazard", "Environmental Hazard", "Others"
 ];
 
 // Emergency facility types
@@ -110,6 +112,21 @@ export function PinModal({
 
   const [isSaving, setIsSaving] = useState(false);
   const [isWaitingForMapClick, setIsWaitingForMapClick] = useState(false);
+  const [isAddCustomTypeDialogOpen, setIsAddCustomTypeDialogOpen] = useState(false);
+  const [customTypeName, setCustomTypeName] = useState("");
+  const [customPinTypes, setCustomPinTypes] = useState<string[]>([]);
+
+  // Load custom pin types from localStorage on mount
+  useEffect(() => {
+    const stored = localStorage.getItem("customPinTypes");
+    if (stored) {
+      try {
+        setCustomPinTypes(JSON.parse(stored));
+      } catch (e) {
+        console.error("Failed to parse custom pin types:", e);
+      }
+    }
+  }, []);
 
   // Initialize form data
   useEffect(() => {
@@ -165,7 +182,36 @@ export function PinModal({
   const handleSave = async () => {
     try {
       setIsSaving(true);
-      await onSave(formData);
+      
+      // For accident/hazard types: auto-generate title, no description
+      // For emergency facilities: use user-entered title and description
+      // Custom types are also treated as accident/hazard types
+      const isAccidentHazard = accidentHazardTypes.includes(formData.type) || customPinTypes.includes(formData.type);
+      
+      let finalPinData: PinFormData;
+      
+      if (isAccidentHazard) {
+        // Auto-generate title based on type and location
+        const autoTitle = formData.type 
+          ? `${formData.type}${formData.locationName ? ` - ${formData.locationName}` : ''}`
+          : formData.locationName || 'Untitled Pin';
+        
+        finalPinData = {
+          ...formData,
+          title: autoTitle,
+          description: "" // Set description to empty string for accident/hazard types
+        };
+      } else {
+        // For emergency facilities, use the user-entered title and description
+        // If title is empty, provide a default
+        finalPinData = {
+          ...formData,
+          title: formData.title.trim() || `${formData.type || 'Facility'}${formData.locationName ? ` - ${formData.locationName}` : ''}`,
+          description: formData.description || ""
+        };
+      }
+      
+      await onSave(finalPinData);
       onClose();
     } catch (error) {
       console.error("Error saving pin:", error);
@@ -192,6 +238,35 @@ export function PinModal({
       reportId: undefined
     });
     setIsWaitingForMapClick(true);
+  };
+
+  const handleAddCustomType = () => {
+    if (!customTypeName.trim()) {
+      toast.error("Please enter a pin type name");
+      return;
+    }
+
+    const trimmedName = customTypeName.trim();
+    
+    // Check if it already exists
+    const allTypes = [...accidentHazardTypes, ...emergencyFacilityTypes, ...customPinTypes];
+    if (allTypes.includes(trimmedName)) {
+      toast.error("This pin type already exists");
+      return;
+    }
+
+    // Add to custom types
+    const updated = [...customPinTypes, trimmedName];
+    setCustomPinTypes(updated);
+    localStorage.setItem("customPinTypes", JSON.stringify(updated));
+    
+    // Set the new type as selected
+    setFormData({ ...formData, type: trimmedName });
+    
+    // Close dialog and reset
+    setIsAddCustomTypeDialogOpen(false);
+    setCustomTypeName("");
+    toast.success(`"${trimmedName}" added successfully`);
   };
 
   const handleChangeLocation = () => {
@@ -238,26 +313,15 @@ export function PinModal({
         />
       )}
 
-      {/* Overlay Panel */}
+      {/* Floating Modal Panel */}
       <div 
         className={cn(
-          "bg-white shadow-2xl transition-transform duration-300 ease-in-out flex flex-col",
-          // Desktop: Right side overlay within map container
-          "md:absolute md:right-0 md:top-0 md:h-full md:w-[420px] lg:w-[450px] md:z-50",
+          "bg-white shadow-2xl transition-all duration-300 ease-in-out flex flex-col",
+          // Desktop: Overlay on left side within map container, below toolbar
+          "md:absolute md:left-4 md:top-20 md:bottom-4 md:w-[420px] lg:w-[450px] md:z-50 md:rounded-lg md:border md:border-gray-200 md:overflow-hidden",
           // Mobile: Bottom sheet (fixed for mobile)
-          "fixed bottom-0 left-0 right-0 max-h-[90vh] rounded-t-2xl z-50",
-          "md:rounded-none"
+          "fixed bottom-0 left-0 right-0 max-h-[90vh] rounded-t-2xl z-50"
         )}
-        style={{
-          // Ensure it stays within bounds on desktop
-          ...(isMobile ? {} : { 
-            position: 'absolute',
-            right: 0,
-            top: 0,
-            height: '100%',
-            zIndex: 50
-          })
-        }}
       >
         {/* Mobile Drag Handle */}
         {isMobile && (
@@ -304,61 +368,94 @@ export function PinModal({
         >
           <div className="space-y-3">
           {/* Pin Type */}
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <Label htmlFor="pin-type" className="text-sm font-medium text-gray-700">
               Pin Type <span className="text-red-500">*</span>
             </Label>
-            <Select 
-              value={formData.type} 
-              onValueChange={(value) => setFormData({ ...formData, type: value })}
-              disabled={isFromReport}
-            >
-              <SelectTrigger className={cn(
-                "h-10 border-gray-300 focus:border-black focus:ring-black/20",
-                isFromReport && "bg-gray-50 cursor-not-allowed"
-              )}>
-                <SelectValue placeholder="Select pin type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectLabel className="text-xs font-semibold text-gray-600 px-2 py-1.5">
-                    Accident/Hazard Types
-                  </SelectLabel>
-                  {accidentHazardTypes.map((type) => {
-                    const Icon = pinTypeIcons[type] || MapPin;
-                    return (
-                      <SelectItem key={type} value={type}>
-                        <div className="flex items-center">
-                          <Icon className="h-4 w-4 mr-2 text-gray-500" />
-                          {type}
-                        </div>
-                      </SelectItem>
-                    );
-                  })}
-                </SelectGroup>
-                
-                <SelectGroup>
-                  <SelectLabel className="text-xs font-semibold text-gray-600 px-2 py-1.5">
-                    Emergency Facilities
-                  </SelectLabel>
-                  {emergencyFacilityTypes.map((type) => {
-                    const Icon = pinTypeIcons[type] || MapPin;
-                    return (
-                      <SelectItem key={type} value={type}>
-                        <div className="flex items-center">
-                          <Icon className="h-4 w-4 mr-2 text-gray-500" />
-                          {type}
-                        </div>
-                      </SelectItem>
-                    );
-                  })}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
+            <div className="flex gap-2">
+              <Select 
+                value={formData.type} 
+                onValueChange={(value) => setFormData({ ...formData, type: value })}
+                disabled={isFromReport}
+                className="flex-1"
+              >
+                <SelectTrigger className={cn(
+                  "h-10 border-gray-300 focus:border-black focus:ring-black/20",
+                  isFromReport && "bg-gray-50 cursor-not-allowed"
+                )}>
+                  <SelectValue placeholder="Select pin type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectLabel className="text-sm font-semibold text-gray-700 px-2 py-2">
+                      Accident/Hazard Types
+                    </SelectLabel>
+                    {accidentHazardTypes.map((type) => {
+                      const Icon = pinTypeIcons[type] || MapPin;
+                      return (
+                        <SelectItem key={type} value={type} className="group">
+                          <div className="flex items-center">
+                            <Icon className="h-4 w-4 mr-2 text-gray-500 group-hover:text-brand-orange transition-colors" />
+                            {type}
+                          </div>
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectGroup>
+                  
+                  <SelectGroup>
+                    <SelectLabel className="text-sm font-semibold text-gray-700 px-2 py-2">
+                      Emergency Facilities
+                    </SelectLabel>
+                    {emergencyFacilityTypes.map((type) => {
+                      const Icon = pinTypeIcons[type] || MapPin;
+                      return (
+                        <SelectItem key={type} value={type} className="group">
+                          <div className="flex items-center">
+                            <Icon className="h-4 w-4 mr-2 text-gray-500 group-hover:text-brand-orange transition-colors" />
+                            {type}
+                          </div>
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectGroup>
+                  
+                  {customPinTypes.length > 0 && (
+                    <SelectGroup>
+                      <SelectLabel className="text-sm font-semibold text-gray-700 px-2 py-2">
+                        Custom Types
+                      </SelectLabel>
+                      {customPinTypes.map((type) => {
+                        const Icon = AlertCircle; // Use AlertCircle icon for custom types
+                        return (
+                          <SelectItem key={type} value={type} className="group">
+                            <div className="flex items-center">
+                              <Icon className="h-4 w-4 mr-2 text-gray-500 group-hover:text-brand-orange transition-colors" />
+                              {type}
+                            </div>
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectGroup>
+                  )}
+                </SelectContent>
+              </Select>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-10 w-10 border-gray-300 hover:bg-gray-50"
+                onClick={() => setIsAddCustomTypeDialogOpen(true)}
+                disabled={isFromReport}
+                title="Add custom pin type"
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
 
-          {/* Report ID - Only show for Accident/Hazard types */}
-          {accidentHazardTypes.includes(formData.type) && (
+          {/* Report ID - Show for all Accident/Hazard types */}
+          {(accidentHazardTypes.includes(formData.type) || customPinTypes.includes(formData.type)) && (
             <div className="space-y-1">
               <Label htmlFor="report-id" className="text-sm font-medium text-gray-700">
                 Report ID
@@ -371,74 +468,85 @@ export function PinModal({
                   <Input
                     id="report-id"
                     type="text"
-                    placeholder="Enter report ID number"
+                    placeholder={prefillData?.reportId ? "Enter report ID number" : "Not linked to a report"}
                     value={formData.reportId || ''}
                     onChange={(e) => {
                       // Only allow numeric characters
                       const value = e.target.value.replace(/[^0-9]/g, '');
                       setFormData({ ...formData, reportId: value || undefined });
                     }}
-                    className="h-10 rounded-l-none border-l-0 border-gray-300 focus:border-black focus:ring-black/20"
+                    disabled={mode === "create" && !prefillData?.reportId}
+                    className={cn(
+                      "h-10 rounded-l-none border-l-0 border-gray-300 focus:border-black focus:ring-black/20",
+                      mode === "create" && !prefillData?.reportId && "bg-gray-50 cursor-not-allowed"
+                    )}
                   />
+                </div>
+                {mode === "create" && !prefillData?.reportId && (
+                  <p className="text-xs text-gray-500 mt-1">Report ID is only available when pinning from a report</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Facility Name - Only show for Emergency Facilities */}
+          {emergencyFacilityTypes.includes(formData.type) && (
+            <div className="space-y-1.5">
+              <Label htmlFor="facility-name" className="text-sm font-medium text-gray-700">
+                Facility Name
+              </Label>
+              <div className="relative">
+                <Input
+                  id="facility-name"
+                  placeholder="Enter facility name"
+                  value={formData.title}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (value.length <= 60) {
+                      setFormData({ ...formData, title: value });
+                    }
+                  }}
+                  maxLength={60}
+                  className="h-10 border-gray-300 focus:border-black focus:ring-black/20"
+                />
+                <div className="text-xs text-gray-500 mt-0.5 text-right">
+                  <span className={formData.title.length === 60 ? "text-orange-600 font-medium" : ""}>
+                    {formData.title.length}/60
+                  </span>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Title */}
-          <div className="space-y-1.5">
-            <Label htmlFor="pin-title" className="text-sm font-medium text-gray-700">
-              Title
-            </Label>
-            <div className="relative">
-              <Input
-                id="pin-title"
-                placeholder="Enter marker title"
-                value={formData.title}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  if (value.length <= 60) {
-                    setFormData({ ...formData, title: value });
-                  }
-                }}
-                maxLength={60}
-                className="h-10 border-gray-300 focus:border-black focus:ring-black/20"
-              />
-              <div className="text-xs text-gray-500 mt-0.5 text-right">
-                <span className={formData.title.length === 60 ? "text-orange-600 font-medium" : ""}>
-                  {formData.title.length}/60
-                </span>
+          {/* Description - Only show for Emergency Facilities */}
+          {emergencyFacilityTypes.includes(formData.type) && (
+            <div className="space-y-1.5">
+              <Label htmlFor="pin-description" className="text-sm font-medium text-gray-700">
+                Description
+              </Label>
+              <div className="relative">
+                <Textarea
+                  id="pin-description"
+                  placeholder="Enter facility description"
+                  value={formData.description}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (value.length <= 120) {
+                      setFormData({ ...formData, description: value });
+                    }
+                  }}
+                  maxLength={120}
+                  rows={2}
+                  className="resize-none border-gray-300 focus:border-black focus:ring-black/20 min-h-[60px]"
+                />
+                <div className="text-xs text-gray-500 mt-0.5 text-right">
+                  <span className={formData.description.length === 120 ? "text-orange-600 font-medium" : ""}>
+                    {formData.description.length}/120
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
-
-          {/* Description */}
-          <div className="space-y-1.5">
-            <Label htmlFor="pin-description" className="text-sm font-medium text-gray-700">
-              Description
-            </Label>
-            <div className="relative">
-              <Textarea
-                id="pin-description"
-                placeholder="Enter pin description"
-                value={formData.description}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  if (value.length <= 120) {
-                    setFormData({ ...formData, description: value });
-                  }
-                }}
-                maxLength={120}
-                rows={2}
-                className="resize-none border-gray-300 focus:border-black focus:ring-black/20 min-h-[60px]"
-              />
-              <div className="text-xs text-gray-500 mt-0.5 text-right">
-                <span className={formData.description.length === 120 ? "text-orange-600 font-medium" : ""}>
-                  {formData.description.length}/120
-                </span>
-              </div>
-            </div>
-          </div>
+          )}
 
           {/* Location Section */}
           <div className="space-y-2">
@@ -558,6 +666,62 @@ export function PinModal({
           </div>
         </div>
       </div>
+
+      {/* Add Custom Pin Type Dialog */}
+      <Dialog open={isAddCustomTypeDialogOpen} onOpenChange={setIsAddCustomTypeDialogOpen}>
+        <DialogContent 
+          className="sm:max-w-[425px] z-[1010]"
+          overlayClassName="z-[1005]"
+        >
+          <DialogHeader>
+            <div className="flex items-center gap-2 pb-2 border-b">
+              <Plus className="h-5 w-5 text-brand-orange" />
+              <DialogTitle className="text-lg font-semibold">Add Custom Pin Type</DialogTitle>
+            </div>
+            <DialogDescription className="pt-2">
+              Enter a name for the new pin type. Custom pin types will be categorized under "Others" and use the default marker icon.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="custom-type-name" className="text-sm font-medium text-gray-700">
+                Pin Type Name <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                id="custom-type-name"
+                placeholder="e.g., Chemical Spill, Gas Leak, etc."
+                value={customTypeName}
+                onChange={(e) => setCustomTypeName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    handleAddCustomType();
+                  }
+                }}
+                className="h-10 border-gray-300 focus:border-black focus:ring-black/20"
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsAddCustomTypeDialogOpen(false);
+                setCustomTypeName("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAddCustomType}
+              className="bg-brand-orange hover:bg-brand-orange/90 text-white"
+              disabled={!customTypeName.trim()}
+            >
+              Add Type
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
