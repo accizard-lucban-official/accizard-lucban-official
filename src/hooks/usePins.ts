@@ -104,14 +104,6 @@ export function usePins() {
         throw new Error("Missing required fields: type, title, latitude, and longitude are required");
       }
 
-      if (pinData.title.length > 60) {
-        throw new Error("Title must be 60 characters or less");
-      }
-
-      if (pinData.description && pinData.description.length > 120) {
-        throw new Error("Description must be 120 characters or less");
-      }
-
       if (pinData.latitude < -90 || pinData.latitude > 90) {
         throw new Error("Invalid latitude: must be between -90 and 90");
       }
@@ -189,13 +181,6 @@ export function usePins() {
 
     try {
       // Validation
-      if (updates.title && updates.title.length > 60) {
-        throw new Error("Title must be 60 characters or less");
-      }
-
-      if (updates.description && updates.description.length > 120) {
-        throw new Error("Description must be 120 characters or less");
-      }
 
       if (updates.latitude !== undefined && (updates.latitude < -90 || updates.latitude > 90)) {
         throw new Error("Invalid latitude: must be between -90 and 90");

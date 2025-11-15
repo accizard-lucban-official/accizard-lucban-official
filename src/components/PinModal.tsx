@@ -63,6 +63,8 @@ interface PinModalProps {
   onDelete?: (pinId: string) => void;
   canEdit?: boolean;
   canDelete?: boolean;
+  unpinMode?: boolean;
+  onUnpin?: (pinId: string) => Promise<void>;
 }
 
 export interface PinFormData {
@@ -98,7 +100,9 @@ export function PinModal({
   onMapClick,
   onDelete,
   canEdit = true,
-  canDelete = true
+  canDelete = true,
+  unpinMode = false,
+  onUnpin
 }: PinModalProps) {
   const [formData, setFormData] = useState<PinFormData>({
     type: "",
@@ -183,14 +187,22 @@ export function PinModal({
     try {
       setIsSaving(true);
       
-      // For accident/hazard types: auto-generate title, no description
+      // For "Others" and custom types: use user-entered title and description
+      // For other accident/hazard types: auto-generate title, no description
       // For emergency facilities: use user-entered title and description
-      // Custom types are also treated as accident/hazard types
+      const isOthersOrCustom = formData.type === "Others" || customPinTypes.includes(formData.type);
       const isAccidentHazard = accidentHazardTypes.includes(formData.type) || customPinTypes.includes(formData.type);
       
       let finalPinData: PinFormData;
       
-      if (isAccidentHazard) {
+      if (isOthersOrCustom) {
+        // For "Others" and custom types, use user-entered title and description
+        finalPinData = {
+          ...formData,
+          title: formData.title.trim() || `${formData.type || 'Pin'}${formData.locationName ? ` - ${formData.locationName}` : ''}`,
+          description: formData.description || ""
+        };
+      } else if (isAccidentHazard) {
         // Auto-generate title based on type and location
         const autoTitle = formData.type 
           ? `${formData.type}${formData.locationName ? ` - ${formData.locationName}` : ''}`
@@ -224,6 +236,22 @@ export function PinModal({
     if (onDelete && existingPin?.id) {
       onDelete(existingPin.id);
       onClose();
+    }
+  };
+
+  const handleUnpin = async () => {
+    if (onUnpin && existingPin?.id) {
+      try {
+        setIsSaving(true);
+        await onUnpin(existingPin.id);
+        toast.success("Pin removed from map successfully");
+        onClose();
+      } catch (error: any) {
+        console.error("Error unpinning:", error);
+        toast.error(error.message || "Failed to unpin");
+      } finally {
+        setIsSaving(false);
+      }
     }
   };
 
@@ -281,7 +309,9 @@ export function PinModal({
     return formData.type.trim().length > 0;
   };
 
-  const isFromReport = !!prefillData?.reportId;
+  const isFromReport = !!prefillData?.reportId || !!(existingPin && existingPin.reportId);
+  const isCustomPin = mode === "edit" && existingPin && !existingPin.reportId;
+  const isUnpinningFromReport = unpinMode && isFromReport;
   const isMobile = useIsMobile();
 
   if (!isOpen) return null;
@@ -341,8 +371,13 @@ export function PinModal({
             </div>
             <div className="flex items-center gap-2">
               {isFromReport && (
-                <Badge variant="secondary" className="text-xs">
+                <Badge variant="outline" className="text-xs bg-brand-orange/10 text-brand-orange border-brand-orange rounded-md px-2.5 py-1">
                   From Report
+                </Badge>
+              )}
+              {isCustomPin && (
+                <Badge variant="outline" className="text-xs bg-gray-100 text-gray-700 border-gray-300 rounded-md px-2.5 py-1">
+                  Custom Pin
                 </Badge>
               )}
               <Button 
@@ -376,7 +411,7 @@ export function PinModal({
               <Select 
                 value={formData.type} 
                 onValueChange={(value) => setFormData({ ...formData, type: value })}
-                disabled={isFromReport}
+                disabled={isFromReport || isUnpinningFromReport}
                 className="flex-1"
               >
                 <SelectTrigger className={cn(
@@ -446,7 +481,7 @@ export function PinModal({
                 size="icon"
                 className="h-10 w-10 border-gray-300 hover:bg-gray-50"
                 onClick={() => setIsAddCustomTypeDialogOpen(true)}
-                disabled={isFromReport}
+                disabled={isFromReport || isUnpinningFromReport}
                 title="Add custom pin type"
               >
                 <Plus className="h-4 w-4" />
@@ -454,8 +489,8 @@ export function PinModal({
             </div>
           </div>
 
-          {/* Report ID - Show for all Accident/Hazard types */}
-          {(accidentHazardTypes.includes(formData.type) || customPinTypes.includes(formData.type)) && (
+          {/* Report ID - Show for all Accident/Hazard types, but only if pin has reportId */}
+          {(accidentHazardTypes.includes(formData.type) || customPinTypes.includes(formData.type)) && (isFromReport || (mode === "edit" && existingPin?.reportId)) && (
             <div className="space-y-1">
               <Label htmlFor="report-id" className="text-sm font-medium text-gray-700">
                 Report ID
@@ -475,10 +510,11 @@ export function PinModal({
                       const value = e.target.value.replace(/[^0-9]/g, '');
                       setFormData({ ...formData, reportId: value || undefined });
                     }}
-                    disabled={mode === "create" && !prefillData?.reportId}
+                    disabled={(mode === "create" && isFromReport) || (mode === "create" && !prefillData?.reportId) || (mode === "edit" && isFromReport)}
+                    readOnly={(mode === "create" && isFromReport) || (mode === "edit" && isFromReport)}
                     className={cn(
                       "h-10 rounded-l-none border-l-0 border-gray-300 focus:border-black focus:ring-black/20",
-                      mode === "create" && !prefillData?.reportId && "bg-gray-50 cursor-not-allowed"
+                      ((mode === "create" && isFromReport) || (mode === "create" && !prefillData?.reportId) || (mode === "edit" && isFromReport)) ? "bg-gray-50 cursor-not-allowed" : ""
                     )}
                   />
                 </div>
@@ -489,37 +525,33 @@ export function PinModal({
             </div>
           )}
 
-          {/* Facility Name - Only show for Emergency Facilities */}
-          {emergencyFacilityTypes.includes(formData.type) && (
+          {/* Title - Show for Emergency Facilities, "Others", and Custom Types */}
+          {(emergencyFacilityTypes.includes(formData.type) || formData.type === "Others" || customPinTypes.includes(formData.type)) && (
             <div className="space-y-1.5">
-              <Label htmlFor="facility-name" className="text-sm font-medium text-gray-700">
-                Facility Name
+              <Label htmlFor={emergencyFacilityTypes.includes(formData.type) ? "facility-name" : "pin-title"} className="text-sm font-medium text-gray-700">
+                {emergencyFacilityTypes.includes(formData.type) ? "Facility Name" : "Title"}
               </Label>
               <div className="relative">
                 <Input
-                  id="facility-name"
-                  placeholder="Enter facility name"
+                  id={emergencyFacilityTypes.includes(formData.type) ? "facility-name" : "pin-title"}
+                  placeholder={emergencyFacilityTypes.includes(formData.type) ? "Enter facility name" : "Enter pin title"}
                   value={formData.title}
                   onChange={(e) => {
-                    const value = e.target.value;
-                    if (value.length <= 60) {
-                      setFormData({ ...formData, title: value });
-                    }
+                    setFormData({ ...formData, title: e.target.value });
                   }}
-                  maxLength={60}
-                  className="h-10 border-gray-300 focus:border-black focus:ring-black/20"
+                  readOnly={isUnpinningFromReport}
+                  disabled={isUnpinningFromReport}
+                  className={cn(
+                    "h-10",
+                    isUnpinningFromReport ? "bg-gray-50 cursor-not-allowed border-gray-200" : "border-gray-300 focus:border-black focus:ring-black/20"
+                  )}
                 />
-                <div className="text-xs text-gray-500 mt-0.5 text-right">
-                  <span className={formData.title.length === 60 ? "text-orange-600 font-medium" : ""}>
-                    {formData.title.length}/60
-                  </span>
-                </div>
               </div>
             </div>
           )}
 
-          {/* Description - Only show for Emergency Facilities */}
-          {emergencyFacilityTypes.includes(formData.type) && (
+          {/* Description - Show for Emergency Facilities, "Others", and Custom Types */}
+          {(emergencyFacilityTypes.includes(formData.type) || formData.type === "Others" || customPinTypes.includes(formData.type)) && (
             <div className="space-y-1.5">
               <Label htmlFor="pin-description" className="text-sm font-medium text-gray-700">
                 Description
@@ -527,23 +559,19 @@ export function PinModal({
               <div className="relative">
                 <Textarea
                   id="pin-description"
-                  placeholder="Enter facility description"
+                  placeholder={emergencyFacilityTypes.includes(formData.type) ? "Enter facility description" : "Enter pin description"}
                   value={formData.description}
                   onChange={(e) => {
-                    const value = e.target.value;
-                    if (value.length <= 120) {
-                      setFormData({ ...formData, description: value });
-                    }
+                    setFormData({ ...formData, description: e.target.value });
                   }}
-                  maxLength={120}
+                  readOnly={isUnpinningFromReport}
+                  disabled={isUnpinningFromReport}
                   rows={2}
-                  className="resize-none border-gray-300 focus:border-black focus:ring-black/20 min-h-[60px]"
+                  className={cn(
+                    "resize-none min-h-[60px]",
+                    isUnpinningFromReport ? "bg-gray-50 cursor-not-allowed border-gray-200" : "border-gray-300 focus:border-black focus:ring-black/20"
+                  )}
                 />
-                <div className="text-xs text-gray-500 mt-0.5 text-right">
-                  <span className={formData.description.length === 120 ? "text-orange-600 font-medium" : ""}>
-                    {formData.description.length}/120
-                  </span>
-                </div>
               </div>
             </div>
           )}
@@ -559,8 +587,9 @@ export function PinModal({
                 id="location-name"
                 placeholder="Location will be set automatically"
                 value={formData.locationName}
-                readOnly
-                className="bg-gray-50 cursor-not-allowed border-gray-200 h-10"
+                readOnly={mode === "edit" || isUnpinningFromReport}
+                disabled={mode === "edit" || isUnpinningFromReport}
+                className="h-10 bg-gray-50 cursor-not-allowed border-gray-200"
               />
             </div>
 
@@ -579,7 +608,10 @@ export function PinModal({
                     ? `${formData.latitude}, ${formData.longitude}`
                     : ''
                 }
+                readOnly={isUnpinningFromReport || (mode === "create" && isFromReport) || (mode === "edit" && isFromReport)}
+                disabled={isUnpinningFromReport || (mode === "create" && isFromReport) || (mode === "edit" && isFromReport)}
                 onChange={(e) => {
+                  if (isUnpinningFromReport || (mode === "create" && isFromReport) || (mode === "edit" && isFromReport)) return;
                   const val = e.target.value.trim();
                   if (val === '') {
                     setFormData({ ...formData, latitude: null, longitude: null });
@@ -597,7 +629,10 @@ export function PinModal({
                   }
                   // If only one value is entered, don't update yet (wait for comma and second value)
                 }}
-                className="h-10 border-gray-300 focus:border-black focus:ring-black/20"
+                className={cn(
+                  "h-10",
+                  (isUnpinningFromReport || (mode === "create" && isFromReport) || (mode === "edit" && isFromReport)) ? "bg-gray-50 cursor-not-allowed border-gray-200" : "border-gray-300 focus:border-black focus:ring-black/20"
+                )}
               />
             </div>
           </div>
@@ -625,7 +660,57 @@ export function PinModal({
         {/* Action Buttons - Footer */}
         <div className="bg-white border-t border-gray-200 px-4 sm:px-6 py-2 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] flex-shrink-0">
           <div className="flex gap-3">
-            {mode === "edit" && onDelete && existingPin?.id && (
+            {/* Unpin mode from report: Show only Unpin button */}
+            {isUnpinningFromReport && onUnpin && existingPin?.id && (
+              <Button 
+                onClick={handleUnpin} 
+                className="flex-1 h-10 bg-brand-orange hover:bg-brand-orange/90 text-white font-medium shadow-sm hover:shadow-md transition-all"
+                disabled={isSaving}
+              >
+                {isSaving ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+                    Unpinning...
+                  </>
+                ) : (
+                  "Unpin"
+                )}
+              </Button>
+            )}
+            
+            {/* Pin from report in edit mode: Show only Unpin button */}
+            {!isUnpinningFromReport && mode === "edit" && isFromReport && onUnpin && existingPin?.id && (
+              <Button 
+                onClick={handleUnpin} 
+                className="flex-1 h-10 bg-brand-orange hover:bg-brand-orange/90 text-white font-medium shadow-sm hover:shadow-md transition-all"
+                disabled={isSaving}
+              >
+                {isSaving ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+                    Unpinning...
+                  </>
+                ) : (
+                  "Unpin"
+                )}
+              </Button>
+            )}
+            
+            {/* Custom pin in edit mode: Show both Unpin and Save buttons */}
+            {!isUnpinningFromReport && mode === "edit" && isCustomPin && onUnpin && existingPin?.id && (
+              <Button 
+                onClick={handleUnpin} 
+                variant="outline"
+                className="h-10 px-4 border-gray-300 hover:bg-gray-100"
+                disabled={isSaving}
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Unpin
+              </Button>
+            )}
+            
+            {/* Regular delete button (for non-unpin scenarios) */}
+            {!isUnpinningFromReport && mode === "edit" && onDelete && existingPin?.id && !isCustomPin && !isFromReport && (
               canDelete ? (
                 <Button 
                   onClick={handleDelete} 
@@ -648,21 +733,25 @@ export function PinModal({
                 </Button>
               )
             )}
-            <Button 
-              onClick={handleSave} 
-              className="flex-1 h-10 bg-brand-orange hover:bg-brand-orange/90 text-white font-medium shadow-sm hover:shadow-md transition-all"
-              disabled={!isValid() || isSaving || (mode === "edit" && !canEdit)}
-              title={mode === "edit" && !canEdit ? "You don't have permission to edit pins. Contact your super admin for access." : undefined}
-            >
-              {isSaving ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
-                  Saving...
-                </>
-              ) : (
-                mode === "create" ? "Add Pin" : "Save Changes"
-              )}
-            </Button>
+            
+            {/* Save button - hidden in unpin mode from report and when editing pins from report, shown otherwise */}
+            {!isUnpinningFromReport && !(mode === "edit" && isFromReport) && (
+              <Button 
+                onClick={handleSave} 
+                className="flex-1 h-10 bg-brand-orange hover:bg-brand-orange/90 text-white font-medium shadow-sm hover:shadow-md transition-all"
+                disabled={!isValid() || isSaving || (mode === "edit" && !canEdit)}
+                title={mode === "edit" && !canEdit ? "You don't have permission to edit pins. Contact your super admin for access." : undefined}
+              >
+                {isSaving ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+                    Saving...
+                  </>
+                ) : (
+                  mode === "create" ? "Add Pin" : "Save Changes"
+                )}
+              </Button>
+            )}
           </div>
         </div>
       </div>

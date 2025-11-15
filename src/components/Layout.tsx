@@ -142,59 +142,95 @@ export function Layout({ children }: LayoutProps) {
   }, [userRole, roleLoading]);
 
 
+  // Function to calculate unseen reports count
+  const calculateUnseenReportsCount = (snapshot: any) => {
+    // Get viewed reports from localStorage
+    const viewedReportsData = localStorage.getItem("viewedReports");
+    const viewedReports = viewedReportsData ? new Set(JSON.parse(viewedReportsData)) : new Set();
+    
+    const now = new Date();
+    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    
+    const unseenCount = snapshot.docs.filter((doc: any) => {
+      const data = doc.data();
+      const reportId = data.reportId || doc.id;
+      
+      // Check if report has been viewed
+      if (viewedReports.has(reportId)) {
+        return false;
+      }
+      
+      // Check if report is within last 24 hours
+      try {
+        const timestamp = data.timestamp;
+        let reportDate;
+        
+        if (timestamp && typeof timestamp.toDate === "function") {
+          reportDate = timestamp.toDate();
+        } else if (timestamp instanceof Date) {
+          reportDate = timestamp;
+        } else if (typeof timestamp === "number") {
+          reportDate = new Date(timestamp);
+        } else if (typeof timestamp === "string") {
+          reportDate = new Date(timestamp);
+        }
+        
+        if (reportDate && !isNaN(reportDate.getTime())) {
+          return reportDate >= oneDayAgo && reportDate <= now;
+        }
+      } catch (error) {
+        console.error("Error parsing timestamp:", error);
+      }
+      
+      return false;
+    }).length;
+    
+    setUnseenReportsCount(unseenCount);
+  };
+
+  // Store snapshot ref to recalculate when localStorage changes
+  const reportsSnapshotRef = useRef<any>(null);
+
   // Fetch and count unseen reports
   useEffect(() => {
     try {
       const reportsQuery = query(collection(db, "reports"), orderBy("timestamp", "desc"));
       const unsubscribe = onSnapshot(reportsQuery, (snapshot) => {
-        // Get viewed reports from localStorage
-        const viewedReportsData = localStorage.getItem("viewedReports");
-        const viewedReports = viewedReportsData ? new Set(JSON.parse(viewedReportsData)) : new Set();
-        
-        const now = new Date();
-        const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-        
-        const unseenCount = snapshot.docs.filter(doc => {
-          const data = doc.data();
-          const reportId = data.reportId || doc.id;
-          
-          // Check if report has been viewed
-          if (viewedReports.has(reportId)) {
-            return false;
-          }
-          
-          // Check if report is within last 24 hours
-          try {
-            const timestamp = data.timestamp;
-            let reportDate;
-            
-            if (timestamp && typeof timestamp.toDate === "function") {
-              reportDate = timestamp.toDate();
-            } else if (timestamp instanceof Date) {
-              reportDate = timestamp;
-            } else if (typeof timestamp === "number") {
-              reportDate = new Date(timestamp);
-            } else if (typeof timestamp === "string") {
-              reportDate = new Date(timestamp);
-            }
-            
-            if (reportDate && !isNaN(reportDate.getTime())) {
-              return reportDate >= oneDayAgo && reportDate <= now;
-            }
-          } catch (error) {
-            console.error("Error parsing timestamp:", error);
-          }
-          
-          return false;
-        }).length;
-        
-        setUnseenReportsCount(unseenCount);
+        // Store snapshot for recalculation when localStorage changes
+        reportsSnapshotRef.current = snapshot;
+        calculateUnseenReportsCount(snapshot);
       });
       
       return () => unsubscribe();
     } catch (error) {
       console.error("Error fetching unseen reports:", error);
     }
+  }, []);
+
+  // Listen for localStorage changes to update badge count when reports are viewed
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      // Only recalculate if viewedReports changed
+      if (e.key === "viewedReports" && reportsSnapshotRef.current) {
+        calculateUnseenReportsCount(reportsSnapshotRef.current);
+      }
+    };
+
+    // Listen for storage events (fires when localStorage changes in other tabs/windows)
+    window.addEventListener("storage", handleStorageChange);
+
+    // Also listen for custom event that we can trigger from same window
+    const handleCustomStorageChange = () => {
+      if (reportsSnapshotRef.current) {
+        calculateUnseenReportsCount(reportsSnapshotRef.current);
+      }
+    };
+    window.addEventListener("viewedReportsUpdated", handleCustomStorageChange);
+
+    return () => {
+      window.removeEventListener("storage", handleStorageChange);
+      window.removeEventListener("viewedReportsUpdated", handleCustomStorageChange);
+    };
   }, []);
 
   // Fetch and count unread chat messages

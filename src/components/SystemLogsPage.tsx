@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { db } from "@/lib/firebase";
-import { collection, query, orderBy, getDocs, deleteDoc, doc } from "firebase/firestore";
+import { collection, query, orderBy, getDocs, deleteDoc, doc, getDoc } from "firebase/firestore";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useUserRole } from "@/hooks/useUserRole";
 import { useToast } from "@/components/ui/use-toast";
@@ -70,6 +70,7 @@ export function SystemLogsPage() {
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
+  const [customIdCache, setCustomIdCache] = useState<Map<string, string>>(new Map());
   
   // Pagination state
   const [activityPage, setActivityPage] = useState(1);
@@ -130,6 +131,52 @@ export function SystemLogsPage() {
     }
   }, [searchParams]);
 
+  // Function to fetch custom ID for an entity (memoized with useCallback)
+  const fetchCustomId = useCallback(async (entityType: string, entityId: string): Promise<string | null> => {
+    // Check cache first
+    const cacheKey = `${entityType}:${entityId}`;
+    if (customIdCache.has(cacheKey)) {
+      return customIdCache.get(cacheKey) || null;
+    }
+
+    try {
+      let customId: string | null = null;
+      
+      if (entityType === 'report') {
+        const reportDoc = await getDoc(doc(db, "reports", entityId));
+        if (reportDoc.exists()) {
+          const data = reportDoc.data();
+          customId = data.reportId || entityId;
+        }
+      } else if (entityType === 'admin') {
+        const adminDoc = await getDoc(doc(db, "admins", entityId));
+        if (adminDoc.exists()) {
+          const data = adminDoc.data();
+          customId = data.userId || entityId;
+        }
+      } else if (entityType === 'resident') {
+        const residentDoc = await getDoc(doc(db, "users", entityId));
+        if (residentDoc.exists()) {
+          const data = residentDoc.data();
+          customId = data.userId || entityId;
+        }
+      } else {
+        // For other entity types, return the entityId as is
+        customId = entityId;
+      }
+
+      // Cache the result
+      if (customId) {
+        setCustomIdCache(prev => new Map(prev).set(cacheKey, customId!));
+      }
+
+      return customId || entityId;
+    } catch (error) {
+      console.error(`Error fetching custom ID for ${entityType}:${entityId}:`, error);
+      return entityId; // Fallback to original ID
+    }
+  }, [customIdCache]);
+
   // Fetch activity logs (polling every 30 seconds)
   useEffect(() => {
     const fetchActivityLogs = async () => {
@@ -157,6 +204,13 @@ export function SystemLogsPage() {
           };
         });
         setActivityLogs(logs);
+
+        // Pre-fetch custom IDs for logs that have entityType and entityId
+        const logsToFetch = logs.filter(log => log.entityType && log.entityId);
+        const fetchPromises = logsToFetch.map(log => 
+          fetchCustomId(log.entityType, log.entityId)
+        );
+        await Promise.all(fetchPromises);
       } catch (error) {
         console.error("Error fetching activity logs:", error);
       }
@@ -169,7 +223,7 @@ export function SystemLogsPage() {
     const interval = setInterval(fetchActivityLogs, 30000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchCustomId]);
 
   // Filter activity logs based on search and filters
   const filteredActivityLogs = activityLogs.filter(log => {
@@ -196,30 +250,39 @@ export function SystemLogsPage() {
     // Date range filter
     let matchesDateRange = true;
     if (dateRange?.from || dateRange?.to) {
-      let logDate: Date;
-      if (log.timestamp instanceof Date) {
-        logDate = log.timestamp;
-      } else if (log.timestamp?.toDate && typeof log.timestamp.toDate === 'function') {
-        logDate = log.timestamp.toDate();
-      } else if (typeof log.timestamp === 'number') {
-        logDate = new Date(log.timestamp);
-      } else if (typeof log.timestamp === 'string') {
-        logDate = new Date(log.timestamp);
-      } else {
-        logDate = new Date();
-      }
-      logDate.setHours(0, 0, 0, 0);
-      
-      if (dateRange.from) {
-        const fromDate = new Date(dateRange.from);
-        fromDate.setHours(0, 0, 0, 0);
-        matchesDateRange = logDate >= fromDate;
-      }
-      
-      if (matchesDateRange && dateRange.to) {
-        const toDate = new Date(dateRange.to);
-        toDate.setHours(23, 59, 59, 999);
-        matchesDateRange = logDate <= toDate;
+      let logDate: Date | null = null;
+      try {
+        if (log.timestamp instanceof Date) {
+          logDate = log.timestamp;
+        } else if (log.timestamp?.toDate && typeof log.timestamp.toDate === 'function') {
+          logDate = log.timestamp.toDate();
+        } else if (typeof log.timestamp === 'number') {
+          logDate = new Date(log.timestamp);
+        } else if (typeof log.timestamp === 'string') {
+          logDate = new Date(log.timestamp);
+        }
+        
+        if (logDate && !isNaN(logDate.getTime())) {
+          logDate.setHours(0, 0, 0, 0);
+          
+          if (dateRange.from) {
+            const fromDate = new Date(dateRange.from);
+            fromDate.setHours(0, 0, 0, 0);
+            matchesDateRange = logDate >= fromDate;
+          }
+          
+          if (matchesDateRange && dateRange.to) {
+            const toDate = new Date(dateRange.to);
+            toDate.setHours(23, 59, 59, 999);
+            matchesDateRange = logDate <= toDate;
+          }
+        } else {
+          // Invalid date, exclude from results when date filter is active
+          matchesDateRange = false;
+        }
+      } catch (error) {
+        // If date parsing fails, exclude from results when date filter is active
+        matchesDateRange = false;
       }
     }
     
@@ -715,7 +778,7 @@ export function SystemLogsPage() {
                         {activitySortDirection === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                       </div>
                     </TableHead>
-                    <TableHead className="min-w-[300px]">Log Message</TableHead>
+                    <TableHead className="w-[200px] max-w-[200px]">Log Message</TableHead>
                     {isSuperAdmin() && <TableHead>Actions</TableHead>}
                   </TableRow>
                 </TableHeader>
@@ -806,8 +869,31 @@ export function SystemLogsPage() {
                               );
                             })() : "-"}
                           </TableCell>
-                          <TableCell className="min-w-[300px] max-w-md break-words whitespace-normal" title={log.action}>
-                            {log.action || '-'}
+                          <TableCell className="w-[200px] max-w-[200px] break-words whitespace-normal text-sm" title={log.action}>
+                            {(() => {
+                              // Format log message to replace Firestore IDs with custom IDs
+                              let formattedMessage = log.action || '-';
+                              
+                              // If log has entityType and entityId, replace the ID in the message
+                              if (log.entityType && log.entityId) {
+                                const cacheKey = `${log.entityType}:${log.entityId}`;
+                                const customId = customIdCache.get(cacheKey);
+                                
+                                if (customId && customId !== log.entityId) {
+                                  // Replace Firestore ID with custom ID in the message
+                                  // Escape special regex characters in the Firestore ID
+                                  const escapedId = log.entityId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                                  // Pattern 1: Look for (entityId) - most common format
+                                  const parenthesesPattern = new RegExp(`\\(${escapedId}\\)`, 'g');
+                                  formattedMessage = formattedMessage.replace(parenthesesPattern, `(${customId})`);
+                                  // Pattern 2: Look for entityId at word boundaries (for cases without parentheses)
+                                  const wordBoundaryPattern = new RegExp(`\\b${escapedId}\\b`, 'g');
+                                  formattedMessage = formattedMessage.replace(wordBoundaryPattern, customId);
+                                }
+                              }
+                              
+                              return formattedMessage;
+                            })()}
                           </TableCell>
                           {isSuperAdmin() && (
                             <TableCell>

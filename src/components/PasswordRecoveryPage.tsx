@@ -5,10 +5,10 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, CheckCircle2, Lock } from "lucide-react";
-import { auth } from "@/lib/firebase";
+import { auth, db } from "@/lib/firebase";
 import { sendPasswordResetEmail } from "firebase/auth";
+import { collection, query, where, getDocs } from "firebase/firestore";
 import { toast } from "@/components/ui/sonner";
-import { SUPER_ADMIN_EMAIL } from "@/lib/utils";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export function PasswordRecoveryPage() {
@@ -26,15 +26,24 @@ export function PasswordRecoveryPage() {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(email)) {
         toast.error("Please enter a valid email address.");
+        setIsSubmitting(false);
         return;
       }
       
-      // Check if the email is the authorized super admin email
-      if (email !== SUPER_ADMIN_EMAIL) {
+      // Check if the email exists in the superAdmin collection
+      const superAdminQuery = query(
+        collection(db, "superAdmin"),
+        where("email", "==", email)
+      );
+      const querySnapshot = await getDocs(superAdminQuery);
+      
+      if (querySnapshot.empty) {
         toast.error("Access denied. Password recovery is only available for authorized super admin accounts.");
+        setIsSubmitting(false);
         return;
       }
       
+      // Email is found in superAdmin collection, proceed with password reset
       await sendPasswordResetEmail(auth, email);
       setIsSubmitted(true);
       toast.success("Recovery link sent! Please check your email.");
@@ -50,6 +59,10 @@ export function PasswordRecoveryPage() {
                err.message?.includes('network') ||
                err.message?.includes('fetch')) {
         toast.error("Network error. Please check your internet connection and try again.");
+      }
+      // Check if email is not found in Firebase Auth
+      else if (err.code === 'auth/user-not-found') {
+        toast.error("No account found with this email address. Please verify your email and try again.");
       }
       // Generic error fallback
       else {

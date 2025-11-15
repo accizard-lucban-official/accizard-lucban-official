@@ -325,17 +325,24 @@ export function ManageUsersPage() {
   };
 
   const isWithinDateRange = (date: Date | null, range: DateRange | undefined) => {
-    if (!range?.from || !range?.to) {
+    if (!range?.from && !range?.to) {
       return true;
     }
     if (!date) {
-      return true;
+      return false; // Exclude items without dates when date filter is active
     }
-    const from = new Date(range.from);
-    from.setHours(0, 0, 0, 0);
-    const to = new Date(range.to);
-    to.setHours(23, 59, 59, 999);
-    return date >= from && date <= to;
+    let matches = true;
+    if (range.from) {
+      const from = new Date(range.from);
+      from.setHours(0, 0, 0, 0);
+      matches = date >= from;
+    }
+    if (range.to && matches) {
+      const to = new Date(range.to);
+      to.setHours(23, 59, 59, 999);
+      matches = date <= to;
+    }
+    return matches;
   };
 
   const location = useLocation();
@@ -631,7 +638,11 @@ export function ManageUsersPage() {
       resident.verified ? 'verified' : 'pending',
       resident.suspended ? 'suspended' : ''
     ].some(field => (field || '').toString().toLowerCase().includes(search));
-    const matchesBarangay = barangayFilter === "all" || resident.barangay === barangayFilter;
+    const matchesBarangay = barangayFilter === "all" 
+      ? true 
+      : barangayFilter === "others" 
+      ? !barangayOptions.includes(resident.barangay || "")
+      : resident.barangay === barangayFilter;
     const matchesVerification = verificationFilter === "all" || 
       (verificationFilter === "verified" && resident.verified) || 
       (verificationFilter === "pending" && !resident.verified && !resident.suspended) ||
@@ -3499,9 +3510,12 @@ export function ManageUsersPage() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">All Barangays</SelectItem>
-                        {Array.from(new Set(residents.map(r => r.barangay).filter(Boolean))).map(barangay => (
+                        {barangayOptions.map(barangay => (
                           <SelectItem key={barangay} value={barangay}>{barangay}</SelectItem>
                         ))}
+                        {Array.from(new Set(residents.map(r => r.barangay).filter(Boolean).filter(b => !barangayOptions.includes(b)))).length > 0 && (
+                          <SelectItem value="others">Others</SelectItem>
+                        )}
                       </SelectContent>
                     </Select>
 

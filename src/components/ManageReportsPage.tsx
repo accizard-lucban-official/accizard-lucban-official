@@ -25,6 +25,8 @@ import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { MapboxMap } from "./MapboxMap";
 import { db } from "@/lib/firebase";
 import { collection, onSnapshot, orderBy, query, getDocs, getDoc, where, updateDoc, doc, serverTimestamp, deleteDoc, addDoc } from "firebase/firestore";
+import { usePins } from "@/hooks/usePins";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { storage } from "@/lib/firebase";
 import { auth } from "@/lib/firebase";
@@ -33,6 +35,7 @@ import { useUserRole } from "@/hooks/useUserRole";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import { logActivity, ActionType, formatLogMessage } from "@/lib/activityLogger";
+import JSZip from "jszip";
 
 // Helper function to get icon for report type
 const getReportTypeIcon = (type: string) => {
@@ -252,6 +255,7 @@ const normalizeDispatchData = (data: any): DispatchDataState => {
 export function ManageReportsPage() {
   const navigate = useNavigate();
   const { canEditReports, canDeleteReports, canAddReportToMap } = useUserRole();
+  const { deletePin, getPinById, updatePin, fetchPins } = usePins();
   const [searchTerm, setSearchTerm] = useState("");
   const [date, setDate] = useState<DateRange | undefined>();
   const [typeFilter, setTypeFilter] = useState("all");
@@ -268,6 +272,7 @@ export function ManageReportsPage() {
   });
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [reportToDelete, setReportToDelete] = useState<string | null>(null);
+  const [pinnedReports, setPinnedReports] = useState<Map<string, string>>(new Map()); // reportId -> pinId mapping
   
   // Preview Map (Report Modal - Directions Tab) state
   const [previewMapCenter, setPreviewMapCenter] = useState<[number, number]>([121.5556, 14.1139]);
@@ -410,9 +415,11 @@ export function ManageReportsPage() {
   const previousReportCountRef = useRef<number>(0);
   const alarmIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
-  // Sync viewed reports to localStorage
+  // Sync viewed reports to localStorage and notify Layout component
   useEffect(() => {
     localStorage.setItem("viewedReports", JSON.stringify(Array.from(viewedReports)));
+    // Dispatch custom event to notify Layout component to recalculate badge count
+    window.dispatchEvent(new Event("viewedReportsUpdated"));
   }, [viewedReports]);
   
   // Fallback function using Web Audio API (defined before useCallback dependencies)
@@ -687,6 +694,46 @@ export function ManageReportsPage() {
     }
   }, [playAlarmSound]);
 
+  // Fetch pins to check which reports are pinned
+  useEffect(() => {
+    const fetchPinnedReports = async () => {
+      try {
+        // Get all pins and filter those with reportId
+        const pinsQuery = query(collection(db, "pins"));
+        const querySnapshot = await getDocs(pinsQuery);
+        const pinnedMap = new Map<string, string>();
+        
+        querySnapshot.docs.forEach((doc) => {
+          const pinData = doc.data();
+          if (pinData.reportId) {
+            pinnedMap.set(pinData.reportId, doc.id);
+          }
+        });
+        
+        setPinnedReports(pinnedMap);
+      } catch (error) {
+        console.error("Error fetching pinned reports:", error);
+      }
+    };
+
+    fetchPinnedReports();
+    
+    // Subscribe to real-time updates
+    const pinsQuery = query(collection(db, "pins"));
+    const unsubscribe = onSnapshot(pinsQuery, (snapshot) => {
+      const pinnedMap = new Map<string, string>();
+      snapshot.docs.forEach((doc) => {
+        const pinData = doc.data();
+        if (pinData.reportId) {
+          pinnedMap.set(pinData.reportId, doc.id);
+        }
+      });
+      setPinnedReports(pinnedMap);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
   // Fetch team members from database
   useEffect(() => {
     fetchTeamMembers();
@@ -765,22 +812,27 @@ export function ManageReportsPage() {
       }
 
       // Generate report ID with incremented value (RID-[Incremented value])
-      // Fetch all reports to find the maximum RID number
+      // Fetch all existing reports to find the maximum RID number
+      // This ensures that even if reports are deleted, new RIDs continue from the highest existing RID
       const reportsQuery = query(collection(db, "reports"));
       const reportsSnapshot = await getDocs(reportsQuery);
       
       // Extract the number from reportId if it matches 'RID-[Number]'
-      const reportIds = reportsSnapshot.docs.map(doc => {
+      // Only consider valid RID numbers (ignore legacy formats or invalid values)
+      const reportIds: number[] = [];
+      reportsSnapshot.docs.forEach(doc => {
         const raw = doc.data().reportId;
         if (typeof raw === 'string' && raw.startsWith('RID-')) {
-          const num = parseInt(raw.replace('RID-', ''));
-          return isNaN(num) ? 0 : num;
+          const num = parseInt(raw.replace('RID-', ''), 10);
+          if (!isNaN(num) && num > 0) {
+            reportIds.push(num);
+          }
         }
-        // fallback for legacy reportIds (RPT- format or others)
-        return 0;
       });
       
+      // Find the highest existing RID number, or default to 0 if no reports exist
       const maxReportId = reportIds.length > 0 ? Math.max(...reportIds) : 0;
+      // Assign the next RID as 1 higher than the highest existing RID
       const nextReportId = maxReportId + 1;
       const reportId = `RID-${nextReportId}`;
       
@@ -930,16 +982,71 @@ export function ManageReportsPage() {
   // Fetch residents from database
   const fetchResidents = async () => {
     try {
-      const residentsQuery = query(collection(db, "users"), orderBy("name"));
+      // Try ordering by fullName first
+      const residentsQuery = query(collection(db, "users"), orderBy("fullName"));
       const querySnapshot = await getDocs(residentsQuery);
-      const residentsData = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+      const residentsData = querySnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          name: data.name || data.fullName || "",
+          fullName: data.fullName || data.name || "",
+          email: data.email || "",
+          mobileNumber: data.mobileNumber || data.phoneNumber || "",
+          ...data
+        };
+      });
       setResidents(residentsData);
       setFilteredResidents(residentsData);
     } catch (error) {
-      console.error("Error fetching residents:", error);
+      console.error("Error fetching residents with fullName order:", error);
+      // Fallback: try ordering by name
+      try {
+        const residentsQuery = query(collection(db, "users"), orderBy("name"));
+        const querySnapshot = await getDocs(residentsQuery);
+        const residentsData = querySnapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            name: data.name || data.fullName || "",
+            fullName: data.fullName || data.name || "",
+            email: data.email || "",
+            mobileNumber: data.mobileNumber || data.phoneNumber || "",
+            ...data
+          };
+        });
+        setResidents(residentsData);
+        setFilteredResidents(residentsData);
+      } catch (fallbackError) {
+        console.error("Error fetching residents with name order:", fallbackError);
+        // Final fallback: fetch without ordering
+        try {
+          const querySnapshot = await getDocs(collection(db, "users"));
+          const residentsData = querySnapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+              id: doc.id,
+              name: data.name || data.fullName || "",
+              fullName: data.fullName || data.name || "",
+              email: data.email || "",
+              mobileNumber: data.mobileNumber || data.phoneNumber || "",
+              ...data
+            };
+          });
+          // Sort manually by fullName
+          residentsData.sort((a, b) => {
+            const aName = (a.fullName || a.name || "").toLowerCase();
+            const bName = (b.fullName || b.name || "").toLowerCase();
+            return aName.localeCompare(bName);
+          });
+          setResidents(residentsData);
+          setFilteredResidents(residentsData);
+        } catch (finalError) {
+          console.error("Error fetching residents without ordering:", finalError);
+          setResidents([]);
+          setFilteredResidents([]);
+        }
+      }
     }
   };
 
@@ -980,11 +1087,18 @@ export function ManageReportsPage() {
     if (residentSearch.trim() === "") {
       setFilteredResidents(residents);
     } else {
-      const filtered = residents.filter(resident =>
-        resident.name?.toLowerCase().includes(residentSearch.toLowerCase()) ||
-        resident.email?.toLowerCase().includes(residentSearch.toLowerCase()) ||
-        resident.mobileNumber?.includes(residentSearch)
-      );
+      const searchTerm = residentSearch.toLowerCase();
+      const filtered = residents.filter(resident => {
+        const fullName = (resident.fullName || resident.name || "").toLowerCase();
+        const name = (resident.name || resident.fullName || "").toLowerCase();
+        const email = (resident.email || "").toLowerCase();
+        const mobileNumber = resident.mobileNumber || resident.phoneNumber || "";
+        
+        return fullName.includes(searchTerm) ||
+               name.includes(searchTerm) ||
+               email.includes(searchTerm) ||
+               mobileNumber.includes(residentSearch);
+      });
       setFilteredResidents(filtered);
     }
   }, [residentSearch, residents]);
@@ -1194,61 +1308,132 @@ useEffect(() => {
             <!DOCTYPE html>
             <html>
               <head>
-                <title>Emergency Report - ${report?.id || 'N/A'}</title>
+                <title>Incident Patient Report - ${report?.id || 'N/A'}</title>
+                <link rel="preconnect" href="https://fonts.googleapis.com">
+                <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+                <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
                 <style>
                   body {
-                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    font-family: 'DM Sans', sans-serif;
                     margin: 0;
                     padding: 20px;
-                    color: #333;
+                    color: #000;
                     background: #fff;
                   }
                   
                   .header {
-                    border-bottom: 3px solid #f97316;
-                    padding-bottom: 15px;
-                    margin-bottom: 25px;
+                    text-align: center;
+                    margin-bottom: 15px;
+                    padding-bottom: 10px;
                   }
                   
-                  .header h1 {
-                    color: #f97316;
-                    margin: 0 0 5px 0;
-                    font-size: 28px;
+                  .header-logo {
+                    width: 80px;
+                    height: 80px;
+                    margin: 0 auto 8px;
+                    display: block;
                   }
                   
-                  .header-info {
-                    display: flex;
-                    justify-content: space-between;
-                    margin-top: 10px;
+                  .header-org {
+                    font-size: 10px;
+                    color: #000;
+                    margin: 2px 0;
+                    line-height: 1.3;
+                  }
+                  
+                  .header-province {
+                    font-size: 10px;
+                    color: #000;
+                    margin: 2px 0;
+                    line-height: 1.3;
+                  }
+                  
+                  .header-divider {
+                    border-top: 1px solid #000;
+                    margin: 4px auto;
+                    width: 180px;
+                  }
+                  
+                  .header-municipality {
                     font-size: 12px;
-                    color: #666;
+                    font-weight: bold;
+                    color: #000;
+                    margin: 4px 0;
+                    line-height: 1.3;
+                  }
+                  
+                  .header-office {
+                    font-size: 13px;
+                    font-weight: bold;
+                    color: #000;
+                    margin: 6px 0 2px;
+                    line-height: 1.3;
+                  }
+                  
+                  .header-title {
+                    font-size: 15px;
+                    font-weight: bold;
+                    color: #000;
+                    margin: 6px 0 8px;
+                    letter-spacing: 0.3px;
+                    line-height: 1.3;
+                  }
+                  
+                  .header-for {
+                    font-size: 11px;
+                    color: #000;
+                    margin: 6px 0 2px;
+                    line-height: 1.3;
+                  }
+                  
+                  .header-mayor {
+                    font-size: 11px;
+                    color: #000;
+                    margin: 2px 0 10px;
+                    line-height: 1.3;
                   }
                   
                   .section {
-                    margin-bottom: 30px;
-                    page-break-inside: avoid;
+                    margin-bottom: 0;
                   }
                   
-                  .section-title {
+                  .section-title-row {
                     background: #f97316;
                     color: white;
-                    padding: 10px 15px;
-                    margin: 0 0 15px 0;
-                    font-size: 18px;
                     font-weight: bold;
-                    border-radius: 4px;
+                    font-size: 14px;
+                  }
+                  
+                  .section-title-row td {
+                    padding: 8px 12px;
+                    border: 1px solid #ddd;
                   }
                   
                   table {
                     width: 100%;
                     border-collapse: collapse;
                     margin-bottom: 20px;
+                    page-break-inside: auto;
+                  }
+                  
+                  table thead {
+                    display: table-header-group;
+                  }
+                  
+                  table tbody {
+                    display: table-row-group;
+                  }
+                  
+                  table tr {
+                    page-break-inside: avoid;
+                    page-break-after: auto;
                   }
                   
                   table td, table th {
-                    padding: 10px;
+                    padding: 6px 8px;
                     border: 1px solid #ddd;
                     text-align: left;
+                    font-size: 12px;
                   }
                   
                   table th {
@@ -1265,7 +1450,7 @@ useEffect(() => {
                     display: inline-block;
                     padding: 4px 8px;
                     border-radius: 4px;
-                    font-size: 12px;
+                    font-size: 11px;
                     font-weight: 600;
                   }
                   
@@ -1290,6 +1475,7 @@ useEffect(() => {
                     border-radius: 6px 6px 0 0;
                     font-weight: bold;
                     color: #1f2937;
+                    page-break-after: avoid;
                   }
                   
                   .sub-section {
@@ -1301,6 +1487,7 @@ useEffect(() => {
                     font-weight: 600;
                     color: #f97316;
                     margin-bottom: 8px;
+                    font-size: 13px;
                   }
                   
                   .footer {
@@ -1308,27 +1495,32 @@ useEffect(() => {
                     padding-top: 20px;
                     border-top: 2px solid #e5e7eb;
                     text-align: center;
-                    font-size: 12px;
+                    font-size: 11px;
                     color: #666;
                   }
                 </style>
               </head>
               <body>
                 <div class="header">
-                  <h1>AcciZard Emergency Report</h1>
-                  <div class="header-info">
-                    <div>Report ID: <strong>${report?.id || 'N/A'}</strong></div>
-                    <div>Generated: ${new Date().toLocaleString()}</div>
-                  </div>
+                  <img src="/accizard-uploads/logo-ldrrmo-png.png" alt="LDRRMO Logo" class="header-logo" />
+                  <div class="header-org">Republic of the Philippines</div>
+                  <div class="header-province">Province of Quezon</div>
+                  <div class="header-divider"></div>
+                  <div class="header-municipality">Municipality of Lucban</div>
+                  <div class="header-office">Local Disaster Risk Reduction and Management Office</div>
+                  <div class="header-title">Incident Patient Report</div>
+                  <div class="header-for">FOR: [Name]</div>
+                  <div class="header-mayor">Municipal Mayor Chair, MDRRMC</div>
+                </div>
                 
-                <!-- Section I: Report Details -->
-                <div class="section">
-                  <div class="section-title">I. Report Details</div>
-                  <table>
-                    <tr>
-                      <th>Report Type</th>
-                      <td class="value-cell">${report?.type || 'N/A'}</td>
-                    </tr>
+                <table>
+                  <tr class="section-title-row">
+                    <td colspan="2">I. Report Details</td>
+                  </tr>
+                  <tr>
+                    <th>Report Type</th>
+                    <td class="value-cell">${report?.type || 'N/A'}</td>
+                  </tr>
                     <tr>
                       <th>Status</th>
                       <td class="value-cell">
@@ -1370,14 +1562,11 @@ useEffect(() => {
                         </small>
                       </td>
                     </tr>
-                  </table>
-                
-                <!-- Section II: Dispatch Form -->
-                <div class="section">
-                  <div class="section-title">II. Dispatch Form</div>
-                  <table>
-                    <tr>
-                      <th>Received By</th>
+                  <tr class="section-title-row">
+                    <td colspan="2">II. Dispatch Form</td>
+                  </tr>
+                  <tr>
+                    <th>Received By</th>
                       <td class="value-cell">${dispatch?.receivedBy || 'N/A'}</td>
                     </tr>
                     <tr>
@@ -1456,11 +1645,9 @@ useEffect(() => {
                           : 'N/A'}
                       </td>
                     </tr>
-                  </table>
-                
-                <!-- Section III: Patient Information -->
-                <div class="section">
-                  <div class="section-title">III. Patient Information</div>
+                  <tr class="section-title-row">
+                    <td colspan="2">III. Patient Information</td>
+                  </tr>
                   ${patientData && patientData.length > 0
                     ? patientData.map((patient: any, index: number) => {
                         const gcsTotal = calculateGCSTotal(patient);
@@ -1540,9 +1727,6 @@ useEffect(() => {
                     : '<p style="color: #666; font-style: italic;">No patient information available</p>'}
               </div>
               
-              <div class="footer">
-                <p>AcciZard Emergency Management System</p>
-                <p>Lucban, Quezon - Local Disaster Risk Reduction and Management Office</p>
               </div>
             </body>
           </html>
@@ -1596,6 +1780,30 @@ useEffect(() => {
         console.log("Report data not found for PDF generation");
       }
 
+      // Check if there's a pin associated with this report and delete it
+      const reportId = reportToDeleteData?.id || reportToDeleteData?.reportId;
+      if (reportId) {
+        try {
+          // Find pin with matching reportId
+          const pinsQuery = query(collection(db, "pins"), where("reportId", "==", reportId));
+          const pinsSnapshot = await getDocs(pinsQuery);
+          
+          // Delete all pins associated with this report
+          if (!pinsSnapshot.empty) {
+            await Promise.all(
+              pinsSnapshot.docs.map(async (pinDoc) => {
+                await deleteDoc(doc(db, "pins", pinDoc.id));
+                console.log("Deleted associated pin:", pinDoc.id);
+              })
+            );
+            console.log(`Deleted ${pinsSnapshot.docs.length} pin(s) associated with report ${reportId}`);
+          }
+        } catch (pinError) {
+          console.error("Error deleting associated pin(s):", pinError);
+          // Continue with report deletion even if pin deletion fails
+        }
+      }
+
       // Delete the report from Firestore
       await deleteDoc(doc(db, "reports", reportToDelete));
       console.log("Successfully deleted report from Firestore:", reportToDelete);
@@ -1646,8 +1854,28 @@ useEffect(() => {
       setIsDeletingReport(null);
     }
   };
-  const handlePinOnMap = (report: any) => {
-    console.log("Redirecting to map for report:", report.id);
+  const handlePinOnMap = async (report: any) => {
+    const reportId = report.id || report.reportId;
+    const pinId = pinnedReports.get(reportId);
+    
+    // If report is already pinned, fetch pin data and navigate to map in unpin mode
+    if (pinId) {
+      try {
+        const pin = await getPinById(pinId);
+        if (pin) {
+          navigate("/risk-map", { state: { pin, unpinMode: true } });
+        } else {
+          toast.error("Pin not found");
+        }
+      } catch (error: any) {
+        console.error("Error fetching pin:", error);
+        toast.error("Failed to load pin data");
+      }
+      return;
+    }
+    
+    // Otherwise, navigate to map to pin it
+    console.log("Redirecting to map for report:", reportId);
     navigate("/risk-map", { state: { report } });
   };
   const handleViewLocation = (location: string) => {
@@ -1803,20 +2031,30 @@ useEffect(() => {
     
     // Date filter
     let dateMatch = true;
-    if (date?.from) {
+    if (date?.from || date?.to) {
       try {
-        const [month, day, year] = report.dateSubmitted.split('/');
-        const fullYear = 2000 + parseInt(year);
-        const reportDate = new Date(fullYear, parseInt(month) - 1, parseInt(day));
-        
-        if (date.from) {
-          dateMatch = reportDate >= date.from;
-        }
-        if (date.to && dateMatch) {
-          dateMatch = reportDate <= date.to;
+        if (report.dateSubmitted) {
+          const [month, day, year] = report.dateSubmitted.split('/');
+          if (month && day && year) {
+            const fullYear = 2000 + parseInt(year);
+            const reportDate = new Date(fullYear, parseInt(month) - 1, parseInt(day));
+            reportDate.setHours(0, 0, 0, 0);
+            
+            if (date.from) {
+              const fromDate = new Date(date.from);
+              fromDate.setHours(0, 0, 0, 0);
+              dateMatch = reportDate >= fromDate;
+            }
+            if (date.to && dateMatch) {
+              const toDate = new Date(date.to);
+              toDate.setHours(23, 59, 59, 999);
+              dateMatch = reportDate <= toDate;
+            }
+          }
         }
       } catch (error) {
-        dateMatch = true;
+        // If date parsing fails, exclude from results
+        dateMatch = false;
       }
     }
     
@@ -1978,6 +2216,413 @@ useEffect(() => {
     setShowBatchDeleteDialog(true);
   };
 
+  // Helper function to generate PDF blob from report data
+  const generatePDFBlob = async (
+    reportData: any,
+    dispatchDataForPDF: any,
+    patientsDataForPDF: any[]
+  ): Promise<{ blob: Blob; filename: string } | null> => {
+    try {
+      // Helper function to calculate GCS total
+      const calculateGCSTotal = (patient: any) => {
+        const eyes = patient.gcs?.eyes ? parseInt(patient.gcs.eyes) : 0;
+        const verbal = patient.gcs?.verbal ? parseInt(patient.gcs.verbal) : 0;
+        const motor = patient.gcs?.motor ? parseInt(patient.gcs.motor) : 0;
+        return eyes + verbal + motor;
+      };
+
+      // Generate PDF HTML content
+      const generatePDFHTML = () => {
+        const report = reportData;
+        const dispatch = dispatchDataForPDF;
+        const patientData = patientsDataForPDF;
+        
+        return `
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>Incident Patient Report - ${report?.id || 'N/A'}</title>
+              <link rel="preconnect" href="https://fonts.googleapis.com">
+              <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+              <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+              <style>
+                body {
+                  font-family: 'DM Sans', sans-serif;
+                  margin: 0;
+                  padding: 20px;
+                  color: #000;
+                  background: #fff;
+                }
+                
+                .header {
+                  text-align: center;
+                  margin-bottom: 15px;
+                  padding-bottom: 10px;
+                }
+                
+                .header-logo {
+                  width: 80px;
+                  height: 80px;
+                  margin: 0 auto 8px;
+                  display: block;
+                }
+                
+                .header-org {
+                  font-size: 10px;
+                  color: #000;
+                  margin: 2px 0;
+                  line-height: 1.3;
+                }
+                
+                .header-province {
+                  font-size: 10px;
+                  color: #000;
+                  margin: 2px 0;
+                  line-height: 1.3;
+                }
+                
+                .header-divider {
+                  border-top: 1px solid #000;
+                  margin: 4px auto;
+                  width: 180px;
+                }
+                
+                .header-municipality {
+                  font-size: 12px;
+                  font-weight: bold;
+                  color: #000;
+                  margin: 4px 0;
+                  line-height: 1.3;
+                }
+                
+                .header-office {
+                  font-size: 13px;
+                  font-weight: bold;
+                  color: #000;
+                  margin: 6px 0 2px;
+                  line-height: 1.3;
+                }
+                
+                .header-title {
+                  font-size: 15px;
+                  font-weight: bold;
+                  color: #000;
+                  margin: 6px 0 8px;
+                  letter-spacing: 0.3px;
+                  line-height: 1.3;
+                }
+                
+                .header-for {
+                  font-size: 11px;
+                  color: #000;
+                  margin: 6px 0 2px;
+                  line-height: 1.3;
+                }
+                
+                .header-mayor {
+                  font-size: 11px;
+                  color: #000;
+                  margin: 2px 0 10px;
+                  line-height: 1.3;
+                }
+                
+                .section {
+                  margin-bottom: 0;
+                }
+                
+                .section-title-row {
+                  background: #f97316;
+                  color: white;
+                  font-weight: bold;
+                  font-size: 14px;
+                }
+                
+                .section-title-row td {
+                  padding: 8px 12px;
+                  border: 1px solid #ddd;
+                }
+                
+                table {
+                  width: 100%;
+                  border-collapse: collapse;
+                  margin-bottom: 20px;
+                  page-break-inside: auto;
+                }
+                
+                table thead {
+                  display: table-header-group;
+                }
+                
+                table tbody {
+                  display: table-row-group;
+                }
+                
+                table tr {
+                  page-break-inside: avoid;
+                  page-break-after: auto;
+                }
+                
+                table td, table th {
+                  padding: 6px 8px;
+                  border: 1px solid #ddd;
+                  text-align: left;
+                  font-size: 12px;
+                }
+                
+                table th {
+                  background-color: #f8f9fa;
+                  font-weight: 600;
+                  width: 30%;
+                }
+                
+                .value-cell {
+                  background-color: #fff;
+                }
+                
+                .badge {
+                  display: inline-block;
+                  padding: 4px 8px;
+                  border-radius: 4px;
+                  font-size: 11px;
+                  font-weight: 600;
+                }
+                
+                .status-pending { background-color: #fef3c7; color: #92400e; }
+                .status-ongoing { background-color: #dbeafe; color: #1e40af; }
+                .status-not-responded { background-color: #fee2e2; color: #991b1b; }
+                .status-responded { background-color: #d1fae5; color: #065f46; }
+                .status-false-report { background-color: #f3f4f6; color: #374151; }
+                .status-redundant { background-color: #f3e8ff; color: #6b21a8; }
+                
+                .patient-section {
+                  margin-top: 20px;
+                  border: 2px solid #e5e7eb;
+                  padding: 15px;
+                  border-radius: 8px;
+                }
+                
+                .patient-header {
+                  background: #f3f4f6;
+                  padding: 10px;
+                  margin: -15px -15px 15px -15px;
+                  border-radius: 6px 6px 0 0;
+                  font-weight: bold;
+                  color: #1f2937;
+                }
+                
+                .sub-section {
+                  margin-top: 15px;
+                  margin-left: 20px;
+                }
+                
+                .sub-section-title {
+                  font-weight: 600;
+                  color: #f97316;
+                  margin-bottom: 8px;
+                  font-size: 13px;
+                }
+                
+                .footer {
+                  margin-top: 40px;
+                  padding-top: 20px;
+                  border-top: 2px solid #e5e7eb;
+                  text-align: center;
+                  font-size: 11px;
+                  color: #666;
+                }
+              </style>
+            </head>
+            <body>
+              <div class="header">
+                <img src="/accizard-uploads/logo-ldrrmo-png.png" alt="LDRRMO Logo" class="header-logo" />
+                <div class="header-org">Republic of the Philippines</div>
+                <div class="header-province">Province of Quezon</div>
+                <div class="header-divider"></div>
+                <div class="header-municipality">Municipality of Lucban</div>
+                <div class="header-office">Local Disaster Risk Reduction and Management Office</div>
+                <div class="header-title">Incident Patient Report</div>
+                <div class="header-for">FOR: [Name]</div>
+                <div class="header-mayor">Municipal Mayor Chair, MDRRMC</div>
+              </div>
+              
+              <table>
+                <tr class="section-title-row">
+                  <td colspan="2">I. Report Details</td>
+                </tr>
+                <tr>
+                  <th>Report Type</th>
+                    <td class="value-cell">${report?.type || 'N/A'}</td>
+                  </tr>
+                  <tr>
+                    <th>Status</th>
+                    <td class="value-cell">
+                      <span class="badge status-${report?.status?.toLowerCase().replace(' ', '-') || 'pending'}">
+                        ${report?.status || 'N/A'}
+                      </span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <th>Reported By</th>
+                    <td class="value-cell">${report?.reportedBy || 'N/A'}</td>
+                  </tr>
+                  <tr>
+                    <th>Date and Time Submitted</th>
+                    <td class="value-cell">
+                      ${report?.dateSubmitted || 'N/A'} ${report?.timeSubmitted ? `at ${report.timeSubmitted}` : ''}
+                    </td>
+                  </tr>
+                  <tr>
+                    <th>Mobile Number</th>
+                    <td class="value-cell">${report?.mobileNumber || 'N/A'}</td>
+                  </tr>
+                  <tr>
+                    <th>Description</th>
+                    <td class="value-cell">${report?.description || 'N/A'}</td>
+                  </tr>
+                  <tr>
+                    <th>Location</th>
+                    <td class="value-cell">
+                      ${report?.location || 'N/A'}<br>
+                      <small style="color: #666;">
+                        Coordinates: ${report?.latitude && report?.longitude 
+                          ? `${report.latitude}, ${report.longitude}` 
+                          : 'N/A'}
+                      </small>
+                    </td>
+                  </tr>
+                <tr class="section-title-row">
+                  <td colspan="2">II. Dispatch Form</td>
+                </tr>
+                <tr>
+                  <th>Received By</th>
+                    <td class="value-cell">${dispatch?.receivedBy || 'N/A'}</td>
+                  </tr>
+                  <tr>
+                    <th>Responders</th>
+                    <td class="value-cell">
+                      ${dispatch?.responders && dispatch.responders.length > 0
+                        ? dispatch.responders.map((r: any) => 
+                            `${r.team}: ${r.responders ? r.responders.join(', ') : 'N/A'}`
+                          ).join('<br>')
+                        : 'N/A'}
+                    </td>
+                  </tr>
+                  <tr>
+                    <th>Time Call Received</th>
+                    <td class="value-cell">${dispatch?.timeCallReceived || 'N/A'}</td>
+                  </tr>
+                  <tr>
+                    <th>Time of Dispatch</th>
+                    <td class="value-cell">${dispatch?.timeOfDispatch || 'N/A'}</td>
+                  </tr>
+                  <tr>
+                    <th>Time of Arrival</th>
+                    <td class="value-cell">${dispatch?.timeOfArrival || 'N/A'}</td>
+                  </tr>
+                  <tr>
+                    <th>Response Time</th>
+                    <td class="value-cell">
+                      ${dispatch?.timeOfDispatch && dispatch?.timeOfArrival
+                        ? calculateResponseTime(dispatch.timeOfDispatch, dispatch.timeOfArrival)
+                        : 'N/A'}
+                    </td>
+                  </tr>
+                <tr class="section-title-row">
+                  <td colspan="2">III. Patient Information</td>
+                </tr>
+                ${patientData && patientData.length > 0
+                  ? patientData.map((patient: any, index: number) => {
+                      const gcsTotal = calculateGCSTotal(patient);
+                      return `
+                        <div class="patient-section">
+                          <div class="patient-header">Patient ${index + 1}${patient.name ? ` - ${patient.name}` : ''}</div>
+                          
+                          <table>
+                            <tr>
+                              <th>Name</th>
+                              <td class="value-cell">${patient.name || 'N/A'}</td>
+                            </tr>
+                            <tr>
+                              <th>Contact Number</th>
+                              <td class="value-cell">${patient.contactNumber || 'N/A'}</td>
+                            </tr>
+                            <tr>
+                              <th>Address</th>
+                              <td class="value-cell">${patient.address || 'N/A'}</td>
+                            </tr>
+                            <tr>
+                              <th>Age</th>
+                              <td class="value-cell">${patient.age ? `${patient.age} years old` : 'N/A'}</td>
+                            </tr>
+                            <tr>
+                              <th>Gender</th>
+                              <td class="value-cell">${patient.gender || 'N/A'}</td>
+                            </tr>
+                          </table>
+                        </div>
+                      `;
+                    }).join('')
+                  : '<p style="color: #666; font-style: italic;">No patient information available</p>'}
+            </div>
+            
+            </div>
+          </body>
+        </html>
+      `;
+      };
+
+      // Generate PDF
+      const htmlContent = generatePDFHTML();
+      const pdfContent = document.createElement('div');
+      pdfContent.innerHTML = htmlContent;
+      pdfContent.style.position = 'absolute';
+      pdfContent.style.left = '-9999px';
+      pdfContent.style.width = '210mm';
+      document.body.appendChild(pdfContent);
+      
+      try {
+        const canvas = await html2canvas(pdfContent, {
+          allowTaint: true,
+          logging: false,
+          useCORS: true,
+          scale: 2 as any
+        } as any);
+        
+        const imgData = canvas.toDataURL('image/png');
+        const pdf = new jsPDF('p', 'mm', 'a4');
+        const imgWidth = 210;
+        const pageHeight = 297;
+        const imgHeight = (canvas.height * imgWidth) / canvas.width;
+        let heightLeft = imgHeight;
+        let position = 0;
+        
+        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+        
+        while (heightLeft >= 0) {
+          position = heightLeft - imgHeight;
+          pdf.addPage();
+          pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+          heightLeft -= pageHeight;
+        }
+        
+        // Get PDF as blob
+        const pdfBlob = pdf.output('blob');
+        const filename = `Report_${reportData.id}_${new Date().getTime()}.pdf`;
+        
+        return { blob: pdfBlob, filename };
+      } catch (error) {
+        console.error("Error generating PDF:", error);
+        return null;
+      } finally {
+        document.body.removeChild(pdfContent);
+      }
+    } catch (pdfError) {
+      console.error("Error generating PDF:", pdfError);
+      return null;
+    }
+  };
+
   const confirmBatchDelete = async () => {
     if (!selectedReports || selectedReports.length === 0) {
       console.error("No reports selected for deletion");
@@ -1985,353 +2630,137 @@ useEffect(() => {
     }
 
     console.log("Attempting to delete reports:", selectedReports);
+    const shouldCreateZip = selectedReports.length > 5;
 
     try {
-      // Generate PDFs for each report before deletion
-      for (const reportId of selectedReports) {
-        const reportData = reports.find(r => r.firestoreId === reportId);
-        if (reportData) {
-          try {
-            // Load dispatch and patient data if available
-            let dispatchDataForPDF = dispatchData;
-            let patientsDataForPDF = patients;
-            
-            try {
-              const loadedDispatch = await loadDispatchDataFromDatabase(reportId);
-              if (loadedDispatch) dispatchDataForPDF = loadedDispatch;
-              
-              const loadedPatients = await loadPatientDataFromDatabase(reportId);
-              if (loadedPatients && loadedPatients.patients) patientsDataForPDF = loadedPatients.patients;
-            } catch (error) {
-              console.log("Error loading additional data for PDF:", error);
-            }
+      if (shouldCreateZip) {
+        // Generate PDFs and collect them for ZIP
+        const zip = new JSZip();
+        const pdfPromises: Promise<void>[] = [];
 
-            // Helper function to calculate GCS total
-            const calculateGCSTotal = (patient: any) => {
-              const eyes = patient.gcs?.eyes ? parseInt(patient.gcs.eyes) : 0;
-              const verbal = patient.gcs?.verbal ? parseInt(patient.gcs.verbal) : 0;
-              const motor = patient.gcs?.motor ? parseInt(patient.gcs.motor) : 0;
-              return eyes + verbal + motor;
-            };
-
-            // Generate PDF HTML content
-            const generatePDFHTML = () => {
-              const report = reportData;
-              const dispatch = dispatchDataForPDF;
-              const patientData = patientsDataForPDF;
-              
-              return `
-                <!DOCTYPE html>
-                <html>
-                  <head>
-                    <title>Emergency Report - ${report?.id || 'N/A'}</title>
-                    <style>
-                      body {
-                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                        margin: 0;
-                        padding: 20px;
-                        color: #333;
-                        background: #fff;
-                      }
-                      
-                      .header {
-                        border-bottom: 3px solid #f97316;
-                        padding-bottom: 15px;
-                        margin-bottom: 25px;
-                      }
-                      
-                      .header h1 {
-                        color: #f97316;
-                        margin: 0 0 5px 0;
-                        font-size: 28px;
-                      }
-                      
-                      .header-info {
-                        display: flex;
-                        justify-content: space-between;
-                        margin-top: 10px;
-                        font-size: 12px;
-                        color: #666;
-                      }
-                      
-                      .section {
-                        margin-bottom: 30px;
-                        page-break-inside: avoid;
-                      }
-                      
-                      .section-title {
-                        background: #f97316;
-                        color: white;
-                        padding: 10px 15px;
-                        margin: 0 0 15px 0;
-                        font-size: 18px;
-                        font-weight: bold;
-                        border-radius: 4px;
-                      }
-                      
-                      table {
-                        width: 100%;
-                        border-collapse: collapse;
-                        margin-bottom: 20px;
-                      }
-                      
-                      table td, table th {
-                        padding: 10px;
-                        border: 1px solid #ddd;
-                        text-align: left;
-                      }
-                      
-                      table th {
-                        background-color: #f8f9fa;
-                        font-weight: 600;
-                        width: 30%;
-                      }
-                      
-                      .value-cell {
-                        background-color: #fff;
-                      }
-                      
-                      .badge {
-                        display: inline-block;
-                        padding: 4px 8px;
-                        border-radius: 4px;
-                        font-size: 12px;
-                        font-weight: 600;
-                      }
-                      
-                      .status-pending { background-color: #fef3c7; color: #92400e; }
-                      .status-ongoing { background-color: #dbeafe; color: #1e40af; }
-                      .status-not-responded { background-color: #fee2e2; color: #991b1b; }
-                      .status-responded { background-color: #d1fae5; color: #065f46; }
-                      .status-false-report { background-color: #f3f4f6; color: #374151; }
-                      .status-redundant { background-color: #f3e8ff; color: #6b21a8; }
-                      
-                      .patient-section {
-                        margin-top: 20px;
-                        border: 2px solid #e5e7eb;
-                        padding: 15px;
-                        border-radius: 8px;
-                      }
-                      
-                      .patient-header {
-                        background: #f3f4f6;
-                        padding: 10px;
-                        margin: -15px -15px 15px -15px;
-                        border-radius: 6px 6px 0 0;
-                        font-weight: bold;
-                        color: #1f2937;
-                      }
-                      
-                      .sub-section {
-                        margin-top: 15px;
-                        margin-left: 20px;
-                      }
-                      
-                      .sub-section-title {
-                        font-weight: 600;
-                        color: #f97316;
-                        margin-bottom: 8px;
-                      }
-                      
-                      .footer {
-                        margin-top: 40px;
-                        padding-top: 20px;
-                        border-top: 2px solid #e5e7eb;
-                        text-align: center;
-                        font-size: 12px;
-                        color: #666;
-                      }
-                    </style>
-                  </head>
-                  <body>
-                    <div class="header">
-                      <h1>AcciZard Emergency Report</h1>
-                      <div class="header-info">
-                        <div>Report ID: <strong>${report?.id || 'N/A'}</strong></div>
-                        <div>Generated: ${new Date().toLocaleString()}</div>
-                      </div>
-                    </div>
-                    
-                    <!-- Section I: Report Details -->
-                    <div class="section">
-                      <div class="section-title">I. Report Details</div>
-                      <table>
-                        <tr>
-                          <th>Report Type</th>
-                          <td class="value-cell">${report?.type || 'N/A'}</td>
-                        </tr>
-                        <tr>
-                          <th>Status</th>
-                          <td class="value-cell">
-                            <span class="badge status-${report?.status?.toLowerCase().replace(' ', '-') || 'pending'}">
-                              ${report?.status || 'N/A'}
-                            </span>
-                          </td>
-                        </tr>
-                        <tr>
-                          <th>Reported By</th>
-                          <td class="value-cell">${report?.reportedBy || 'N/A'}</td>
-                        </tr>
-                        <tr>
-                          <th>Date and Time Submitted</th>
-                          <td class="value-cell">
-                            ${report?.dateSubmitted || 'N/A'} ${report?.timeSubmitted ? `at ${report.timeSubmitted}` : ''}
-                          </td>
-                        </tr>
-                        <tr>
-                          <th>Mobile Number</th>
-                          <td class="value-cell">${report?.mobileNumber || 'N/A'}</td>
-                        </tr>
-                        <tr>
-                          <th>Description</th>
-                          <td class="value-cell">${report?.description || 'N/A'}</td>
-                        </tr>
-                        <tr>
-                          <th>Location</th>
-                          <td class="value-cell">
-                            ${report?.location || 'N/A'}<br>
-                            <small style="color: #666;">
-                              Coordinates: ${report?.latitude && report?.longitude 
-                                ? `${report.latitude}, ${report.longitude}` 
-                                : 'N/A'}
-                            </small>
-                          </td>
-                        </tr>
-                      </table>
-                    </div>
-                    
-                    <!-- Section II: Dispatch Form -->
-                    <div class="section">
-                      <div class="section-title">II. Dispatch Form</div>
-                      <table>
-                        <tr>
-                          <th>Received By</th>
-                          <td class="value-cell">${dispatch?.receivedBy || 'N/A'}</td>
-                        </tr>
-                        <tr>
-                          <th>Responders</th>
-                          <td class="value-cell">
-                            ${dispatch?.responders && dispatch.responders.length > 0
-                              ? dispatch.responders.map((r: any) => 
-                                  `${r.team}: ${r.responders ? r.responders.join(', ') : 'N/A'}`
-                                ).join('<br>')
-                              : 'N/A'}
-                          </td>
-                        </tr>
-                        <tr>
-                          <th>Time Call Received</th>
-                          <td class="value-cell">${dispatch?.timeCallReceived || 'N/A'}</td>
-                        </tr>
-                        <tr>
-                          <th>Time of Dispatch</th>
-                          <td class="value-cell">${dispatch?.timeOfDispatch || 'N/A'}</td>
-                        </tr>
-                        <tr>
-                          <th>Time of Arrival</th>
-                          <td class="value-cell">${dispatch?.timeOfArrival || 'N/A'}</td>
-                        </tr>
-                        <tr>
-                          <th>Response Time</th>
-                          <td class="value-cell">
-                            ${dispatch?.timeOfDispatch && dispatch?.timeOfArrival
-                              ? calculateResponseTime(dispatch.timeOfDispatch, dispatch.timeOfArrival)
-                              : 'N/A'}
-                          </td>
-                        </tr>
-                      </table>
-                    </div>
-                    
-                    <!-- Section III: Patient Information -->
-                    <div class="section">
-                      <div class="section-title">III. Patient Information</div>
-                      ${patientData && patientData.length > 0
-                        ? patientData.map((patient: any, index: number) => {
-                            const gcsTotal = calculateGCSTotal(patient);
-                            return `
-                              <div class="patient-section">
-                                <div class="patient-header">Patient ${index + 1}${patient.name ? ` - ${patient.name}` : ''}</div>
-                                
-                                <table>
-                                  <tr>
-                                    <th>Name</th>
-                                    <td class="value-cell">${patient.name || 'N/A'}</td>
-                                  </tr>
-                                  <tr>
-                                    <th>Contact Number</th>
-                                    <td class="value-cell">${patient.contactNumber || 'N/A'}</td>
-                                  </tr>
-                                  <tr>
-                                    <th>Address</th>
-                                    <td class="value-cell">${patient.address || 'N/A'}</td>
-                                  </tr>
-                                  <tr>
-                                    <th>Age</th>
-                                    <td class="value-cell">${patient.age ? `${patient.age} years old` : 'N/A'}</td>
-                                  </tr>
-                                  <tr>
-                                    <th>Gender</th>
-                                    <td class="value-cell">${patient.gender || 'N/A'}</td>
-                                  </tr>
-                                </table>
-                              </div>
-                            `;
-                          }).join('')
-                        : '<p style="color: #666; font-style: italic;">No patient information available</p>'}
-                  </div>
+        for (const reportId of selectedReports) {
+          const reportData = reports.find(r => r.firestoreId === reportId);
+          if (reportData) {
+            const pdfPromise = (async () => {
+              try {
+                // Load dispatch and patient data if available
+                let dispatchDataForPDF = dispatchData;
+                let patientsDataForPDF = patients;
+                
+                try {
+                  const loadedDispatch = await loadDispatchDataFromDatabase(reportId);
+                  if (loadedDispatch) dispatchDataForPDF = loadedDispatch;
                   
-                  <div class="footer">
-                    <p>AcciZard Emergency Management System</p>
-                    <p>Lucban, Quezon - Local Disaster Risk Reduction and Management Office</p>
-                  </div>
-                </body>
-              </html>
-            `;
-            };
+                  const loadedPatients = await loadPatientDataFromDatabase(reportId);
+                  if (loadedPatients && loadedPatients.patients) patientsDataForPDF = loadedPatients.patients;
+                } catch (error) {
+                  console.log("Error loading additional data for PDF:", error);
+                }
 
-            // Generate and download PDF
-            const htmlContent = generatePDFHTML();
-            const pdfContent = document.createElement('div');
-            pdfContent.innerHTML = htmlContent;
-            pdfContent.style.position = 'absolute';
-            pdfContent.style.left = '-9999px';
-            pdfContent.style.width = '210mm';
-            document.body.appendChild(pdfContent);
-            
-            try {
-              const canvas = await html2canvas(pdfContent, {
-                allowTaint: true,
-                logging: false,
-                useCORS: true,
-                scale: 2 as any
-              } as any);
-              
-              const imgData = canvas.toDataURL('image/png');
-              const pdf = new jsPDF('p', 'mm', 'a4');
-              const imgWidth = 210;
-              const pageHeight = 297;
-              const imgHeight = (canvas.height * imgWidth) / canvas.width;
-              let heightLeft = imgHeight;
-              let position = 0;
-              
-              pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-              heightLeft -= pageHeight;
-              
-              while (heightLeft >= 0) {
-                position = heightLeft - imgHeight;
-                pdf.addPage();
-                pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-                heightLeft -= pageHeight;
+                const pdfResult = await generatePDFBlob(reportData, dispatchDataForPDF, patientsDataForPDF);
+                if (pdfResult) {
+                  zip.file(pdfResult.filename, pdfResult.blob);
+                }
+              } catch (error) {
+                console.error(`Error generating PDF for report ${reportId}:`, error);
               }
-              
-              pdf.save(`Report_${reportData.id}_${new Date().getTime()}.pdf`);
-            } catch (error) {
-              console.error("Error generating PDF:", error);
-            } finally {
-              document.body.removeChild(pdfContent);
-            }
-          } catch (pdfError) {
-            console.error("Error generating PDF:", pdfError);
+            })();
+            pdfPromises.push(pdfPromise);
           }
+        }
+
+        // Wait for all PDFs to be generated
+        await Promise.all(pdfPromises);
+
+        // Generate ZIP file and download
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+        const zipUrl = URL.createObjectURL(zipBlob);
+        const zipLink = document.createElement('a');
+        zipLink.href = zipUrl;
+        zipLink.download = `Reports_${new Date().getTime()}.zip`;
+        document.body.appendChild(zipLink);
+        zipLink.click();
+        document.body.removeChild(zipLink);
+        URL.revokeObjectURL(zipUrl);
+      } else {
+        // Generate and download PDFs individually (original behavior)
+        for (const reportId of selectedReports) {
+          const reportData = reports.find(r => r.firestoreId === reportId);
+          if (reportData) {
+            try {
+              // Load dispatch and patient data if available
+              let dispatchDataForPDF = dispatchData;
+              let patientsDataForPDF = patients;
+              
+              try {
+                const loadedDispatch = await loadDispatchDataFromDatabase(reportId);
+                if (loadedDispatch) dispatchDataForPDF = loadedDispatch;
+                
+                const loadedPatients = await loadPatientDataFromDatabase(reportId);
+                if (loadedPatients && loadedPatients.patients) patientsDataForPDF = loadedPatients.patients;
+              } catch (error) {
+                console.log("Error loading additional data for PDF:", error);
+              }
+
+              const pdfResult = await generatePDFBlob(reportData, dispatchDataForPDF, patientsDataForPDF);
+              if (pdfResult) {
+                // Download individual PDF
+                const url = URL.createObjectURL(pdfResult.blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = pdfResult.filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+              }
+            } catch (pdfError) {
+              console.error("Error generating PDF:", pdfError);
+            }
+          }
+        }
+      }
+
+      // Collect all reportIds (custom IDs) for the selected reports
+      const reportIdsToDelete: string[] = [];
+      selectedReports.forEach(reportId => {
+        const reportData = reports.find(r => r.firestoreId === reportId);
+        if (reportData?.id || reportData?.reportId) {
+          reportIdsToDelete.push(reportData.id || reportData.reportId);
+        }
+      });
+
+      // Delete all pins associated with the selected reports
+      if (reportIdsToDelete.length > 0) {
+        try {
+          // Firestore "in" operator has a limit of 10 items, so batch if needed
+          const batchSize = 10;
+          const pinDeletionPromises: Promise<void>[] = [];
+          
+          for (let i = 0; i < reportIdsToDelete.length; i += batchSize) {
+            const batch = reportIdsToDelete.slice(i, i + batchSize);
+            const pinsQuery = query(collection(db, "pins"), where("reportId", "in", batch));
+            const pinsSnapshot = await getDocs(pinsQuery);
+            
+            if (!pinsSnapshot.empty) {
+              pinsSnapshot.docs.forEach((pinDoc) => {
+                pinDeletionPromises.push(
+                  deleteDoc(doc(db, "pins", pinDoc.id)).then(() => {
+                    console.log("Deleted associated pin:", pinDoc.id);
+                  })
+                );
+              });
+            }
+          }
+          
+          // Wait for all pin deletions to complete
+          if (pinDeletionPromises.length > 0) {
+            await Promise.all(pinDeletionPromises);
+            console.log(`Deleted ${pinDeletionPromises.length} pin(s) associated with ${reportIdsToDelete.length} report(s)`);
+          }
+        } catch (pinError) {
+          console.error("Error deleting associated pins:", pinError);
+          // Continue with report deletion even if pin deletion fails
         }
       }
 
@@ -2354,10 +2783,16 @@ useEffect(() => {
         return newSet;
       });
       
+      // Save count before clearing
+      const deletedCount = selectedReports.length;
+      
       // Clear selected reports
       setSelectedReports([]);
       
-      toast.success(`PDFs downloaded and ${selectedReports.length} report(s) deleted successfully`);
+      const downloadMessage = shouldCreateZip 
+        ? `ZIP file downloaded and ${deletedCount} report(s) deleted successfully`
+        : `PDFs downloaded and ${deletedCount} report(s) deleted successfully`;
+      toast.success(downloadMessage);
       setShowBatchDeleteDialog(false);
       
       // Force a small delay to ensure Firestore listener has processed the changes
@@ -2499,7 +2934,10 @@ useEffect(() => {
         <!DOCTYPE html>
         <html>
           <head>
-            <title>Emergency Report - ${report?.id || 'N/A'}</title>
+            <title>Incident Patient Report - ${report?.id || 'N/A'}</title>
+            <link rel="preconnect" href="https://fonts.googleapis.com">
+            <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+            <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
             <style>
               @media print {
                 body { margin: 0; padding: 0; }
@@ -2508,46 +2946,99 @@ useEffect(() => {
               }
               
               body {
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                font-family: 'DM Sans', sans-serif;
                 margin: 0;
                 padding: 20px;
-                color: #333;
+                color: #000;
                 background: #fff;
               }
               
               .header {
-                border-bottom: 3px solid #f97316;
-                padding-bottom: 15px;
-                margin-bottom: 25px;
+                text-align: center;
+                margin-bottom: 30px;
+                padding-bottom: 20px;
               }
               
-              .header h1 {
-                color: #f97316;
-                margin: 0 0 5px 0;
-                font-size: 28px;
+              .header-logo {
+                width: 100px;
+                height: 100px;
+                margin: 0 auto 15px;
+                display: block;
               }
               
-              .header-info {
-                display: flex;
-                justify-content: space-between;
-                margin-top: 10px;
+              .header-org {
+                font-size: 11px;
+                color: #000;
+                margin: 5px 0;
+                line-height: 1.4;
+              }
+              
+              .header-province {
+                font-size: 11px;
+                color: #000;
+                margin: 5px 0;
+                line-height: 1.4;
+              }
+              
+              .header-divider {
+                border-top: 1px solid #000;
+                margin: 8px auto;
+                width: 200px;
+              }
+              
+              .header-municipality {
+                font-size: 13px;
+                font-weight: bold;
+                color: #000;
+                margin: 8px 0;
+                line-height: 1.4;
+              }
+              
+              .header-office {
+                font-size: 14px;
+                font-weight: bold;
+                color: #000;
+                margin: 15px 0 5px;
+                line-height: 1.4;
+              }
+              
+              .header-title {
+                font-size: 16px;
+                font-weight: bold;
+                color: #000;
+                margin: 10px 0 20px;
+                letter-spacing: 0.5px;
+                line-height: 1.4;
+              }
+              
+              .header-for {
                 font-size: 12px;
-                color: #666;
+                color: #000;
+                margin: 15px 0 5px;
+                line-height: 1.4;
+              }
+              
+              .header-mayor {
+                font-size: 12px;
+                color: #000;
+                margin: 5px 0 25px;
+                line-height: 1.4;
               }
               
               .section {
-                margin-bottom: 30px;
-                page-break-inside: avoid;
+                margin-bottom: 0;
               }
               
-              .section-title {
+              .section-title-row {
                 background: #f97316;
                 color: white;
-                padding: 10px 15px;
-                margin: 0 0 15px 0;
-                font-size: 18px;
                 font-weight: bold;
-                border-radius: 4px;
+                font-size: 14px;
+              }
+              
+              .section-title-row td {
+                padding: 8px 12px;
+                border: 1px solid #ddd;
               }
               
               table {
@@ -2557,9 +3048,10 @@ useEffect(() => {
               }
               
               table td, table th {
-                padding: 10px;
+                padding: 6px 8px;
                 border: 1px solid #ddd;
                 text-align: left;
+                font-size: 12px;
               }
               
               table th {
@@ -2576,7 +3068,7 @@ useEffect(() => {
                 display: inline-block;
                 padding: 4px 8px;
                 border-radius: 4px;
-                font-size: 12px;
+                font-size: 11px;
                 font-weight: 600;
               }
               
@@ -2612,6 +3104,7 @@ useEffect(() => {
                 font-weight: 600;
                 color: #f97316;
                 margin-bottom: 8px;
+                font-size: 13px;
               }
               
               .grid {
@@ -2625,26 +3118,30 @@ useEffect(() => {
                 padding-top: 20px;
                 border-top: 2px solid #e5e7eb;
                 text-align: center;
-                font-size: 12px;
+                font-size: 11px;
                 color: #666;
               }
             </style>
           </head>
           <body>
             <div class="header">
-              <h1>AcciZard Emergency Report</h1>
-              <div class="header-info">
-                <div>Report ID: <strong>${report?.id || 'N/A'}</strong></div>
-                <div>Generated: ${new Date().toLocaleString()}</div>
-              </div>
+              <img src="/accizard-uploads/logo-ldrrmo-png.png" alt="LDRRMO Logo" class="header-logo" />
+              <div class="header-org">Republic of the Philippines</div>
+              <div class="header-province">Province of Quezon</div>
+              <div class="header-divider"></div>
+              <div class="header-municipality">Municipality of Lucban</div>
+              <div class="header-office">Local Disaster Risk Reduction and Management Office</div>
+              <div class="header-title">Incident Patient Report</div>
+              <div class="header-for">FOR: [Name]</div>
+              <div class="header-mayor">Municipal Mayor Chair, MDRRMC</div>
             </div>
             
-            <!-- Section I: Report Details -->
-            <div class="section">
-              <div class="section-title">I. Report Details</div>
-              <table>
-                <tr>
-                  <th>Report Type</th>
+            <table>
+              <tr class="section-title-row">
+                <td colspan="2">I. Report Details</td>
+              </tr>
+              <tr>
+                <th>Report Type</th>
                   <td class="value-cell">${report?.type || 'N/A'}</td>
                 </tr>
                 <tr>
@@ -2688,15 +3185,11 @@ useEffect(() => {
                     </small>
                   </td>
                 </tr>
-              </table>
-            </div>
-            
-            <!-- Section II: Dispatch Form -->
-            <div class="section">
-              <div class="section-title">II. Dispatch Form</div>
-              <table>
-                <tr>
-                  <th>Received By</th>
+              <tr class="section-title-row">
+                <td colspan="2">II. Dispatch Form</td>
+              </tr>
+              <tr>
+                <th>Received By</th>
                   <td class="value-cell">${dispatch?.receivedBy || 'N/A'}</td>
                 </tr>
                 <tr>
@@ -2775,17 +3268,14 @@ useEffect(() => {
                       : 'N/A'}
                   </td>
                 </tr>
-              </table>
-            </div>
-            
-            <!-- Section III: Patient Information -->
-            <div class="section">
-              <div class="section-title">III. Patient Information</div>
+              <tr class="section-title-row">
+                <td colspan="2">III. Patient Information</td>
+              </tr>
               ${patientData && patientData.length > 0
                 ? patientData.map((patient: any, index: number) => {
                     const gcsTotal = calculateGCSTotal(patient);
                     return `
-                      <div class="patient-section ${index > 0 ? 'page-break' : ''}">
+                      <div class="patient-section">
                         <div class="patient-header">Patient ${index + 1}${patient.name ? ` - ${patient.name}` : ''}</div>
                         
                         <table>
@@ -2946,10 +3436,6 @@ useEffect(() => {
                 : '<p style="color: #666; font-style: italic;">No patient information available</p>'}
             </div>
             
-            <div class="footer">
-              <p>AcciZard Emergency Management System</p>
-              <p>Lucban, Quezon - Local Disaster Risk Reduction and Management Office</p>
-            </div>
           </body>
         </html>
       `;
@@ -3530,6 +4016,32 @@ useEffect(() => {
     });
   };
 
+  const toggleMajorMedicalSymptom = (symptom: string) => {
+    setDispatchData(prev => {
+      const symptoms = Array.isArray(prev.majorMedicalSymptoms) ? prev.majorMedicalSymptoms : [];
+      const isSelected = symptoms.includes(symptom);
+      return {
+        ...prev,
+        majorMedicalSymptoms: isSelected
+          ? symptoms.filter(s => s !== symptom)
+          : [...symptoms, symptom]
+      };
+    });
+  };
+
+  const toggleMinorMedicalSymptom = (symptom: string) => {
+    setDispatchData(prev => {
+      const symptoms = Array.isArray(prev.minorMedicalSymptoms) ? prev.minorMedicalSymptoms : [];
+      const isSelected = symptoms.includes(symptom);
+      return {
+        ...prev,
+        minorMedicalSymptoms: isSelected
+          ? symptoms.filter(s => s !== symptom)
+          : [...symptoms, symptom]
+      };
+    });
+  };
+
   const toggleActionSelection = (action: string) => {
     setDispatchData(prev => {
       const isSelected = prev.actionsTaken.includes(action);
@@ -4072,9 +4584,36 @@ useEffect(() => {
         await updateDoc(doc(db, "reports", selectedReport.firestoreId), {
           location: newLocation.address,
           coordinates: `${newLocation.lat}, ${newLocation.lng}`,
+          latitude: newLocation.lat,
+          longitude: newLocation.lng,
           updatedAt: serverTimestamp(),
           lastModifiedBy: currentUser?.id
         });
+
+        // Update associated pin if the report is pinned
+        if (selectedReport.reportId) {
+          try {
+            // Find pin(s) associated with this report
+            const pins = await fetchPins({ reportId: selectedReport.reportId });
+            if (pins && pins.length > 0) {
+              // Update all pins associated with this report (in case there are multiple)
+              await Promise.all(
+                pins.map(pin => 
+                  updatePin(pin.id, {
+                    latitude: newLocation.lat,
+                    longitude: newLocation.lng,
+                    locationName: newLocation.address
+                  })
+                )
+              );
+              console.log(`Updated ${pins.length} pin(s) associated with report ${selectedReport.reportId}`);
+            }
+          } catch (pinError) {
+            // Log error but don't fail the entire operation
+            console.error('Error updating associated pin(s):', pinError);
+            // Don't show error toast as the report was updated successfully
+          }
+        }
 
         // Log activity
         await logActivity({
@@ -4095,14 +4634,18 @@ useEffect(() => {
         setPreviewEditData((d: any) => ({
           ...d,
           location: newLocation.address,
-          coordinates: `${newLocation.lat}, ${newLocation.lng}`
+          coordinates: `${newLocation.lat}, ${newLocation.lng}`,
+          latitude: newLocation.lat,
+          longitude: newLocation.lng
         }));
 
         // Update the selectedReport state to reflect the change
         setSelectedReport((prev: any) => ({
           ...prev,
           location: newLocation.address,
-          coordinates: `${newLocation.lat}, ${newLocation.lng}`
+          coordinates: `${newLocation.lat}, ${newLocation.lng}`,
+          latitude: newLocation.lat,
+          longitude: newLocation.lng
         }));
 
         setShowLocationMap(false);
@@ -4296,7 +4839,7 @@ useEffect(() => {
                 <TooltipTrigger asChild>
                   <Button onClick={handleExportCSV} size="sm" className="ml-auto bg-green-600 hover:bg-green-700 text-white border-green-600 hover:border-green-700">
                     <FileDown className="h-4 w-4 mr-2" />
-                    Export
+                    Export as CSV 
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
@@ -4561,7 +5104,8 @@ useEffect(() => {
                                     setShowPreviewModal(true);
                                     setPreviewTab("details"); // Reset to details tab
                                     
-                                    // Mark report as viewed
+                                    // Mark report as viewed (using report.id which is data.reportId || doc.id)
+                                    // This matches the ID format used in Layout.tsx for badge counting
                                     setViewedReports(prev => new Set(prev).add(report.id));
                                     
                                     // Load existing dispatch data from database using Firestore document ID
@@ -4610,14 +5154,15 @@ useEffect(() => {
                               <TooltipTrigger asChild>
                                 <Button
                                   size="sm"
-                                  variant="outline"
+                                  variant={pinnedReports.has(report.id || report.reportId) ? "default" : "outline"}
                                   onClick={() => handlePinOnMap(report)}
+                                  className={pinnedReports.has(report.id || report.reportId) ? "bg-brand-orange hover:bg-brand-orange/90 text-white border-brand-orange" : ""}
                                 >
                                   <MapPin className="h-4 w-4" />
                                 </Button>
                               </TooltipTrigger>
                               <TooltipContent>
-                                <p>Pin location on map</p>
+                                <p>{pinnedReports.has(report.id || report.reportId) ? "Pinned" : "Pin location on map"}</p>
                               </TooltipContent>
                             </Tooltip>
                           ) : (
@@ -4793,7 +5338,7 @@ useEffect(() => {
 
         {/* Add Report Modal */}
         <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
-          <DialogContent className="sm:max-w-[800px] lg:max-w-[1000px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
             <DialogHeader className="border-b border-gray-200 pb-4">
               <DialogTitle className="flex items-center gap-2">
                 <FileText className="h-5 w-5 text-[#FF4F0B]" />
@@ -4883,13 +5428,13 @@ useEffect(() => {
                             onClick={() => {
                               setFormData({
                                 ...formData,
-                                reportedBy: resident.name || resident.email || ""
+                                reportedBy: resident.fullName || resident.name || resident.email || ""
                               });
                               setResidentSearch("");
                               setShowResidentSearch(false);
                             }}
                           >
-                            <div className="text-sm font-medium">{resident.name || "No name"}</div>
+                            <div className="text-sm font-medium">{resident.fullName || resident.name || "No name"}</div>
                             {resident.email && (
                               <div className="text-xs text-gray-500">{resident.email}</div>
                             )}
@@ -5326,13 +5871,13 @@ useEffect(() => {
                         <TableCell className="text-sm font-medium text-gray-800 align-top w-1/3 min-w-[150px]">Date & Time Submitted</TableCell>
                         <TableCell>
                           {selectedReport?.dateSubmitted && selectedReport?.timeSubmitted ? (
-                            <div>
+                            <div className="text-sm">
                               {selectedReport.dateSubmitted}
                               <br />
                               <span className="text-xs text-gray-600">{selectedReport.timeSubmitted}</span>
                             </div>
                           ) : (
-                            <span className="text-gray-400">Not available</span>
+                            <span className="text-sm text-gray-400">Not available</span>
                           )}
                         </TableCell>
                       </TableRow>
@@ -5479,7 +6024,7 @@ useEffect(() => {
                           selectedReport?.reportedBy ? (
                             <button
                               type="button"
-                              className="text-gray-900 hover:underline focus:outline-none flex items-center gap-1"
+                              className="text-sm text-gray-900 hover:underline focus:outline-none flex items-center gap-1"
                               onClick={() => navigate("/manage-users", { state: { tab: "residents", search: selectedReport?.reportedBy } })}
                               title="View Resident Account"
                             >
@@ -5487,7 +6032,7 @@ useEffect(() => {
                               <ArrowUpRight className="h-3 w-3" />
                             </button>
                           ) : (
-                            <span className="text-gray-400 italic">Not specified</span>
+                            <span className="text-sm text-gray-400 italic">Not specified</span>
                           )
                         )}
                       </TableCell>
@@ -5498,7 +6043,7 @@ useEffect(() => {
                         {isPreviewEditMode ? (
                           <Input value={previewEditData?.mobileNumber} onChange={e => setPreviewEditData((d: any) => ({ ...d, mobileNumber: e.target.value }))} />
                         ) : (
-                          selectedReport?.mobileNumber || <span className="text-gray-400 italic">Not specified</span>
+                          selectedReport?.mobileNumber ? <span className="text-sm">{selectedReport.mobileNumber}</span> : <span className="text-sm text-gray-400 italic">Not specified</span>
                         )}
                       </TableCell>
                     </TableRow>
@@ -5585,7 +6130,7 @@ useEffect(() => {
                             </PopoverContent>
                           </Popover>
                         ) : (
-                          selectedReport?.barangay || <span className="text-gray-400 italic">Edit to add Barangay</span>
+                          selectedReport?.barangay ? <span className="text-sm">{selectedReport.barangay}</span> : <span className="text-sm text-gray-400 italic">Edit to add Barangay</span>
                         )}
                       </TableCell>
                     </TableRow>
@@ -5595,7 +6140,11 @@ useEffect(() => {
                         {isPreviewEditMode ? (
                           <Textarea value={previewEditData?.description} onChange={e => setPreviewEditData((d: any) => ({ ...d, description: e.target.value }))} />
                         ) : (
-                          selectedReport?.description
+                          selectedReport?.description ? (
+                            <span className="text-sm">{selectedReport.description}</span>
+                          ) : (
+                            <span className="text-sm text-gray-400 italic">Not specified</span>
+                          )
                         )}
                       </TableCell>
                     </TableRow>
@@ -5604,7 +6153,7 @@ useEffect(() => {
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <div className="flex-1">
-                            <div className="text-gray-800">{previewEditData?.location || selectedReport?.location}</div>
+                            <div className="text-sm text-gray-800">{previewEditData?.location || selectedReport?.location || <span className="text-gray-400 italic">Not specified</span>}</div>
                             <div className="text-xs text-gray-600 mt-1">
                               {previewEditData?.latitude && previewEditData?.longitude 
                                 ? `${previewEditData.latitude}, ${previewEditData.longitude}`
@@ -6131,7 +6680,7 @@ useEffect(() => {
                         <TableRow>
                           <TableCell className="font-medium text-gray-700 align-top w-1/3 min-w-[150px]">Received By</TableCell>
                           <TableCell>
-                            {dispatchData.receivedBy || (currentUser ? `${currentUser.name}` : "Not specified")}
+                            <span className="text-sm">{dispatchData.receivedBy || (currentUser ? `${currentUser.name}` : "Not specified")}</span>
                           </TableCell>
                         </TableRow>
                         
@@ -6236,7 +6785,7 @@ useEffect(() => {
                                 </div>
                               )
                             ) : (
-                              dispatchData.driverName || dispatchData.driverId || "Not specified"
+                              <span className="text-sm">{dispatchData.driverName || dispatchData.driverId || "Not specified"}</span>
                             )}
                           </TableCell>
                         </TableRow>
@@ -6322,14 +6871,14 @@ useEffect(() => {
                                 </Select>
                               </div>
                             ) : (
-                              dispatchData.vehicleName || dispatchData.vehicleId || "Not specified"
+                              <span className="text-sm">{dispatchData.vehicleName || dispatchData.vehicleId || "Not specified"}</span>
                             )}
                           </TableCell>
                         </TableRow>
                         <TableRow>
                           <TableCell className="font-medium text-gray-700 align-top w-1/3 min-w-[150px]">Time Call Received</TableCell>
                           <TableCell>
-                            {dispatchData.timeCallReceived || getCurrentTime()}
+                            <span className="text-sm">{dispatchData.timeCallReceived || getCurrentTime()}</span>
                           </TableCell>
                         </TableRow>
                         <TableRow>
@@ -6361,7 +6910,7 @@ useEffect(() => {
                                 </Tooltip>
                               </div>
                             ) : (
-                              dispatchData.timeOfDispatch || "Not specified"
+                              <span className="text-sm">{dispatchData.timeOfDispatch || "Not specified"}</span>
                             )}
                           </TableCell>
                         </TableRow>
@@ -6394,7 +6943,7 @@ useEffect(() => {
                                 </Tooltip>
                               </div>
                             ) : (
-                              dispatchData.timeOfArrival || "Not specified"
+                              <span className="text-sm">{dispatchData.timeOfArrival || "Not specified"}</span>
                             )}
                           </TableCell>
                         </TableRow>
@@ -6444,7 +6993,7 @@ useEffect(() => {
                                 </Tooltip>
                               </div>
                             ) : (
-                              dispatchData.hospitalArrival || "Not specified"
+                              <span className="text-sm">{dispatchData.hospitalArrival || "Not specified"}</span>
                             )}
                           </TableCell>
                         </TableRow>
@@ -6477,7 +7026,7 @@ useEffect(() => {
                                 </Tooltip>
                               </div>
                             ) : (
-                              dispatchData.returnedToOpcen || "Not specified"
+                              <span className="text-sm">{dispatchData.returnedToOpcen || "Not specified"}</span>
                             )}
                           </TableCell>
                         </TableRow>
@@ -6522,7 +7071,7 @@ useEffect(() => {
                                 </button>
                               </div>
                             ) : (
-                              dispatchData.disasterRelated || "Not specified"
+                              <span className="text-sm">{dispatchData.disasterRelated || "Not specified"}</span>
                             )}
                           </TableCell>
                         </TableRow>
@@ -6614,9 +7163,11 @@ useEffect(() => {
                                 </Popover>
                               </div>
                             ) : (
-                              dispatchData.agencyPresent && dispatchData.agencyPresent.length > 0
-                                ? dispatchData.agencyPresent.join(", ")
-                                : "Not specified"
+                              <span className="text-sm">
+                                {dispatchData.agencyPresent && dispatchData.agencyPresent.length > 0
+                                  ? dispatchData.agencyPresent.join(", ")
+                                  : "Not specified"}
+                              </span>
                             )}
                           </TableCell>
                         </TableRow>
@@ -6657,7 +7208,7 @@ useEffect(() => {
                                 </SelectContent>
                               </Select>
                             ) : (
-                              dispatchData.typeOfEmergency || "Not specified"
+                              <span className="text-sm">{dispatchData.typeOfEmergency || "Not specified"}</span>
                             )}
                           </TableCell>
                         </TableRow>
@@ -6676,7 +7227,7 @@ useEffect(() => {
                                     </SelectContent>
                                   </Select>
                                 ) : (
-                                  dispatchData.vehicleInvolved || "Not specified"
+                                  <span className="text-sm">{dispatchData.vehicleInvolved || "Not specified"}</span>
                                 )}
                               </TableCell>
                             </TableRow>
@@ -6726,7 +7277,7 @@ useEffect(() => {
                                     </button>
                                   </div>
                                 ) : (
-                                  dispatchData.injuryClassification || "Not specified"
+                                  <span className="text-sm">{dispatchData.injuryClassification || "Not specified"}</span>
                                 )}
                               </TableCell>
                             </TableRow>
@@ -6788,9 +7339,11 @@ useEffect(() => {
                                       </PopoverContent>
                                     </Popover>
                                   ) : (
-                                    dispatchData.majorInjuryTypes.length > 0
-                                      ? dispatchData.majorInjuryTypes.join(", ")
-                                      : "No major injury types selected"
+                                    <span className="text-sm">
+                                      {dispatchData.majorInjuryTypes.length > 0
+                                        ? dispatchData.majorInjuryTypes.join(", ")
+                                        : "No major injury types selected"}
+                                    </span>
                                   )}
                                 </TableCell>
                               </TableRow>
@@ -6853,9 +7406,11 @@ useEffect(() => {
                                       </PopoverContent>
                                     </Popover>
                                   ) : (
-                                    dispatchData.minorInjuryTypes.length > 0
-                                      ? dispatchData.minorInjuryTypes.join(", ")
-                                      : "No minor injury types selected"
+                                    <span className="text-sm">
+                                      {dispatchData.minorInjuryTypes.length > 0
+                                        ? dispatchData.minorInjuryTypes.join(", ")
+                                        : "No minor injury types selected"}
+                                    </span>
                                   )}
                                 </TableCell>
                               </TableRow>
@@ -6870,14 +7425,48 @@ useEffect(() => {
                               <TableCell className="font-medium text-gray-700 align-top w-1/3 min-w-[150px]">Medical Classification</TableCell>
                               <TableCell>
                                 {isDispatchEditMode ? (
-                                  <Select value={dispatchData.medicalClassification} onValueChange={v => setDispatchData(d => ({ ...d, medicalClassification: v, majorMedicalSymptoms: [], minorMedicalSymptoms: [] }))}>
-                                    <SelectTrigger><SelectValue placeholder="Select medical classification" /></SelectTrigger>
-                                    <SelectContent>
-                                      {injuryClassificationOptions.map(classification => <SelectItem key={classification} value={classification}>{classification}</SelectItem>)}
-                                    </SelectContent>
-                                  </Select>
+                                  <div className="inline-flex rounded-md border border-gray-200 bg-white p-1">
+                                    <button
+                                      type="button"
+                                      className={cn(
+                                        "px-3 py-1 text-sm font-medium rounded-md transition-colors",
+                                        dispatchData.medicalClassification === "Major"
+                                          ? "bg-brand-orange text-white shadow-sm"
+                                          : "text-gray-600 hover:bg-gray-50"
+                                      )}
+                                      onClick={() =>
+                                        setDispatchData(d => ({
+                                          ...d,
+                                          medicalClassification: "Major",
+                                          majorMedicalSymptoms: [],
+                                          minorMedicalSymptoms: []
+                                        }))
+                                      }
+                                    >
+                                      Major
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className={cn(
+                                        "px-3 py-1 text-sm font-medium rounded-md transition-colors",
+                                        dispatchData.medicalClassification === "Minor"
+                                          ? "bg-brand-orange text-white shadow-sm"
+                                          : "text-gray-600 hover:bg-gray-50"
+                                      )}
+                                      onClick={() =>
+                                        setDispatchData(d => ({
+                                          ...d,
+                                          medicalClassification: "Minor",
+                                          majorMedicalSymptoms: [],
+                                          minorMedicalSymptoms: []
+                                        }))
+                                      }
+                                    >
+                                      Minor
+                                    </button>
+                                  </div>
                                 ) : (
-                                  dispatchData.medicalClassification || "Not specified"
+                                  <span className="text-sm">{dispatchData.medicalClassification || "Not specified"}</span>
                                 )}
                               </TableCell>
                             </TableRow>
@@ -6888,36 +7477,62 @@ useEffect(() => {
                                 <TableCell className="font-medium text-gray-700 align-top w-1/3 min-w-[150px]">Major Medical Symptoms</TableCell>
                                 <TableCell>
                                   {isDispatchEditMode ? (
-                                    <div className="space-y-2">
-                                      {majorMedicalSymptomsOptions.map((symptom) => (
-                                        <div key={symptom} className="flex items-center space-x-2">
-                                          <Checkbox
-                                            id={`major-medical-${symptom}`}
-                                            checked={dispatchData.majorMedicalSymptoms.includes(symptom)}
-                                            onCheckedChange={(checked) => {
-                                              if (checked) {
-                                                setDispatchData(d => ({
-                                                  ...d,
-                                                  majorMedicalSymptoms: [...d.majorMedicalSymptoms, symptom]
-                                                }));
-                                              } else {
-                                                setDispatchData(d => ({
-                                                  ...d,
-                                                  majorMedicalSymptoms: d.majorMedicalSymptoms.filter(s => s !== symptom)
-                                                }));
-                                              }
-                                            }}
-                                          />
-                                          <Label htmlFor={`major-medical-${symptom}`} className="text-sm">
-                                            {symptom}
-                                          </Label>
+                                    <Popover>
+                                      <PopoverTrigger asChild>
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          className={cn(
+                                            "w-full justify-between text-left font-normal",
+                                            dispatchData.majorMedicalSymptoms.length === 0 && "text-muted-foreground"
+                                          )}
+                                        >
+                                          <span className="flex flex-wrap gap-1">
+                                            {dispatchData.majorMedicalSymptoms.length > 0
+                                              ? dispatchData.majorMedicalSymptoms.map((symptom, index) => (
+                                                  <span
+                                                    key={`${symptom}-${index}`}
+                                                    className="inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-md border border-brand-orange/40 bg-orange-50 text-brand-orange"
+                                                  >
+                                                    {symptom}
+                                                  </span>
+                                                ))
+                                              : "Select major medical symptoms"}
+                                          </span>
+                                          <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                        </Button>
+                                      </PopoverTrigger>
+                                      <PopoverContent className="w-64 p-0" align="start">
+                                        <div className="max-h-60 overflow-y-auto">
+                                          {majorMedicalSymptomsOptions.map((symptom) => {
+                                            const isSelected = dispatchData.majorMedicalSymptoms.includes(symptom);
+                                            return (
+                                              <button
+                                                key={symptom}
+                                                type="button"
+                                                className={cn(
+                                                  "flex w-full items-center gap-2 px-3 py-2 text-sm",
+                                                  isSelected ? "bg-orange-50/70 text-brand-orange" : "text-gray-700 hover:bg-orange-50"
+                                                )}
+                                                onClick={() => toggleMajorMedicalSymptom(symptom)}
+                                              >
+                                                <Checkbox
+                                                  checked={isSelected}
+                                                  className="h-4 w-4"
+                                                />
+                                                <span className="flex-1 text-left">{symptom}</span>
+                                              </button>
+                                            );
+                                          })}
                                         </div>
-                                      ))}
-                                    </div>
+                                      </PopoverContent>
+                                    </Popover>
                                   ) : (
-                                    dispatchData.majorMedicalSymptoms.length > 0
-                                      ? dispatchData.majorMedicalSymptoms.join(", ")
-                                      : "No major medical symptoms selected"
+                                    <span className="text-sm">
+                                      {dispatchData.majorMedicalSymptoms.length > 0
+                                        ? dispatchData.majorMedicalSymptoms.join(", ")
+                                        : "No major medical symptoms selected"}
+                                    </span>
                                   )}
                                 </TableCell>
                               </TableRow>
@@ -6929,36 +7544,62 @@ useEffect(() => {
                                 <TableCell className="font-medium text-gray-700 align-top w-1/3 min-w-[150px]">Minor Medical Symptoms</TableCell>
                                 <TableCell>
                                   {isDispatchEditMode ? (
-                                    <div className="space-y-2">
-                                      {minorMedicalSymptomsOptions.map((symptom) => (
-                                        <div key={symptom} className="flex items-center space-x-2">
-                                          <Checkbox
-                                            id={`minor-medical-${symptom}`}
-                                            checked={dispatchData.minorMedicalSymptoms.includes(symptom)}
-                                            onCheckedChange={(checked) => {
-                                              if (checked) {
-                                                setDispatchData(d => ({
-                                                  ...d,
-                                                  minorMedicalSymptoms: [...d.minorMedicalSymptoms, symptom]
-                                                }));
-                                              } else {
-                                                setDispatchData(d => ({
-                                                  ...d,
-                                                  minorMedicalSymptoms: d.minorMedicalSymptoms.filter(s => s !== symptom)
-                                                }));
-                                              }
-                                            }}
-                                          />
-                                          <Label htmlFor={`minor-medical-${symptom}`} className="text-sm">
-                                            {symptom}
-                                          </Label>
+                                    <Popover>
+                                      <PopoverTrigger asChild>
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          className={cn(
+                                            "w-full justify-between text-left font-normal",
+                                            dispatchData.minorMedicalSymptoms.length === 0 && "text-muted-foreground"
+                                          )}
+                                        >
+                                          <span className="flex flex-wrap gap-1">
+                                            {dispatchData.minorMedicalSymptoms.length > 0
+                                              ? dispatchData.minorMedicalSymptoms.map((symptom, index) => (
+                                                  <span
+                                                    key={`${symptom}-${index}`}
+                                                    className="inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-md border border-brand-orange/40 bg-orange-50 text-brand-orange"
+                                                  >
+                                                    {symptom}
+                                                  </span>
+                                                ))
+                                              : "Select minor medical symptoms"}
+                                          </span>
+                                          <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                        </Button>
+                                      </PopoverTrigger>
+                                      <PopoverContent className="w-64 p-0" align="start">
+                                        <div className="max-h-60 overflow-y-auto">
+                                          {minorMedicalSymptomsOptions.map((symptom) => {
+                                            const isSelected = dispatchData.minorMedicalSymptoms.includes(symptom);
+                                            return (
+                                              <button
+                                                key={symptom}
+                                                type="button"
+                                                className={cn(
+                                                  "flex w-full items-center gap-2 px-3 py-2 text-sm",
+                                                  isSelected ? "bg-orange-50/70 text-brand-orange" : "text-gray-700 hover:bg-orange-50"
+                                                )}
+                                                onClick={() => toggleMinorMedicalSymptom(symptom)}
+                                              >
+                                                <Checkbox
+                                                  checked={isSelected}
+                                                  className="h-4 w-4"
+                                                />
+                                                <span className="flex-1 text-left">{symptom}</span>
+                                              </button>
+                                            );
+                                          })}
                                         </div>
-                                      ))}
-                                    </div>
+                                      </PopoverContent>
+                                    </Popover>
                                   ) : (
-                                    dispatchData.minorMedicalSymptoms.length > 0
-                                      ? dispatchData.minorMedicalSymptoms.join(", ")
-                                      : "No minor medical symptoms selected"
+                                    <span className="text-sm">
+                                      {dispatchData.minorMedicalSymptoms.length > 0
+                                        ? dispatchData.minorMedicalSymptoms.join(", ")
+                                        : "No minor medical symptoms selected"}
+                                    </span>
                                   )}
                                 </TableCell>
                               </TableRow>
@@ -6980,7 +7621,7 @@ useEffect(() => {
                                     className="min-h-[80px]"
                                   />
                                 ) : (
-                                  dispatchData.chiefComplaint || "Not specified"
+                                  <span className="text-sm">{dispatchData.chiefComplaint || "Not specified"}</span>
                                 )}
                               </TableCell>
                             </TableRow>
@@ -6996,7 +7637,7 @@ useEffect(() => {
                                     className="min-h-[80px]"
                                   />
                                 ) : (
-                                  dispatchData.diagnosis || "Not specified"
+                                  <span className="text-sm">{dispatchData.diagnosis || "Not specified"}</span>
                                 )}
                               </TableCell>
                             </TableRow>
@@ -7006,19 +7647,21 @@ useEffect(() => {
                               <TableCell>
                                 {isDispatchEditMode ? (
                                   <div className="space-y-3">
-                                    <RadioGroup 
+                                    <Select 
                                       value={dispatchData.natureOfIllness} 
                                       onValueChange={v => setDispatchData(d => ({ ...d, natureOfIllness: v, natureOfIllnessOthers: "" }))}
                                     >
-                                      {natureOfIllnessOptions.map((illness) => (
-                                        <div key={illness} className="flex items-center space-x-2">
-                                          <RadioGroupItem value={illness} id={`illness-${illness}`} />
-                                          <Label htmlFor={`illness-${illness}`} className="text-sm">
+                                      <SelectTrigger className="w-full">
+                                        <SelectValue placeholder="Select nature of illness" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {natureOfIllnessOptions.map((illness) => (
+                                          <SelectItem key={illness} value={illness}>
                                             {illness}
-                                          </Label>
-                                        </div>
-                                      ))}
-                                    </RadioGroup>
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
                                     
                                     {dispatchData.natureOfIllness === "Others" && (
                                       <div className="mt-2">
@@ -7036,11 +7679,13 @@ useEffect(() => {
                                     )}
                                   </div>
                                 ) : (
-                                  dispatchData.natureOfIllness
-                                    ? dispatchData.natureOfIllness === "Others" && dispatchData.natureOfIllnessOthers
-                                      ? `${dispatchData.natureOfIllness} - ${dispatchData.natureOfIllnessOthers}`
-                                      : dispatchData.natureOfIllness
-                                    : "Not specified"
+                                  <span className="text-sm">
+                                    {dispatchData.natureOfIllness
+                                      ? dispatchData.natureOfIllness === "Others" && dispatchData.natureOfIllnessOthers
+                                        ? `${dispatchData.natureOfIllness} - ${dispatchData.natureOfIllnessOthers}`
+                                        : dispatchData.natureOfIllness
+                                      : "Not specified"}
+                                  </span>
                                 )}
                               </TableCell>
                             </TableRow>
@@ -7459,9 +8104,9 @@ useEffect(() => {
                               />
                             ) : (
                               currentPatient.name ? (
-                                <span className="text-gray-800">{currentPatient.name}</span>
+                                <span className="text-sm text-gray-800">{currentPatient.name}</span>
                               ) : (
-                                <span className="text-gray-400 italic">Not specified</span>
+                                <span className="text-sm text-gray-400 italic">Not specified</span>
                               )
                             )}
                           </TableCell>
@@ -7478,9 +8123,9 @@ useEffect(() => {
                               />
                             ) : (
                               currentPatient.contactNumber ? (
-                                <span className="text-gray-800">{currentPatient.contactNumber}</span>
+                                <span className="text-sm text-gray-800">{currentPatient.contactNumber}</span>
                               ) : (
-                                <span className="text-gray-400 italic">Not specified</span>
+                                <span className="text-sm text-gray-400 italic">Not specified</span>
                               )
                             )}
                           </TableCell>
@@ -7535,7 +8180,7 @@ useEffect(() => {
                           ) : (
                             currentPatient.address ? (
                               <div className="space-y-1">
-                                <span className="text-gray-800">{currentPatient.address}</span>
+                                <span className="text-sm text-gray-800">{currentPatient.address}</span>
                                 {currentPatient.latitude && currentPatient.longitude && (
                                   <div className="text-xs text-gray-500 flex items-center gap-1">
                                     <MapPin className="h-3 w-3" />
@@ -7544,7 +8189,7 @@ useEffect(() => {
                                 )}
                               </div>
                             ) : (
-                              <span className="text-gray-400 italic">Not specified</span>
+                              <span className="text-sm text-gray-400 italic">Not specified</span>
                             )
                           )}
                           </TableCell>
@@ -7571,11 +8216,11 @@ useEffect(() => {
                             </Select>
                           ) : (
                             currentPatient.religion ? (
-                              <Badge className="bg-gray-100 text-gray-800 hover:bg-gray-50">
+                              <Badge className="text-sm bg-gray-100 text-gray-800 hover:bg-gray-50">
                                 {currentPatient.religion}
                               </Badge>
                             ) : (
-                              <span className="text-gray-400 italic">Not specified</span>
+                              <span className="text-sm text-gray-400 italic">Not specified</span>
                             )
                           )}
                           </TableCell>
@@ -7618,9 +8263,9 @@ useEffect(() => {
                             </Popover>
                           ) : (
                             formattedCurrentPatientBirthday ? (
-                              <span className="text-gray-800">{formattedCurrentPatientBirthday}</span>
+                              <span className="text-sm text-gray-800">{formattedCurrentPatientBirthday}</span>
                             ) : (
-                              <span className="text-gray-400 italic">Not specified</span>
+                              <span className="text-sm text-gray-400 italic">Not specified</span>
                             )
                           )}
                           </TableCell>
@@ -7647,11 +8292,11 @@ useEffect(() => {
                             </Select>
                           ) : (
                             currentPatient.bloodType ? (
-                              <Badge className="bg-red-100 text-red-800 hover:bg-red-50">
+                              <Badge className="text-sm bg-red-100 text-red-800 hover:bg-red-50">
                                 {currentPatient.bloodType}
                               </Badge>
                             ) : (
-                              <span className="text-gray-400 italic">Not specified</span>
+                              <span className="text-sm text-gray-400 italic">Not specified</span>
                             )
                           )}
                           </TableCell>
@@ -7674,11 +8319,11 @@ useEffect(() => {
                             </Select>
                           ) : (
                             currentPatient.civilStatus ? (
-                              <Badge className="bg-gray-100 text-gray-800 hover:bg-gray-50">
+                              <Badge className="text-sm bg-gray-100 text-gray-800 hover:bg-gray-50">
                                 {currentPatient.civilStatus}
                               </Badge>
                             ) : (
-                              <span className="text-gray-400 italic">Not specified</span>
+                              <span className="text-sm text-gray-400 italic">Not specified</span>
                             )
                           )}
                           </TableCell>
@@ -7698,9 +8343,9 @@ useEffect(() => {
                             />
                           ) : (
                             currentPatient.age ? (
-                              <span className="text-gray-800">{currentPatient.age} years old</span>
+                              <span className="text-sm text-gray-800">{currentPatient.age} years old</span>
                             ) : (
-                              <span className="text-gray-400 italic">Not specified</span>
+                              <span className="text-sm text-gray-400 italic">Not specified</span>
                             )
                           )}
                           </TableCell>
@@ -7737,9 +8382,9 @@ useEffect(() => {
                             </div>
                           ) : (
                             currentPatient.pwd ? (
-                              <span className="text-gray-800">{currentPatient.pwd}</span>
+                              <span className="text-sm text-gray-800">{currentPatient.pwd}</span>
                             ) : (
-                              <span className="text-gray-400 italic">Not specified</span>
+                              <span className="text-sm text-gray-400 italic">Not specified</span>
                             )
                           )}
                           </TableCell>
@@ -8535,8 +9180,7 @@ useEffect(() => {
           }
         }}>
           <DialogContent
-            hideOverlay
-            className="sm:max-w-[720px] max-h-[85vh] bg-white flex flex-col overflow-hidden"
+            className="sm:max-w-[900px] max-h-[85vh] bg-white flex flex-col overflow-hidden"
           >
             <DialogHeader className="pb-2">
               <DialogTitle className="flex items-center gap-2">
@@ -8609,11 +9253,12 @@ useEffect(() => {
                   onMapClick={handleMapClick}
                   showOnlyCurrentLocation={false}
                   clickedLocation={newLocation}
+                  clickedLocationType={selectedReport?.type || 'Default'}
                   showGeocoder={false}
                   showControls={true}
                   showDirections={true}
                   showUserLocationMarker={true}
-                  singleMarker={selectedReport?.latitude && selectedReport?.longitude ? 
+                  singleMarker={newLocation ? undefined : (selectedReport?.latitude && selectedReport?.longitude ? 
                     {
                       id: selectedReport.id || 'report-marker',
                       type: selectedReport.type || 'Emergency',
@@ -8626,14 +9271,14 @@ useEffect(() => {
                       latitude: selectedReport.latitude,
                       longitude: selectedReport.longitude
                     } : 
-                    undefined}
+                    undefined)}
                   disableSingleMarkerPulse={true}
                   center={newLocation ? 
                     [newLocation.lng, newLocation.lat] as [number, number] :
                     selectedReport?.latitude && selectedReport?.longitude ? 
                     [selectedReport.longitude, selectedReport.latitude] as [number, number] : 
                     [121.5556, 14.1139] as [number, number]} // Center on Lucban, Quezon
-                  zoom={newLocation ? 15 : 14}
+                  zoom={newLocation ? 15 : (selectedReport?.latitude && selectedReport?.longitude ? 14 : 11)}
                 />
               </div>
             </div>
@@ -8669,8 +9314,7 @@ useEffect(() => {
         {/* Add Location Map Modal */}
         <Dialog open={showAddLocationMap} onOpenChange={setShowAddLocationMap}>
           <DialogContent
-            hideOverlay
-            className="sm:max-w-[720px] max-h-[85vh] bg-white flex flex-col overflow-hidden"
+            className="sm:max-w-[900px] max-h-[85vh] bg-white flex flex-col overflow-hidden"
           >
             <DialogHeader className="pb-2">
               <DialogTitle className="flex items-center gap-2">
@@ -8971,7 +9615,7 @@ useEffect(() => {
 
         {/* Patient Location Map Modal */}
         <Dialog open={showPatientLocationMap} onOpenChange={setShowPatientLocationMap}>
-          <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+          <DialogContent className="sm:max-w-[900px] max-h-[85vh] bg-white flex flex-col overflow-hidden">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <MapPin className="h-5 w-5 text-brand-orange" />

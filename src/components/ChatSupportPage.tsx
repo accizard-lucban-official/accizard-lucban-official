@@ -276,6 +276,7 @@ export function ChatSupportPage() {
             lastMessageTime: data.lastMessageTime,
             lastAccessTime: data.lastAccessTime,
             createdAt: data.createdAt,
+            updatedAt: data.updatedAt,
             profilePicture: profilePicture,
             profilePictureUrl: profilePicture,
             ...data
@@ -344,7 +345,31 @@ export function ChatSupportPage() {
           createdAt: s.createdAt
         })));
         
-        setChatSessions(sessionsData);
+        // Deduplicate sessions by userId/id to prevent duplicates
+        const uniqueSessions = new Map<string, any>();
+        sessionsData.forEach(session => {
+          const key = session.userId || session.id;
+          // Keep the most recent session if duplicates exist
+          if (!uniqueSessions.has(key)) {
+            uniqueSessions.set(key, session);
+          } else {
+            const existing = uniqueSessions.get(key);
+            const existingTime = existing.lastMessageTime?.toDate?.()?.getTime() || 
+                                (existing as any).updatedAt?.toDate?.()?.getTime() || 
+                                existing.createdAt?.toDate?.()?.getTime() || 0;
+            const newTime = session.lastMessageTime?.toDate?.()?.getTime() || 
+                           (session as any).updatedAt?.toDate?.()?.getTime() || 
+                           session.createdAt?.toDate?.()?.getTime() || 0;
+            if (newTime > existingTime) {
+              uniqueSessions.set(key, session);
+            }
+          }
+        });
+        
+        const deduplicatedSessions = Array.from(uniqueSessions.values());
+        console.log(`🔍 Deduplicated ${sessionsData.length} sessions to ${deduplicatedSessions.length} unique sessions`);
+        
+        setChatSessions(deduplicatedSessions);
         setLoadingChatSessions(false);
       }, (error) => {
         console.error("Error loading chat sessions:", error);
@@ -688,18 +713,35 @@ export function ChatSupportPage() {
     try {
       console.log("🚀 Starting chat with user:", user);
       
-      // Check if chat already exists in current sessions
-      const existingChat = chatSessions.find(cs => cs.userId === user.firebaseUid || cs.id === user.id);
-      if (existingChat) {
-        console.log("✅ Existing chat found:", existingChat);
-        setSelectedSession(existingChat);
+      // Determine the userId to use (must be consistent with existing messages)
+      // Prefer firebaseUid as it's what the mobile app uses
+      const userId = user.firebaseUid || user.id;
+      
+      // First, check Firestore directly to see if chat already exists
+      const chatRef = doc(db, "chats", userId);
+      const chatDoc = await getDoc(chatRef);
+      
+      // Also check local state for existing chat
+      const existingChat = chatSessions.find(cs => 
+        cs.userId === userId || 
+        cs.id === userId || 
+        cs.userId === user.firebaseUid || 
+        cs.id === user.firebaseUid ||
+        cs.userId === user.id ||
+        cs.id === user.id
+      );
+      
+      if (existingChat || chatDoc.exists()) {
+        console.log("✅ Existing chat found:", existingChat || chatDoc.data());
+        // Use existing chat from Firestore if available, otherwise use local state
+        const sessionToUse = chatDoc.exists() 
+          ? { id: userId, userId: userId, ...chatDoc.data(), ...user }
+          : existingChat;
+        setSelectedSession(sessionToUse);
         setStartingChat(null);
         return;
       }
 
-      // Determine the userId to use (must be consistent with existing messages)
-      const userId = user.firebaseUid || user.id;
-      
       // Check if there are existing messages for this user
       // Query both userId and userID fields to catch all messages
       const messagesRef = collection(db, "chat_messages");
@@ -765,8 +807,13 @@ export function ChatSupportPage() {
       }
 
       // Create/restore chat session in chats collection
-      const chatRef = doc(db, "chats", userId);
+      // Use setDoc with merge: false for new chats to ensure clean creation
+      // This prevents race conditions with the real-time listener
       await setDoc(chatRef, chatData, { merge: true });
+      
+      // Wait a brief moment to ensure Firestore has processed the write
+      // This helps prevent race conditions with the real-time listener
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       const newSession = {
         id: userId,
@@ -787,11 +834,22 @@ export function ChatSupportPage() {
       console.log("📱 Phone number stored:", phoneNumber);
       console.log("🖼️ Profile picture stored:", profilePictureUrl);
       
-      // Update local chatSessions state immediately so the session appears in the list
+      // Update local chatSessions state, but check for duplicates first
       setChatSessions(prev => {
-        const exists = prev.find(cs => cs.id === userId || cs.userId === userId);
+        // Check if session already exists (might have been added by real-time listener)
+        const exists = prev.find(cs => 
+          cs.id === userId || 
+          cs.userId === userId ||
+          cs.id === user.firebaseUid ||
+          cs.userId === user.firebaseUid
+        );
         if (exists) {
-          return prev.map(cs => cs.id === userId || cs.userId === userId ? newSession : cs);
+          // Update existing session instead of adding duplicate
+          return prev.map(cs => 
+            (cs.id === userId || cs.userId === userId || cs.id === user.firebaseUid || cs.userId === user.firebaseUid) 
+              ? newSession 
+              : cs
+          );
         }
         return [newSession, ...prev];
       });
@@ -900,6 +958,9 @@ export function ChatSupportPage() {
       // This ensures admin messages are always identified correctly and don't conflict with user IDs
       const adminId = currentUser?.uid || (sessionUser ? `admin-${sessionUser.userId || sessionUser.username}` : "admin");
 
+      // Ensure we use the correct userId (prefer firebaseUid for mobile app compatibility)
+      const targetUserId = selectedSession.firebaseUid || selectedSession.userId || selectedSession.id;
+      
       // Upload all attachments
       const uploadedFiles: Array<{url: string, fileName: string, fileSize: number, fileType: string, isImage: boolean, isVideo: boolean, isAudio: boolean}> = [];
       
@@ -909,8 +970,8 @@ export function ChatSupportPage() {
           const uploadResult = await uploadSingleFile(
             attachment.file,
             'general',
-            selectedSession.userId,
-            `chat_attachments/${selectedSession.userId}/${Date.now()}_${attachment.file.name}`
+            targetUserId,
+            `chat_attachments/${targetUserId}/${Date.now()}_${attachment.file.name}`
           );
             
             if (uploadResult) {
@@ -937,12 +998,13 @@ export function ChatSupportPage() {
       // Send message with text (if any)
       if (message.trim() || uploadedFiles.length === 0) {
         const messageData: any = {
-        userId: selectedSession.userId,
-        senderId: adminId,
-        senderName: adminName,
+          userId: targetUserId,
+          userID: targetUserId, // Also set userID for mobile app compatibility
+          senderId: adminId,
+          senderName: adminName,
           message: message.trim() || "Message",
-        timestamp: serverTimestamp(),
-        isRead: false
+          timestamp: serverTimestamp(),
+          isRead: false
         };
 
         await addDoc(collection(db, "chat_messages"), messageData);
@@ -956,7 +1018,8 @@ export function ChatSupportPage() {
         else if (file.isAudio) attachmentType = 'audio';
         
         const messageData: any = {
-          userId: selectedSession.userId,
+          userId: targetUserId,
+          userID: targetUserId, // Also set userID for mobile app compatibility
           senderId: adminId,
           senderName: adminName,
           message: message.trim() || `Sent a ${attachmentType}`,
@@ -981,7 +1044,8 @@ export function ChatSupportPage() {
       }
 
       // Update or create chat metadata in chats collection
-      const chatRef = doc(db, "chats", selectedSession.userId);
+      // Use the same userId that we used for messages
+      const chatRef = doc(db, "chats", targetUserId);
       let lastMessagePreview = message.trim();
       
       if (!lastMessagePreview && uploadedFiles.length > 0) {
@@ -1000,13 +1064,14 @@ export function ChatSupportPage() {
       }
       
       await setDoc(chatRef, {
-        userId: selectedSession.userId,
+        userId: targetUserId,
         userName: selectedSession.fullName || selectedSession.userName || "Unknown User",
         userEmail: selectedSession.userEmail || selectedSession.email || "",
         lastMessage: lastMessagePreview || "Message",
         lastMessageTime: serverTimestamp(),
         lastMessageSenderName: adminName,
-        lastAccessTime: serverTimestamp()
+        lastAccessTime: serverTimestamp(),
+        updatedAt: serverTimestamp()
       }, { merge: true });
 
       setMessage("");

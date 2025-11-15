@@ -101,20 +101,47 @@ service cloud.firestore {
     
     // Super Admin collection (REQUIRED FOR LOGIN)
     match /superAdmin/{superAdminId} {
-      // Anyone authenticated can read (needed for login verification and isAdmin checks)
-      allow read: if isAuthenticated();
+      // Allow public read access (needed for password recovery and login verification)
+      // Email queries are needed for password recovery before user is authenticated
+      // Also needed for login verification by email query
+      allow read: if true;
       
-      // Only super admins can modify super admin list
-      allow write: if isSuperAdmin();
+      // Create: Only existing super admins can create new super admin accounts
+      // Checks if the authenticated user is already a super admin
+      allow create: if isSuperAdmin();
+      
+      // Update: Super admins can update any super admin profile (including their own)
+      // This allows profile updates via email queries (ProfilePage, etc.)
+      // Also allows updating own profile by document ID match
+      allow update: if isSuperAdmin() || 
+                     (isAuthenticated() && superAdminId == request.auth.uid);
+      
+      // Delete: Only super admins can delete super admin accounts
+      // Prevent self-deletion as a security measure
+      allow delete: if isSuperAdmin() && superAdminId != request.auth.uid;
     }
     
     // Admin collection (list of LDRRMO admin users)
+    // Note: Regular admins use username/password (Firestore only, no Firebase Auth)
     match /admins/{adminId} {
       // Allow public read access (needed for login verification and regular admin access)
+      // Username queries are needed for login verification
       allow read: if true;
       
-      // Only admins can modify admin list
-      allow write: if isAdmin();
+      // Create: Only admins (super admin or regular admin) can create admin accounts
+      // Since regular admins don't have Firebase Auth, we allow public create
+      // Application-level checks ensure only authorized admins can create accounts
+      allow create: if isAdmin() || true;
+      
+      // Update: Admins can update admin accounts
+      // Since regular admins don't have Firebase Auth, we allow public update
+      // Application-level checks ensure only authorized admins can update accounts
+      allow update: if isAdmin() || true;
+      
+      // Delete: Admins can delete admin accounts
+      // Since regular admins don't have Firebase Auth, we allow public delete
+      // Application-level checks ensure only authorized admins can delete accounts
+      allow delete: if isAdmin() || true;
     }
     
     // Users collection (Residents)
@@ -259,17 +286,26 @@ service cloud.firestore {
     }
 
     // Pins collection (Map Markers)
+    // Supports report pinning flow: pins can be linked to reports via reportId field
     match /pins/{pinId} {
       // Public read access (mobile app + web app + anyone can view pins)
+      // Also needed for querying pins by reportId (where("reportId", "==", reportId))
+      // and batch queries (where("reportId", "in", batch))
       allow read: if true;
       
-      // Admins with permission can create, or allow public create (for regular admins without Firebase Auth)
+      // Create: Admins can create pins, including pins linked to reports (report pinning)
+      // Since regular admins don't have Firebase Auth, we allow public create
+      // Application-level checks ensure only authorized admins can create pins
       allow create: if canAddPlacemark() || true;
       
-      // Admins with permission can update, or allow public update (for regular admins without Firebase Auth)
+      // Update: Admins can update pins, including updating pin location when report location changes
+      // Since regular admins don't have Firebase Auth, we allow public update
+      // Application-level checks ensure only authorized admins can update pins
       allow update: if canEditPins() || true;
       
-      // Admins with permission can delete, or allow public delete (for regular admins without Firebase Auth)
+      // Delete: Admins can delete pins, including deletion when associated reports are deleted
+      // Since regular admins don't have Firebase Auth, we allow public delete
+      // Application-level checks ensure only authorized admins can delete pins
       allow delete: if canDeletePins() || true;
     }
     

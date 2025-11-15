@@ -224,12 +224,14 @@ interface MapboxMapProps {
       roadNetwork?: boolean;
       waterways?: boolean;
       traffic?: boolean;
+      satellite?: boolean;
     };
   };
   singleMarker?: Marker;
   pins?: Pin[]; // Array of pins from database to display
   showOnlyCurrentLocation?: boolean;
   clickedLocation?: { lat: number; lng: number; address: string } | null;
+  clickedLocationType?: string; // Report type for the clicked location marker
   showGeocoder?: boolean;
   onGeocoderResult?: (result: { lat: number; lng: number; address: string }) => void;
   showDirections?: boolean; // Control whether to show routes and travel time
@@ -281,6 +283,7 @@ export function MapboxMap({
   pins = [],
   showOnlyCurrentLocation = false,
   clickedLocation = null,
+  clickedLocationType,
   showGeocoder = false,
   onGeocoderResult,
   showDirections = true, // Default to true for backward compatibility
@@ -319,6 +322,7 @@ export function MapboxMap({
   const lastRouteKeyRef = useRef<string | null>(null);
   const lastTravelTimeDataRef = useRef<{ key: string; duration: string; distance: number } | null>(null);
   const lastRouteDataRef = useRef<any>(null);
+  const lastAppliedStyleRef = useRef<'streets' | 'satellite' | null>(null);
   
   // Use external style if provided, otherwise use internal state
   const currentStyle = externalStyle || mapStyle;
@@ -453,6 +457,9 @@ export function MapboxMap({
     el.style.minHeight = `${size}px`;
     el.style.position = 'relative';
     el.style.willChange = 'transform'; // Optimize for transform operations during zoom
+    el.style.flexShrink = '0'; // Prevent marker from shrinking
+    el.style.flexGrow = '0'; // Prevent marker from growing
+    el.style.boxSizing = 'border-box'; // Ensure padding/border don't affect size
     
     // Create image element for the marker icon
     const img = document.createElement('img');
@@ -1071,6 +1078,10 @@ export function MapboxMap({
           clearTimeout(loadTimeout);
           setMapLoaded(true);
           setMapError(null);
+          
+          // Track the initial style (use externalStyle if provided, otherwise mapStyle)
+          const initialStyle = externalStyle || mapStyle;
+          lastAppliedStyleRef.current = initialStyle;
 
           // Hide all layers except lucban-boundary on initial load
           const allLayers = map.current.getStyle().layers;
@@ -1223,7 +1234,7 @@ export function MapboxMap({
         map.current = null;
       }
     };
-  }, [currentStyle]); // Re-initialize when map style changes
+      }, []); // Only initialize once - style changes handled by setStyle() useEffect
 
   // Handle center and zoom changes
   useEffect(() => {
@@ -1288,16 +1299,22 @@ export function MapboxMap({
         popupRef.current = null;
       }
 
-      const clickedLocationEl = createMarkerElement('Default', true, false);
+      // Use the report type if provided, otherwise use Default
+      const markerType = clickedLocationType || 'Default';
+      const clickedLocationEl = createMarkerElement(markerType, true, false);
       clickedLocationEl.title = 'Selected location';
 
       const clickedLocationMarker = new mapboxgl.Marker({
         element: clickedLocationEl,
-        anchor: 'center'
+        anchor: 'center',
+        draggable: false
       })
       .setLngLat([clickedLocation.lng, clickedLocation.lat])
       .addTo(map.current);
 
+      // Ensure marker stays fixed at the location even during zoom/pan
+      clickedLocationMarker.getElement().style.pointerEvents = 'none';
+      
       markersRef.current.push(clickedLocationMarker);
 
       const travelTimeElementId = `travel-time-${clickedLocation.lat.toFixed(6).replace(/\./g, '_')}-${clickedLocation.lng.toFixed(6).replace(/\./g, '_')}`;
@@ -1724,7 +1741,7 @@ export function MapboxMap({
 
       markersRef.current.push(markerInstance);
     });
-  }, [mapLoaded, activeFilters, singleMarker, pins, userLocation, showOnlyCurrentLocation, clickedLocation, onEditPin, canEdit, showDirections, showHeatmap]);
+  }, [mapLoaded, activeFilters, singleMarker, pins, userLocation, showOnlyCurrentLocation, clickedLocation, clickedLocationType, onEditPin, canEdit, showDirections, showHeatmap]);
 
   // Handle route display
   useEffect(() => {
@@ -1866,6 +1883,7 @@ export function MapboxMap({
     if (!map.current || !mapLoaded || !activeFilters?.layerFilters) return;
 
     const layerFilters = activeFilters.layerFilters;
+    const isSatellite = layerFilters.satellite ?? false;
 
     // Helper function to toggle layer visibility
     const toggleLayer = (layerId: string, visible: boolean) => {
@@ -1878,21 +1896,23 @@ export function MapboxMap({
       }
     };
 
-    // Toggle barangay boundaries (lucban-brgys) and fill (lucban-fill)
+    // Toggle barangay boundaries - toggle both regular and satellite layers together
     // Note: lucban-boundary stays visible (not controlled by these toggles)
     const barangayVisible = layerFilters.barangay ?? false;
+    // Toggle both layers together - the appropriate one will show based on style
     toggleLayer('lucban-brgys', barangayVisible);
+    toggleLayer('lucban-brgys-satellite', barangayVisible);
     toggleLayer('lucban-fill', barangayVisible); // Toggle fill layer together with boundaries
 
     // Toggle barangay labels (lucban-brgy-names)
     toggleLayer('lucban-brgy-names', layerFilters.barangayLabel ?? false);
 
-    // Toggle waterways (waterway)
+    // Toggle waterways - works in both styles
     toggleLayer('waterway', layerFilters.waterways ?? false);
+    toggleLayer('waterway-satellite', layerFilters.waterways ?? false);
 
-    // Toggle road network - try common layer names
-    // Note: The actual layer name may vary, common names: 'road', 'roads', 'road-network', 'highway'
-    const roadLayerNames = ['road', 'roads', 'road-network', 'highway', 'road-label'];
+    // Toggle road network - works in both styles
+    const roadLayerNames = ['road', 'roads', 'road-network', 'highway', 'road-label', 'road-satellite'];
     roadLayerNames.forEach(layerName => {
       try {
         if (map.current && map.current.getLayer(layerName)) {
@@ -1908,10 +1928,15 @@ export function MapboxMap({
   }, [mapLoaded, activeFilters?.layerFilters]);
 
   // Toggle facility layers based on facility filters
+  // Note: These layers only exist in the custom streets style, not in satellite
   useEffect(() => {
     if (!map.current || !mapLoaded || !activeFilters?.facilityTypes) return;
 
     const facilityTypes = activeFilters.facilityTypes;
+    const isSatellite = activeFilters?.layerFilters?.satellite ?? false;
+
+    // Only toggle facility layers for streets style (they don't exist in satellite)
+    if (isSatellite) return;
 
     // Helper function to toggle layer visibility
     const toggleLayer = (layerId: string, visible: boolean) => {
@@ -1931,7 +1956,7 @@ export function MapboxMap({
     // Toggle evacuation-centers layer
     const evacuationCentersVisible = facilityTypes.includes('Evacuation Centers');
     toggleLayer('evacuation-centers', evacuationCentersVisible);
-  }, [mapLoaded, activeFilters?.facilityTypes]);
+  }, [mapLoaded, activeFilters?.facilityTypes, activeFilters?.layerFilters?.satellite]);
 
   // Update style toggle control when external style changes
   useEffect(() => {
@@ -1939,6 +1964,207 @@ export function MapboxMap({
       styleToggleControlRef.current.updateStyle(externalStyle);
     }
   }, [externalStyle]);
+
+  // Handle external style changes dynamically using setStyle (more efficient than re-initializing)
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return;
+
+    // Determine the style to use (external style takes precedence, fallback to mapStyle)
+    const styleToUse = externalStyle !== undefined ? externalStyle : mapStyle;
+    
+    // Only update if the style has actually changed
+    if (lastAppliedStyleRef.current === styleToUse) return;
+
+    const styleUrl = styleToUse === 'streets' 
+      ? 'mapbox://styles/accizard-lucban-official/cmhox8ita005o01sr1psmbgp6'
+      : 'mapbox://styles/mapbox/satellite-v9';
+    
+    console.log('Changing map style to:', styleToUse, 'URL:', styleUrl);
+    
+    // Update the map style
+    map.current.setStyle(styleUrl);
+    lastAppliedStyleRef.current = styleToUse;
+    
+    // Also update internal state if external style changed
+    if (externalStyle !== undefined && externalStyle !== mapStyle) {
+      setMapStyle(externalStyle);
+    }
+    
+    // Re-add controls and layers after style loads
+    map.current.once('style.load', async () => {
+      console.log('Style loaded successfully:', styleToUse);
+      
+      if (styleToUse === 'streets') {
+        // Hide all layers except lucban-boundary on style load (similar to initial load)
+        const allLayers = map.current?.getStyle().layers;
+        if (allLayers) {
+          allLayers.forEach((layer: any) => {
+            try {
+              // Keep lucban-boundary visible, hide everything else initially
+              if (layer.id !== 'lucban-boundary') {
+                if (map.current && map.current.getLayer(layer.id)) {
+                  map.current.setLayoutProperty(layer.id, 'visibility', 'none');
+                }
+              }
+            } catch (error) {
+              // Some layers might not support visibility property, skip them
+              console.warn(`Could not hide layer ${layer.id}:`, error);
+            }
+          });
+        }
+        
+        // Re-add traffic layer for streets style
+        if (map.current) {
+          if (!map.current.getSource('mapbox-traffic')) {
+            map.current.addSource('mapbox-traffic', {
+              type: 'vector',
+              url: 'mapbox://mapbox.mapbox-traffic-v1'
+            });
+          }
+
+          if (!map.current.getLayer('traffic')) {
+            map.current.addLayer({
+              id: 'traffic',
+              type: 'line',
+              source: 'mapbox-traffic',
+              'source-layer': 'traffic',
+              paint: {
+                'line-width': 2,
+                'line-color': [
+                  'case',
+                  ['==', ['get', 'congestion'], 'low'], '#4ade80',
+                  ['==', ['get', 'congestion'], 'moderate'], '#fbbf24',
+                  ['==', ['get', 'congestion'], 'heavy'], '#f87171',
+                  ['==', ['get', 'congestion'], 'severe'], '#dc2626',
+                  '#94a3b8'
+                ]
+              },
+              layout: {
+                'visibility': activeFilters?.layerFilters?.traffic ? 'visible' : 'none'
+              }
+            });
+          }
+        }
+      } else if (styleToUse === 'satellite' && map.current) {
+        // For satellite style, add custom layers as overlays on top
+        // First, fetch the custom style to get source and layer definitions
+        try {
+          const customStyleUrl = 'https://api.mapbox.com/styles/v1/accizard-lucban-official/cmhox8ita005o01sr1psmbgp6?access_token=' + mapboxgl.accessToken;
+          const response = await fetch(customStyleUrl);
+          const customStyle = await response.json();
+          
+          // Add custom sources from the custom style to satellite style
+          if (customStyle.sources) {
+            Object.keys(customStyle.sources).forEach(sourceId => {
+              try {
+                // Skip sources that already exist or are part of satellite style
+                if (map.current && !map.current.getSource(sourceId)) {
+                  const source = customStyle.sources[sourceId];
+                  // Only add vector/raster sources (not composite)
+                  if (source.type === 'vector' || source.type === 'raster') {
+                    map.current.addSource(sourceId, source);
+                  }
+                }
+              } catch (error) {
+                console.warn(`Could not add source ${sourceId}:`, error);
+              }
+            });
+          }
+          
+          // Add custom layers from the custom style on top of satellite
+          // Layers are added in order, so they'll appear on top of satellite imagery
+          if (customStyle.layers) {
+            // Define exact layer IDs we want to add
+            const layersToAdd = new Set([
+              'lucban-boundary', 'lucban-brgys', 'lucban-brgys-satellite', 'lucban-fill', 'lucban-brgy-names'
+            ]);
+            
+            // Also match waterway and road layers by pattern
+            const waterwayPattern = /^waterway/;
+            const roadPattern = /^(road|roads|road-network|highway|road-label)/;
+            
+            customStyle.layers.forEach((layer: any) => {
+              try {
+                const shouldAdd = layersToAdd.has(layer.id) || 
+                                  waterwayPattern.test(layer.id) || 
+                                  roadPattern.test(layer.id);
+                
+                if (shouldAdd && map.current && !map.current.getLayer(layer.id)) {
+                  // Make sure the source exists before adding the layer
+                  if (layer.source && map.current.getSource(layer.source)) {
+                    // Add layer at the end (on top of satellite)
+                    map.current.addLayer(layer);
+                    
+                    // Set initial visibility based on layer filters
+                    const layerFilters = activeFilters?.layerFilters;
+                    if (layer.id === 'lucban-boundary') {
+                      // Always keep boundary visible
+                      map.current.setLayoutProperty(layer.id, 'visibility', 'visible');
+                    } else if (layer.id === 'lucban-brgys-satellite') {
+                      // Use satellite-specific layer for barangay boundaries
+                      map.current.setLayoutProperty(layer.id, 'visibility', layerFilters?.barangay ? 'visible' : 'none');
+                    } else if (layer.id === 'lucban-brgys' || layer.id === 'lucban-fill') {
+                      // Hide regular boundaries in satellite mode (use satellite-specific instead)
+                      map.current.setLayoutProperty(layer.id, 'visibility', 'none');
+                    } else if (layer.id === 'lucban-brgy-names') {
+                      map.current.setLayoutProperty(layer.id, 'visibility', layerFilters?.barangayLabel ? 'visible' : 'none');
+                    } else if (waterwayPattern.test(layer.id)) {
+                      map.current.setLayoutProperty(layer.id, 'visibility', layerFilters?.waterways ? 'visible' : 'none');
+                    } else if (roadPattern.test(layer.id)) {
+                      map.current.setLayoutProperty(layer.id, 'visibility', layerFilters?.roadNetwork ? 'visible' : 'none');
+                    } else {
+                      map.current.setLayoutProperty(layer.id, 'visibility', 'none');
+                    }
+                  }
+                }
+              } catch (error) {
+                console.warn(`Could not add layer ${layer.id}:`, error);
+              }
+            });
+          }
+          
+          // Add traffic layer for satellite style too
+          if (!map.current.getSource('mapbox-traffic')) {
+            map.current.addSource('mapbox-traffic', {
+              type: 'vector',
+              url: 'mapbox://mapbox.mapbox-traffic-v1'
+            });
+          }
+
+          if (!map.current.getLayer('traffic')) {
+            map.current.addLayer({
+              id: 'traffic',
+              type: 'line',
+              source: 'mapbox-traffic',
+              'source-layer': 'traffic',
+              paint: {
+                'line-width': 2,
+                'line-color': [
+                  'case',
+                  ['==', ['get', 'congestion'], 'low'], '#4ade80',
+                  ['==', ['get', 'congestion'], 'moderate'], '#fbbf24',
+                  ['==', ['get', 'congestion'], 'heavy'], '#f87171',
+                  ['==', ['get', 'congestion'], 'severe'], '#dc2626',
+                  '#94a3b8'
+                ]
+              },
+              layout: {
+                'visibility': activeFilters?.layerFilters?.traffic ? 'visible' : 'none'
+              }
+            });
+          }
+        } catch (error) {
+          console.error('Error adding custom layers to satellite style:', error);
+        }
+      }
+    });
+    
+    // Handle style load errors
+    map.current.once('style.error', (e: any) => {
+      console.error('Error loading map style:', e);
+      console.error('Style URL:', styleUrl);
+    });
+  }, [externalStyle, mapLoaded, activeFilters?.layerFilters?.traffic]);
 
   // Function to create hover popup content for tileset features
   const createTilesetHoverPopupContent = (feature: mapboxgl.MapboxGeoJSONFeature, layerType: string) => {
@@ -2036,8 +2262,13 @@ export function MapboxMap({
   };
 
   // Handle hover for tileset layers (health-facilities and evacuation-centers)
+  // Note: These layers only exist in the custom streets style, not in satellite
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
+
+    const isSatellite = activeFilters?.layerFilters?.satellite ?? false;
+    // Don't set up hover handlers for facility layers in satellite mode
+    if (isSatellite) return;
 
     const handleMouseMove = (e: mapboxgl.MapMouseEvent) => {
       if (!map.current) return;
@@ -2129,7 +2360,7 @@ export function MapboxMap({
         tilesetHoverPopupRef.current = null;
       }
     };
-  }, [mapLoaded]);
+  }, [mapLoaded, activeFilters?.layerFilters?.satellite]);
 
   // Handle cursor change for add placemark mode with custom cursor element
   useEffect(() => {

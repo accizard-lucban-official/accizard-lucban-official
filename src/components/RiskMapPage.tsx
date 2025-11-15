@@ -13,7 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel, SelectSeparator } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Plus, MapPin, Layers, CalendarIcon, Search, Building2, Ambulance, Waves, Mountain, Building, CircleAlert, Users, ShieldAlert, Activity, Flame, Car, Siren, Home, Navigation, RotateCcw, HelpCircle, Info, ZoomIn, ZoomOut, LocateFixed, X, Filter, Download, FileText, Globe, Wrench, AlertTriangle, Zap, Leaf } from "lucide-react";
+import { Plus, MapPin, Layers, CalendarIcon, Search, Building2, Ambulance, Waves, Mountain, Building, CircleAlert, Users, ShieldAlert, Activity, Flame, Car, Siren, Home, Navigation, RotateCcw, HelpCircle, Info, ZoomIn, ZoomOut, LocateFixed, X, Filter, Download, FileText, Globe, Wrench, AlertTriangle, Zap, Leaf, Satellite } from "lucide-react";
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear } from "date-fns";
 import { cn, ensureOk } from "@/lib/utils";
 import { Layout } from "./Layout";
@@ -84,6 +84,7 @@ export function RiskMapPage() {
   const [pinModalMode, setPinModalMode] = useState<"create" | "edit">("create");
   const [editingPin, setEditingPin] = useState<Pin | undefined>(undefined);
   const [pinModalPrefill, setPinModalPrefill] = useState<Partial<PinFormData> | undefined>(undefined);
+  const [isUnpinMode, setIsUnpinMode] = useState(false);
   const [isLegendDialogOpen, setIsLegendDialogOpen] = useState(false);
   const [tempClickedLocation, setTempClickedLocation] = useState<{ lat: number; lng: number; locationName: string } | null>(null);
   
@@ -133,7 +134,8 @@ export function RiskMapPage() {
     barangayLabel: false, // Hidden by default
     roadNetwork: false, // Hidden by default
     waterways: false, // Hidden by default
-    traffic: false // Hidden by default
+    traffic: false, // Hidden by default
+    satellite: false // Hidden by default
   });
 
 
@@ -239,7 +241,7 @@ export function RiskMapPage() {
     toast.success(`Navigated to ${placeName}`);
   };
 
-  // Effect to populate modal when navigating from a report
+  // Effect to populate modal when navigating from a report or pin
   useEffect(() => {
     const state = location.state as any;
     console.log("Location state changed:", state);
@@ -257,10 +259,33 @@ export function RiskMapPage() {
         locationName: report.location || "",
         reportId: report.id || ""
       });
+      setIsUnpinMode(false);
       setIsPinModalOpen(true);
       setIsFiltersOpen(false); // Close filter panel when pin modal opens
       
       // Clear the location state to prevent it from persisting on refresh
+      navigate("/risk-map", { replace: true, state: {} });
+    } else if (state && state.pin && state.unpinMode) {
+      // Handle unpin mode - open edit modal with pin data
+      const pin = state.pin;
+      console.log("Loading pin data for unpin mode:", pin);
+      
+      setPinModalMode("edit");
+      setEditingPin(pin);
+      setPinModalPrefill({
+        type: pin.type,
+        title: pin.title,
+        description: pin.description || "",
+        latitude: pin.latitude,
+        longitude: pin.longitude,
+        locationName: pin.locationName,
+        reportId: pin.reportId
+      });
+      setIsUnpinMode(true);
+      setIsPinModalOpen(true);
+      setIsFiltersOpen(false);
+      
+      // Clear the location state
       navigate("/risk-map", { replace: true, state: {} });
     }
   }, [location.state, navigate]);
@@ -656,10 +681,26 @@ ${placemarks}
       setPinModalPrefill(undefined);
       setEditingPin(undefined);
       setTempClickedLocation(null); // Clear temporary marker after pin is saved
+      setIsUnpinMode(false);
     } catch (error: any) {
       console.error("Error saving pin:", error);
       toast.error(error.message || "Failed to save pin");
       throw error; // Re-throw to keep modal open
+    }
+  };
+
+  const handleUnpin = async (pinId: string) => {
+    try {
+      await deletePin(pinId);
+      toast.success("Pin removed from map successfully");
+      setIsPinModalOpen(false);
+      setEditingPin(undefined);
+      setPinModalPrefill(undefined);
+      setIsUnpinMode(false);
+    } catch (error: any) {
+      console.error("Error unpinning:", error);
+      toast.error(error.message || "Failed to unpin");
+      throw error;
     }
   };
 
@@ -762,10 +803,14 @@ ${placemarks}
     // Date filters should not apply to emergency support facilities
     if (activeAccidentTypes.length > 0) {
       if (date?.from) {
-        filters.dateFrom = date.from;
+        const fromDate = new Date(date.from);
+        fromDate.setHours(0, 0, 0, 0);
+        filters.dateFrom = fromDate;
       }
       if (date?.to) {
-        filters.dateTo = date.to;
+        const toDate = new Date(date.to);
+        toDate.setHours(23, 59, 59, 999);
+        filters.dateTo = toDate;
       }
     }
 
@@ -1193,6 +1238,7 @@ ${placemarks}
                 setEditingPin(undefined);
                 setTempClickedLocation(null); // Clear temporary marker when modal closes
                 setIsAddPlacemarkMode(false); // Exit add placemark mode when modal closes
+                setIsUnpinMode(false);
               }}
               onSave={handleSavePin}
               mode={pinModalMode}
@@ -1201,6 +1247,8 @@ ${placemarks}
               onDelete={handleDeletePinClick}
               canEdit={canEditPins()}
               canDelete={canDeletePins()}
+              unpinMode={isUnpinMode}
+              onUnpin={handleUnpin}
             />
             
             {/* Filters Overlay - positioned within map container */}
@@ -1319,6 +1367,25 @@ ${placemarks}
                           >
                             <Car className={cn("h-4 w-4 transition-colors", layerFilters.traffic ? "text-white" : "text-gray-600 group-hover:text-brand-orange")} />
                             Traffic
+                          </button>
+                          <button
+                            onClick={() => {
+                              setLayerFilters(prev => {
+                                const newSatelliteValue = !prev.satellite;
+                                // Update map style when satellite is toggled
+                                setMapLayerStyle(newSatelliteValue ? 'satellite' : 'streets');
+                                return { ...prev, satellite: newSatelliteValue };
+                              });
+                            }}
+                            className={cn(
+                              "flex items-center gap-2 px-4 py-2.5 text-xs font-medium rounded-lg transition-all border-2 group",
+                              layerFilters.satellite 
+                                ? "bg-gradient-to-r from-brand-orange to-orange-500 text-white border-brand-orange" 
+                                : "bg-white text-gray-700 border-gray-200 hover:border-orange-300 hover:bg-orange-50 hover:text-brand-orange"
+                            )}
+                          >
+                            <Satellite className={cn("h-4 w-4 transition-colors", layerFilters.satellite ? "text-white" : "text-gray-600 group-hover:text-brand-orange")} />
+                            Satellite View
                           </button>
                         </div>
                       </AccordionContent>

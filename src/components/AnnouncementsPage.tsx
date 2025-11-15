@@ -256,15 +256,22 @@ export function AnnouncementsPage() {
     const matchesPriority = priorityFilter === "all" || announcement.priority === priorityFilter;
     // Date range filter (createdTime)
     let matchesDate = true;
-    if (dateRange?.from && dateRange?.to) {
+    if (dateRange?.from || dateRange?.to) {
       const created = announcement.createdTime ? new Date(announcement.createdTime) : null;
       if (created) {
-        // Set time to 0:00 for from, 23:59 for to
-        const from = new Date(dateRange.from);
-        from.setHours(0,0,0,0);
-        const to = new Date(dateRange.to);
-        to.setHours(23,59,59,999);
-        matchesDate = created >= from && created <= to;
+        if (dateRange.from) {
+          const from = new Date(dateRange.from);
+          from.setHours(0,0,0,0);
+          matchesDate = created >= from;
+        }
+        if (dateRange.to && matchesDate) {
+          const to = new Date(dateRange.to);
+          to.setHours(23,59,59,999);
+          matchesDate = created <= to;
+        }
+      } else {
+        // If no createdTime, exclude from results when date filter is active
+        matchesDate = false;
       }
     }
     return matchesSearch && matchesType && matchesPriority && matchesDate;
