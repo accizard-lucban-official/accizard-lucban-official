@@ -61,7 +61,7 @@ export function SystemLogsPage() {
   const [searchTerm, setSearchTerm] = useState(searchParams.get("search") || "");
   const [userFilter, setUserFilter] = useState("all");
   const [actionTypeFilter, setActionTypeFilter] = useState("all");
-  const [activityLogs, setActivityLogs] = useState([]);
+  const [activityLogs, setActivityLogs] = useState<any[]>([]);
   const [adminUsers, setAdminUsers] = useState<any[]>([]);
   const [superAdmins, setSuperAdmins] = useState<any[]>([]);
   const [activitySortDirection, setActivitySortDirection] = useState<'asc' | 'desc'>('desc');
@@ -202,12 +202,12 @@ export function SystemLogsPage() {
             ...data,
             timestamp 
           };
-        });
+        }) as any[];
         setActivityLogs(logs);
 
         // Pre-fetch custom IDs for logs that have entityType and entityId
-        const logsToFetch = logs.filter(log => log.entityType && log.entityId);
-        const fetchPromises = logsToFetch.map(log => 
+        const logsToFetch = logs.filter((log: any) => log.entityType && log.entityId);
+        const fetchPromises = logsToFetch.map((log: any) => 
           fetchCustomId(log.entityType, log.entityId)
         );
         await Promise.all(fetchPromises);
@@ -624,8 +624,8 @@ export function SystemLogsPage() {
 
               {/* Date Range Picker */}
               <DateRangePicker
-                date={dateRange}
-                onDateChange={setDateRange}
+                value={dateRange}
+                onChange={setDateRange}
               />
 
               {/* User Filter */}
