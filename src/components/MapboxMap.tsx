@@ -247,6 +247,7 @@ interface MapboxMapProps {
   disableSingleMarkerPulse?: boolean;
   onLegendClick?: () => void; // Callback when legend button is clicked
   isAddPlacemarkMode?: boolean; // When true, shows marker cursor and allows placing placemarks
+  onReportIdClick?: (reportId: string) => void; // Callback when RID is clicked in info window
 }
 
 // Sample data for markers - currently empty, will be populated from database
@@ -297,7 +298,8 @@ export function MapboxMap({
   externalStyle, // Optional external control
   disableSingleMarkerPulse = false,
   onLegendClick, // Optional callback for legend button
-  isAddPlacemarkMode = false // Optional add placemark mode
+  isAddPlacemarkMode = false, // Optional add placemark mode
+  onReportIdClick // Optional callback when RID is clicked
 }: MapboxMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
@@ -633,7 +635,12 @@ export function MapboxMap({
               <div style="display: flex; align-items: center; gap: 6px;">
                 ${reportId ? `
                   <span style="font-size: 11px; font-weight: 600; color: #6b7280; font-family: 'DM Sans', sans-serif;">RID</span>
-                  <span style="font-size: 11px; color: #1f2937; font-family: 'DM Sans', sans-serif;">${reportId}</span>
+                  <span 
+                    id="rid-link-${reportId}" 
+                    style="font-size: 11px; color: #2563eb; font-family: 'DM Sans', sans-serif; cursor: pointer; text-decoration: underline; transition: color 0.2s;"
+                    onmouseover="this.style.color='#1d4ed8'"
+                    onmouseout="this.style.color='#2563eb'"
+                  >${reportId}</span>
                 ` : '<span style="font-size: 11px; color: #9ca3af; font-family: \'DM Sans\', sans-serif;">No RID</span>'}
               </div>
               <span style="display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; background-color: rgba(249, 115, 22, 0.12); color: #f97316; border: 1px solid rgba(249, 115, 22, 0.25); font-family: 'DM Sans', sans-serif;">
@@ -1611,6 +1618,21 @@ export function MapboxMap({
           .setLngLat([pin.longitude, pin.latitude])
           .setHTML(createHoverPopupContent(pin))
           .addTo(map.current!);
+
+          // Add click handler for RID link if reportId exists and callback is provided
+          if (pin.reportId && onReportIdClick) {
+            // Use setTimeout to ensure DOM is ready
+            setTimeout(() => {
+              const ridLink = document.getElementById(`rid-link-${pin.reportId}`);
+              if (ridLink) {
+                ridLink.addEventListener('click', (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onReportIdClick(pin.reportId!);
+                });
+              }
+            }, 0);
+          }
         });
 
         // Remove hover popup on mouse leave
@@ -1705,6 +1727,21 @@ export function MapboxMap({
         .setLngLat(marker.coordinates)
         .setHTML(createHoverPopupContent(marker))
         .addTo(map.current!);
+
+        // Add click handler for RID link if reportId exists and callback is provided
+        if (marker.reportId && onReportIdClick) {
+          // Use setTimeout to ensure DOM is ready
+          setTimeout(() => {
+            const ridLink = document.getElementById(`rid-link-${marker.reportId}`);
+            if (ridLink) {
+              ridLink.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onReportIdClick(marker.reportId!);
+              });
+            }
+          }, 0);
+        }
       });
 
       // Remove hover popup on mouse leave
@@ -1904,24 +1941,54 @@ export function MapboxMap({
     toggleLayer('lucban-brgys-satellite', barangayVisible);
     toggleLayer('lucban-fill', barangayVisible); // Toggle fill layer together with boundaries
 
-    // Toggle barangay labels (lucban-brgy-names)
-    toggleLayer('lucban-brgy-names', layerFilters.barangayLabel ?? false);
+    // Toggle barangay labels (lucban-brgy-names) - use barangay filter instead of barangayLabel
+    toggleLayer('lucban-brgy-names', barangayVisible);
 
-    // Toggle waterways - works in both styles
-    toggleLayer('waterway', layerFilters.waterways ?? false);
-    toggleLayer('waterway-satellite', layerFilters.waterways ?? false);
+    // Toggle waterways - use different layers based on satellite mode
+    if (isSatellite) {
+      // Use satellite-specific waterway layer
+      toggleLayer('waterway-satellite', layerFilters.waterways ?? false);
+      // Hide regular waterway layer in satellite mode
+      toggleLayer('waterway', false);
+    } else {
+      // Use regular waterway layer for street view
+      toggleLayer('waterway', layerFilters.waterways ?? false);
+      // Hide satellite waterway layer in street mode
+      toggleLayer('waterway-satellite', false);
+    }
 
-    // Toggle road network - works in both styles
-    const roadLayerNames = ['road', 'roads', 'road-network', 'highway', 'road-label', 'road-satellite'];
-    roadLayerNames.forEach(layerName => {
-      try {
-        if (map.current && map.current.getLayer(layerName)) {
-          toggleLayer(layerName, layerFilters.roadNetwork ?? false);
+    // Toggle road network - use different layers based on satellite mode
+    if (isSatellite) {
+      // Use satellite-specific road layer
+      toggleLayer('road-satellite', layerFilters.roadNetwork ?? false);
+      // Hide regular road layers in satellite mode
+      const streetRoadLayers = ['road', 'roads', 'road-network', 'highway', 'road-label'];
+      streetRoadLayers.forEach(layerName => {
+        try {
+          if (map.current && map.current.getLayer(layerName)) {
+            toggleLayer(layerName, false);
+          }
+        } catch (error) {
+          // Layer doesn't exist, continue
         }
-      } catch (error) {
-        // Layer doesn't exist, continue
-      }
-    });
+      });
+    } else {
+      // Use regular road layer for street view
+      toggleLayer('road', layerFilters.roadNetwork ?? false);
+      // Hide satellite road layer in street mode
+      toggleLayer('road-satellite', false);
+      // Also hide other road layers that might exist
+      const otherRoadLayers = ['roads', 'road-network', 'highway', 'road-label'];
+      otherRoadLayers.forEach(layerName => {
+        try {
+          if (map.current && map.current.getLayer(layerName)) {
+            toggleLayer(layerName, false);
+          }
+        } catch (error) {
+          // Layer doesn't exist, continue
+        }
+      });
+    }
 
     // Toggle traffic layer (we create it as 'traffic')
     toggleLayer('traffic', layerFilters.traffic ?? false);
@@ -1953,9 +2020,9 @@ export function MapboxMap({
     const healthFacilitiesVisible = facilityTypes.includes('Health Facilities');
     toggleLayer('health-facilities', healthFacilitiesVisible);
 
-    // Toggle evacuation-centers layer
-    const evacuationCentersVisible = facilityTypes.includes('Evacuation Centers');
-    toggleLayer('evacuation-centers', evacuationCentersVisible);
+    // Evacuation centers layer is NOT toggled - using manual pins instead
+    // const evacuationCentersVisible = facilityTypes.includes('Evacuation Centers');
+    // toggleLayer('evacuation-centers', evacuationCentersVisible);
   }, [mapLoaded, activeFilters?.facilityTypes, activeFilters?.layerFilters?.satellite]);
 
   // Update style toggle control when external style changes
@@ -2107,11 +2174,24 @@ export function MapboxMap({
                       // Hide regular boundaries in satellite mode (use satellite-specific instead)
                       map.current.setLayoutProperty(layer.id, 'visibility', 'none');
                     } else if (layer.id === 'lucban-brgy-names') {
-                      map.current.setLayoutProperty(layer.id, 'visibility', layerFilters?.barangayLabel ? 'visible' : 'none');
+                      // Use barangay filter for barangay names overlay
+                      map.current.setLayoutProperty(layer.id, 'visibility', layerFilters?.barangay ? 'visible' : 'none');
                     } else if (waterwayPattern.test(layer.id)) {
-                      map.current.setLayoutProperty(layer.id, 'visibility', layerFilters?.waterways ? 'visible' : 'none');
+                      // In satellite mode, only show waterway-satellite, hide regular waterway
+                      if (layer.id === 'waterway-satellite') {
+                        map.current.setLayoutProperty(layer.id, 'visibility', layerFilters?.waterways ? 'visible' : 'none');
+                      } else {
+                        // Hide regular waterway layer in satellite mode
+                        map.current.setLayoutProperty(layer.id, 'visibility', 'none');
+                      }
                     } else if (roadPattern.test(layer.id)) {
-                      map.current.setLayoutProperty(layer.id, 'visibility', layerFilters?.roadNetwork ? 'visible' : 'none');
+                      // In satellite mode, only show road-satellite, hide regular road layers
+                      if (layer.id === 'road-satellite') {
+                        map.current.setLayoutProperty(layer.id, 'visibility', layerFilters?.roadNetwork ? 'visible' : 'none');
+                      } else {
+                        // Hide regular road layers in satellite mode
+                        map.current.setLayoutProperty(layer.id, 'visibility', 'none');
+                      }
                     } else {
                       map.current.setLayoutProperty(layer.id, 'visibility', 'none');
                     }
@@ -2261,7 +2341,7 @@ export function MapboxMap({
     `;
   };
 
-  // Handle hover for tileset layers (health-facilities and evacuation-centers)
+  // Handle hover for tileset layers (health-facilities only - evacuation-centers uses manual pins)
   // Note: These layers only exist in the custom streets style, not in satellite
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
@@ -2273,8 +2353,8 @@ export function MapboxMap({
     const handleMouseMove = (e: mapboxgl.MapMouseEvent) => {
       if (!map.current) return;
 
-      // Query features at the mouse position for tileset layers
-      const layers = ['health-facilities', 'evacuation-centers'];
+      // Query features at the mouse position for tileset layers (evacuation-centers removed - using manual pins)
+      const layers = ['health-facilities'];
       const features = map.current.queryRenderedFeatures(e.point, {
         layers: layers
       });
@@ -2300,12 +2380,10 @@ export function MapboxMap({
         const feature = features[0];
         const layerId = feature.layer?.id || '';
         
-        // Determine layer type
+        // Determine layer type (evacuation-centers removed - using manual pins)
         let layerType = 'Facility';
         if (layerId.includes('health')) {
           layerType = 'Health Facility';
-        } else if (layerId.includes('evacuation')) {
-          layerType = 'Evacuation Center';
         }
 
         // Get coordinates from feature

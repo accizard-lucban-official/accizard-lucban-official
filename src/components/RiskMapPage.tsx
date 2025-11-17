@@ -704,6 +704,31 @@ ${placemarks}
     }
   };
 
+  // Handle coordinate changes from PinModal
+  const handleCoordinatesChange = async (coordinates: { lat: number; lng: number }) => {
+    // Update the temporary clicked location to move the marker
+    if (coordinates.lat !== 0 && coordinates.lng !== 0) {
+      // Reverse geocode to get location name
+      const locationName = await reverseGeocode(coordinates.lat.toString(), coordinates.lng.toString());
+      setTempClickedLocation({
+        lat: coordinates.lat,
+        lng: coordinates.lng,
+        locationName: locationName
+      });
+      
+      // Update the prefill data with new coordinates and location name
+      setPinModalPrefill(prev => ({
+        ...prev,
+        latitude: coordinates.lat,
+        longitude: coordinates.lng,
+        locationName: locationName
+      }));
+    } else {
+      // Clear the marker if coordinates are cleared
+      setTempClickedLocation(null);
+    }
+  };
+
   // Convert camelCase filter key to PinType display name
   const convertFilterKeyToType = (key: string): string => {
     // Direct mapping to ensure exact match with PinType values
@@ -1159,6 +1184,12 @@ ${placemarks}
               <MapboxMap 
               showControls={true}
               onLegendClick={() => setIsLegendDialogOpen(true)}
+              onReportIdClick={(reportId) => {
+                // Navigate to ManageReportsPage with the reportId in search
+                navigate("/manage-reports", { 
+                  state: { searchTerm: reportId } 
+                });
+              }}
               onMapClick={async (lngLat) => {
                 // If in add placemark mode, place the marker and open the form
                 if (isAddPlacemarkMode) {
@@ -1249,6 +1280,7 @@ ${placemarks}
               canDelete={canDeletePins()}
               unpinMode={isUnpinMode}
               onUnpin={handleUnpin}
+              onCoordinatesChange={handleCoordinatesChange}
             />
             
             {/* Filters Overlay - positioned within map container */}

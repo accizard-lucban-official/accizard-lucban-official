@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Layout } from "./Layout";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { DateRange } from "react-day-picker";
 import { format } from "date-fns";
 import { cn, ensureOk, getHttpStatusMessage } from "@/lib/utils";
@@ -254,6 +254,7 @@ const normalizeDispatchData = (data: any): DispatchDataState => {
 
 export function ManageReportsPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { canEditReports, canDeleteReports, canAddReportToMap } = useUserRole();
   const { deletePin, getPinById, updatePin, fetchPins } = usePins();
   const [searchTerm, setSearchTerm] = useState("");
@@ -298,6 +299,16 @@ export function ManageReportsPage() {
       }
     }
   }, [selectedReport]);
+
+  // Handle searchTerm from location state (when navigating from RiskMapPage)
+  useEffect(() => {
+    const state = location.state as any;
+    if (state && state.searchTerm) {
+      setSearchTerm(state.searchTerm);
+      // Clear the state to prevent it from persisting on refresh
+      navigate("/manage-reports", { replace: true, state: {} });
+    }
+  }, [location.state, navigate]);
 
   // Preview: Locate user helper
   const handlePreviewLocateUser = () => {

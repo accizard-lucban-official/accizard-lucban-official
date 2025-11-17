@@ -65,6 +65,7 @@ interface PinModalProps {
   canDelete?: boolean;
   unpinMode?: boolean;
   onUnpin?: (pinId: string) => Promise<void>;
+  onCoordinatesChange?: (coordinates: { lat: number; lng: number }) => void;
 }
 
 export interface PinFormData {
@@ -102,7 +103,8 @@ export function PinModal({
   canEdit = true,
   canDelete = true,
   unpinMode = false,
-  onUnpin
+  onUnpin,
+  onCoordinatesChange
 }: PinModalProps) {
   const [formData, setFormData] = useState<PinFormData>({
     type: "",
@@ -119,6 +121,8 @@ export function PinModal({
   const [isAddCustomTypeDialogOpen, setIsAddCustomTypeDialogOpen] = useState(false);
   const [customTypeName, setCustomTypeName] = useState("");
   const [customPinTypes, setCustomPinTypes] = useState<string[]>([]);
+  const [coordinatesInput, setCoordinatesInput] = useState("");
+  const [coordinatesError, setCoordinatesError] = useState(false);
 
   // Load custom pin types from localStorage on mount
   useEffect(() => {
@@ -145,6 +149,14 @@ export function PinModal({
         locationName: existingPin.locationName,
         reportId: existingPin.reportId
       });
+      // Initialize coordinates input
+      if (existingPin.latitude !== null && existingPin.longitude !== null) {
+        setCoordinatesInput(`${existingPin.latitude}, ${existingPin.longitude}`);
+        setCoordinatesError(false);
+      } else {
+        setCoordinatesInput("");
+        setCoordinatesError(false);
+      }
       setIsWaitingForMapClick(false);
     } else if (mode === "create") {
       // Always start with a clean form in create mode
@@ -169,6 +181,15 @@ export function PinModal({
           locationName: prefillData.locationName !== undefined ? prefillData.locationName : baseFormData.locationName,
           reportId: prefillData.reportId !== undefined ? prefillData.reportId : baseFormData.reportId
         });
+        // Initialize coordinates input
+        if (prefillData.latitude !== undefined && prefillData.latitude !== null && 
+            prefillData.longitude !== undefined && prefillData.longitude !== null) {
+          setCoordinatesInput(`${prefillData.latitude}, ${prefillData.longitude}`);
+          setCoordinatesError(false);
+        } else {
+          setCoordinatesInput("");
+          setCoordinatesError(false);
+        }
         // Stop waiting for map click if coordinates are provided
         if (prefillData.latitude !== undefined && prefillData.longitude !== undefined) {
           setIsWaitingForMapClick(false);
@@ -178,10 +199,36 @@ export function PinModal({
       } else {
         // No prefillData, use clean form
         setFormData(baseFormData);
+        setCoordinatesInput("");
+        setCoordinatesError(false);
         setIsWaitingForMapClick(true); // Start in map click mode for new pins
       }
     }
   }, [mode, existingPin, prefillData, isOpen]);
+
+  // Update locationName when prefillData.locationName changes (e.g., after reverse geocoding)
+  useEffect(() => {
+    if (prefillData?.locationName && mode === "create") {
+      setFormData(prev => ({
+        ...prev,
+        locationName: prefillData.locationName
+      }));
+    }
+  }, [prefillData?.locationName, mode]);
+
+  // Update coordinatesInput when prefillData coordinates change (from parent component)
+  useEffect(() => {
+    if (prefillData?.latitude !== undefined && prefillData?.longitude !== undefined &&
+        prefillData.latitude !== null && prefillData.longitude !== null &&
+        mode === "create") {
+      const newInput = `${prefillData.latitude}, ${prefillData.longitude}`;
+      setCoordinatesInput(prev => {
+        // Only update if different to avoid unnecessary re-renders
+        return prev !== newInput ? newInput : prev;
+      });
+      setCoordinatesError(false);
+    }
+  }, [prefillData?.latitude, prefillData?.longitude, mode]);
 
   const handleSave = async () => {
     try {
@@ -265,6 +312,8 @@ export function PinModal({
       locationName: "",
       reportId: undefined
     });
+    setCoordinatesInput("");
+    setCoordinatesError(false);
     setIsWaitingForMapClick(true);
   };
 
@@ -602,38 +651,82 @@ export function PinModal({
                 id="coordinates"
                 type="text"
                 placeholder="Latitude, Longitude (e.g., 14.1139, 121.5556)"
-                value={
-                  formData.latitude !== null && formData.latitude !== undefined &&
-                  formData.longitude !== null && formData.longitude !== undefined
-                    ? `${formData.latitude}, ${formData.longitude}`
-                    : ''
-                }
-                readOnly={isUnpinningFromReport || (mode === "create" && isFromReport) || (mode === "edit" && isFromReport)}
-                disabled={isUnpinningFromReport || (mode === "create" && isFromReport) || (mode === "edit" && isFromReport)}
+                value={coordinatesInput}
+                readOnly={isUnpinningFromReport}
+                disabled={isUnpinningFromReport}
                 onChange={(e) => {
-                  if (isUnpinningFromReport || (mode === "create" && isFromReport) || (mode === "edit" && isFromReport)) return;
-                  const val = e.target.value.trim();
-                  if (val === '') {
-                    setFormData({ ...formData, latitude: null, longitude: null });
+                  if (isUnpinningFromReport) return;
+                  const val = e.target.value;
+                  
+                  // Update input value immediately for free typing
+                  setCoordinatesInput(val);
+                  
+                  const trimmedVal = val.trim();
+                  if (trimmedVal === '') {
+                    setFormData(prev => ({ ...prev, latitude: null, longitude: null }));
+                    setCoordinatesError(false);
+                    if (onCoordinatesChange) {
+                      onCoordinatesChange({ lat: 0, lng: 0 }); // Clear marker
+                    }
                     return;
                   }
                   
                   // Parse "Latitude, Longitude" format
-                  const parts = val.split(',').map(p => p.trim());
-                  if (parts.length === 2) {
+                  const parts = trimmedVal.split(',').map(p => p.trim());
+                  
+                  // Check for error: text entered but no comma, or comma but invalid values
+                  if (parts.length === 1) {
+                    // Has text but no comma - show error
+                    setCoordinatesError(true);
+                    setFormData(prev => ({ ...prev, latitude: null, longitude: null }));
+                  } else if (parts.length === 2) {
                     const lat = parseFloat(parts[0]);
                     const lng = parseFloat(parts[1]);
                     if (!isNaN(lat) && !isNaN(lng)) {
-                      setFormData({ ...formData, latitude: lat, longitude: lng });
+                      // Valid coordinates - clear error
+                      setCoordinatesError(false);
+                      
+                      // Validate latitude range (-90 to 90)
+                      const validLat = Math.max(-90, Math.min(90, lat));
+                      // Validate longitude range (-180 to 180)
+                      const validLng = Math.max(-180, Math.min(180, lng));
+                      
+                      setFormData(prev => ({ ...prev, latitude: validLat, longitude: validLng }));
+                      
+                      // Notify parent to update marker position
+                      if (onCoordinatesChange) {
+                        onCoordinatesChange({ lat: validLat, lng: validLng });
+                      }
+                    } else {
+                      // Has comma but invalid numbers - show error
+                      setCoordinatesError(true);
+                      setFormData(prev => ({ ...prev, latitude: null, longitude: null }));
                     }
+                  } else {
+                    // More than 2 parts (multiple commas) - show error
+                    setCoordinatesError(true);
+                    setFormData(prev => ({ ...prev, latitude: null, longitude: null }));
                   }
-                  // If only one value is entered, don't update yet (wait for comma and second value)
                 }}
                 className={cn(
                   "h-10",
-                  (isUnpinningFromReport || (mode === "create" && isFromReport) || (mode === "edit" && isFromReport)) ? "bg-gray-50 cursor-not-allowed border-gray-200" : "border-gray-300 focus:border-black focus:ring-black/20"
+                  isUnpinningFromReport 
+                    ? "bg-gray-50 cursor-not-allowed border-gray-200" 
+                    : coordinatesError
+                      ? "border-red-500 focus:border-red-500 focus:ring-red-500/20"
+                      : "border-gray-300 focus:border-black focus:ring-black/20"
                 )}
               />
+              {coordinatesError && (
+                <p className="text-xs text-red-500 mt-1">
+                  Please enter coordinates in the format: Latitude, Longitude (e.g., 14.1139, 121.5556)
+                </p>
+              )}
+              {!coordinatesError && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Enter coordinates manually or click on the map. Marker will update automatically when both values are entered.
+                </p>
+              )}
             </div>
           </div>
 

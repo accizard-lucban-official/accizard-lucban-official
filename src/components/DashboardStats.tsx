@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, PieChart, Pie, Cell, LineChart, Line } from "recharts";
-import { AlertTriangle, Users, FileText, MapPin, CloudRain, Clock, TrendingUp, PieChart as PieChartIcon, Building2, Calendar, Download, Maximize2, FileImage, FileType, Facebook, PhoneCall, Wind, Droplets, CloudRain as Precipitation, Car, Layers, Flame, Activity, Sun, Cloud, CloudLightning, CloudSnow, CloudDrizzle, CloudFog, RefreshCw, AlertCircle, UserCheck } from "lucide-react";
+import { AlertTriangle, Users, FileText, MapPin, CloudRain, Clock, TrendingUp, PieChart as PieChartIcon, Building2, Calendar, Download, Maximize2, FileImage, FileType, Facebook, PhoneCall, Wind, Droplets, CloudRain as Precipitation, Car, Layers, Flame, Activity, Sun, Cloud, CloudLightning, CloudSnow, CloudDrizzle, CloudFog, RefreshCw, AlertCircle, UserCheck, Navigation, Waves, Satellite } from "lucide-react";
 import { ResponsiveBar } from '@nivo/bar';
 import { ResponsiveCalendar } from '@nivo/calendar';
 import { ResponsiveLine } from '@nivo/line';
@@ -56,7 +56,7 @@ export function DashboardStats() {
   const [weatherOutlook, setWeatherOutlook] = useState([]);
   const [temperatureUnit, setTemperatureUnit] = useState<'celsius' | 'fahrenheit'>('celsius');
   const [pins, setPins] = useState<Pin[]>([]);
-  const [mapLayerMode, setMapLayerMode] = useState<'normal' | 'traffic' | 'heatmap'>('normal');
+  const [mapLayerMode, setMapLayerMode] = useState<'normal' | 'roadNetwork' | 'waterways' | 'traffic' | 'satellite'>('normal');
   const [reports, setReports] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [onlineAdminsCount, setOnlineAdminsCount] = useState(0);
@@ -90,6 +90,7 @@ export function DashboardStats() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const markersRef = useRef<mapboxgl.Marker[]>([]);
+  const currentMapStyleRef = useRef<string>('');
 
   // Hazard colors using brand-orange to brand-red spectrum
   const hazardColors = useMemo(() => ({
@@ -994,17 +995,88 @@ export function DashboardStats() {
   // Initialize map snippet
   useEffect(() => {
     if (mapContainer.current && !map.current) {
+      // Start with street style (satellite mode uses different style)
+      const initialStyle = mapLayerMode === 'satellite'
+        ? 'mapbox://styles/mapbox/satellite-v9'
+        : 'mapbox://styles/mapbox/streets-v12';
+      
+      currentMapStyleRef.current = initialStyle;
+      
       map.current = new mapboxgl.Map({
         container: mapContainer.current,
-        style: 'mapbox://styles/accizard-lucban-official/cmhox8ita005o01sr1psmbgp6', // Custom AcciZard style (aligned with RiskMapPage)
+        style: initialStyle,
         center: [121.5556, 14.1139], // Lucban, Quezon coordinates (aligned with RiskMapPage)
         zoom: 13,
         attributionControl: false
       });
 
-      // Wait for map to load before adding traffic source
+      // Wait for map to load before adding custom layers and traffic source
       map.current.on('load', () => {
         if (!map.current) return;
+        
+        // Add custom layers from custom style (for barangay boundaries, waterways, roads)
+        if (initialStyle === 'mapbox://styles/mapbox/streets-v12') {
+          try {
+            const customStyleUrl = 'https://api.mapbox.com/styles/v1/accizard-lucban-official/cmhox8ita005o01sr1psmbgp6?access_token=' + mapboxgl.accessToken;
+            fetch(customStyleUrl)
+              .then(response => response.json())
+              .then(customStyle => {
+                if (!map.current) return;
+                
+                // Add custom sources
+                if (customStyle.sources) {
+                  Object.keys(customStyle.sources).forEach(sourceId => {
+                    try {
+                      if (!map.current!.getSource(sourceId)) {
+                        const source = customStyle.sources[sourceId];
+                        if (source.type === 'vector' || source.type === 'raster') {
+                          map.current!.addSource(sourceId, source);
+                        }
+                      }
+                    } catch (error) {
+                      console.warn(`Could not add source ${sourceId}:`, error);
+                    }
+                  });
+                }
+                
+                // Add custom layers
+                if (customStyle.layers) {
+                  const layersToAdd = new Set([
+                    'lucban-boundary', 'lucban-brgys', 'lucban-brgys-satellite', 'lucban-fill', 'lucban-brgy-names'
+                  ]);
+                  const waterwayPattern = /^waterway/;
+                  const roadPattern = /^(road|roads|road-network|highway|road-label)/;
+                  
+                  customStyle.layers.forEach((layer: any) => {
+                    try {
+                      const shouldAdd = layersToAdd.has(layer.id) || 
+                                        waterwayPattern.test(layer.id) || 
+                                        roadPattern.test(layer.id);
+                      
+                      if (shouldAdd && !map.current!.getLayer(layer.id)) {
+                        if (layer.source && map.current!.getSource(layer.source)) {
+                          map.current!.addLayer(layer);
+                          // Set initial visibility - barangay boundaries always visible, others hidden
+                          if (layer.id === 'lucban-boundary' || layer.id === 'lucban-brgys' || layer.id === 'lucban-brgys-satellite' || layer.id === 'lucban-fill' || layer.id === 'lucban-brgy-names') {
+                            map.current!.setLayoutProperty(layer.id, 'visibility', 'visible');
+                          } else {
+                            map.current!.setLayoutProperty(layer.id, 'visibility', 'none');
+                          }
+                        }
+                      }
+                    } catch (error) {
+                      console.warn(`Could not add layer ${layer.id}:`, error);
+                    }
+                  });
+                }
+              })
+              .catch(error => {
+                console.error('Error fetching custom style for initial load:', error);
+              });
+          } catch (error) {
+            console.error('Error adding custom layers on initial load:', error);
+          }
+        }
         
         // Add traffic source
         if (!map.current.getSource('mapbox-traffic')) {
@@ -1056,6 +1128,11 @@ export function DashboardStats() {
     markersRef.current.forEach(marker => marker.remove());
     markersRef.current = [];
 
+    // Only show pins in 'normal' mode
+    if (mapLayerMode !== 'normal') {
+      return;
+    }
+
     // Add markers for each pin
     pins.forEach(pin => {
       const iconPath = getPinMarkerIcon(pin.type);
@@ -1088,7 +1165,7 @@ export function DashboardStats() {
 
       markersRef.current.push(marker);
     });
-  }, [pins]);
+  }, [pins, mapLayerMode]);
 
   // Subscribe to pins from database
   useEffect(() => {
@@ -1114,81 +1191,320 @@ export function DashboardStats() {
 
   // Handle map layer mode changes
   useEffect(() => {
-    if (!map.current || !map.current.isStyleLoaded()) return;
+    if (!map.current) return;
 
     const currentMap = map.current;
+    if (!currentMap.isStyleLoaded()) return;
 
-    // Toggle traffic layer
-    if (currentMap.getLayer('traffic')) {
-      currentMap.setLayoutProperty(
-        'traffic',
-        'visibility',
-        mapLayerMode === 'traffic' ? 'visible' : 'none'
-      );
-    }
+    // Helper function to toggle layer visibility
+    const toggleLayer = (layerId: string, visible: boolean) => {
+      try {
+        if (map.current && map.current.getLayer(layerId)) {
+          map.current.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
+        }
+      } catch (error) {
+        console.warn(`Could not toggle layer ${layerId}:`, error);
+      }
+    };
 
-    // Toggle heatmap
-    if (mapLayerMode === 'heatmap') {
-      // Add heatmap layer if it doesn't exist
-      if (!currentMap.getLayer('pins-heatmap')) {
-        // Create GeoJSON from pins
-        const geojsonData: GeoJSON.FeatureCollection = {
-          type: 'FeatureCollection',
-          features: pins.map(pin => ({
-            type: 'Feature',
-            geometry: {
-              type: 'Point',
-              coordinates: [pin.longitude, pin.latitude]
-            },
-            properties: {
-              intensity: 1
-            }
-          }))
-        };
+    // Determine target style based on mode
+    const targetStyle = mapLayerMode === 'satellite'
+      ? 'mapbox://styles/mapbox/satellite-v9'
+      : 'mapbox://styles/mapbox/streets-v12';
 
-        // Add source if doesn't exist
-        if (!currentMap.getSource('pins-heatmap-source')) {
-          currentMap.addSource('pins-heatmap-source', {
-            type: 'geojson',
-            data: geojsonData
+    // Helper function to apply layer toggles
+    function applyLayerToggles() {
+      if (!map.current || !currentMap.isStyleLoaded()) return;
+
+      // Always show barangay boundaries
+      toggleLayer('lucban-brgys', true);
+      toggleLayer('lucban-brgys-satellite', true);
+      toggleLayer('lucban-fill', true);
+      toggleLayer('lucban-brgy-names', true);
+
+      // Toggle road network
+      const roadLayerNames = ['road', 'roads', 'road-network', 'highway', 'road-label', 'road-satellite'];
+      roadLayerNames.forEach(layerName => {
+        try {
+          if (map.current && map.current.getLayer(layerName)) {
+            toggleLayer(layerName, mapLayerMode === 'roadNetwork');
+          }
+        } catch (error) {
+          // Layer doesn't exist, continue
+        }
+      });
+
+      // Toggle waterways
+      toggleLayer('waterway', mapLayerMode === 'waterways');
+      toggleLayer('waterway-satellite', mapLayerMode === 'waterways');
+
+      // Toggle traffic layer
+      if (mapLayerMode === 'traffic') {
+        if (!map.current.getSource('mapbox-traffic')) {
+          map.current.addSource('mapbox-traffic', {
+            type: 'vector',
+            url: 'mapbox://mapbox.mapbox-traffic-v1'
           });
         }
 
-        // Add heatmap layer
-        currentMap.addLayer({
-          id: 'pins-heatmap',
-          type: 'heatmap',
-          source: 'pins-heatmap-source',
-          paint: {
-            'heatmap-weight': 1,
-            'heatmap-intensity': 1,
-            'heatmap-color': [
-              'interpolate',
-              ['linear'],
-              ['heatmap-density'],
-              0, 'rgba(0, 0, 255, 0)',
-              0.2, 'rgb(0, 255, 255)',
-              0.4, 'rgb(0, 255, 0)',
-              0.6, 'rgb(255, 255, 0)',
-              0.8, 'rgb(255, 165, 0)',
-              1, 'rgb(255, 0, 0)'
-            ],
-            'heatmap-radius': 30,
-            'heatmap-opacity': 0.7
-          }
-        });
+        if (!map.current.getLayer('traffic')) {
+          map.current.addLayer({
+            id: 'traffic',
+            type: 'line',
+            source: 'mapbox-traffic',
+            'source-layer': 'traffic',
+            paint: {
+              'line-width': 2,
+              'line-color': [
+                'case',
+                ['==', ['get', 'congestion'], 'low'], '#4ade80',
+                ['==', ['get', 'congestion'], 'moderate'], '#fbbf24',
+                ['==', ['get', 'congestion'], 'heavy'], '#f87171',
+                ['==', ['get', 'congestion'], 'severe'], '#dc2626',
+                '#94a3b8'
+              ]
+            },
+            layout: {
+              'visibility': 'visible'
+            }
+          });
+        } else {
+          toggleLayer('traffic', true);
+        }
+      } else {
+        toggleLayer('traffic', false);
       }
 
-      // Show heatmap, hide markers
-      currentMap.setLayoutProperty('pins-heatmap', 'visibility', 'visible');
-      markersRef.current.forEach(marker => marker.getElement().style.display = 'none');
-    } else {
-      // Hide heatmap, show markers
-      if (currentMap.getLayer('pins-heatmap')) {
-        currentMap.setLayoutProperty('pins-heatmap', 'visibility', 'none');
+      // Hide/show markers based on mode (only show in normal mode)
+      if (mapLayerMode === 'normal') {
+        markersRef.current.forEach(marker => marker.getElement().style.display = 'block');
+      } else {
+        markersRef.current.forEach(marker => marker.getElement().style.display = 'none');
       }
-      markersRef.current.forEach(marker => marker.getElement().style.display = 'block');
     }
+
+    // Check if we need to switch styles
+    const needsStyleSwitch = currentMapStyleRef.current !== targetStyle;
+
+    if (needsStyleSwitch) {
+      const center = currentMap.getCenter();
+      const zoom = currentMap.getZoom();
+
+      currentMap.once('style.load', () => {
+        if (!map.current) return;
+        
+        currentMapStyleRef.current = targetStyle;
+        map.current.setCenter(center);
+        map.current.setZoom(zoom);
+        
+        // If switching to satellite, add custom layers as overlays
+        if (mapLayerMode === 'satellite') {
+          try {
+            const customStyleUrl = 'https://api.mapbox.com/styles/v1/accizard-lucban-official/cmhox8ita005o01sr1psmbgp6?access_token=' + mapboxgl.accessToken;
+            fetch(customStyleUrl)
+              .then(response => response.json())
+              .then(customStyle => {
+                if (!map.current) return;
+                
+                // Add custom sources
+                if (customStyle.sources) {
+                  Object.keys(customStyle.sources).forEach(sourceId => {
+                    try {
+                      if (!map.current!.getSource(sourceId)) {
+                        const source = customStyle.sources[sourceId];
+                        if (source.type === 'vector' || source.type === 'raster') {
+                          map.current!.addSource(sourceId, source);
+                        }
+                      }
+                    } catch (error) {
+                      console.warn(`Could not add source ${sourceId}:`, error);
+                    }
+                  });
+                }
+                
+                // Add custom layers
+                if (customStyle.layers) {
+                  const layersToAdd = new Set([
+                    'lucban-boundary', 'lucban-brgys', 'lucban-brgys-satellite', 'lucban-fill', 'lucban-brgy-names'
+                  ]);
+                  const waterwayPattern = /^waterway/;
+                  const roadPattern = /^(road|roads|road-network|highway|road-label)/;
+                  
+                  customStyle.layers.forEach((layer: any) => {
+                    try {
+                      const shouldAdd = layersToAdd.has(layer.id) || 
+                                        waterwayPattern.test(layer.id) || 
+                                        roadPattern.test(layer.id);
+                      
+                      if (shouldAdd && !map.current!.getLayer(layer.id)) {
+                        if (layer.source && map.current!.getSource(layer.source)) {
+                          map.current!.addLayer(layer);
+                          // Set initial visibility - will be updated by applyLayerToggles
+                          if (layer.id === 'lucban-boundary') {
+                            map.current!.setLayoutProperty(layer.id, 'visibility', 'visible');
+                          } else {
+                            map.current!.setLayoutProperty(layer.id, 'visibility', 'none');
+                          }
+                        }
+                      }
+                    } catch (error) {
+                      console.warn(`Could not add layer ${layer.id}:`, error);
+                    }
+                  });
+                }
+                
+                // Add traffic source and layer for satellite
+                if (!map.current.getSource('mapbox-traffic')) {
+                  map.current.addSource('mapbox-traffic', {
+                    type: 'vector',
+                    url: 'mapbox://mapbox.mapbox-traffic-v1'
+                  });
+                }
+                
+                if (!map.current.getLayer('traffic')) {
+                  map.current.addLayer({
+                    id: 'traffic',
+                    type: 'line',
+                    source: 'mapbox-traffic',
+                    'source-layer': 'traffic',
+                    paint: {
+                      'line-width': 2,
+                      'line-color': [
+                        'case',
+                        ['==', ['get', 'congestion'], 'low'], '#4ade80',
+                        ['==', ['get', 'congestion'], 'moderate'], '#fbbf24',
+                        ['==', ['get', 'congestion'], 'heavy'], '#f87171',
+                        ['==', ['get', 'congestion'], 'severe'], '#dc2626',
+                        '#94a3b8'
+                      ]
+                    },
+                    layout: {
+                      'visibility': 'none'
+                    }
+                  });
+                }
+                
+                // Apply layer toggles after layers are added
+                applyLayerToggles();
+              })
+              .catch(error => {
+                console.error('Error fetching custom style for satellite:', error);
+                applyLayerToggles();
+              });
+          } catch (error) {
+            console.error('Error adding custom layers to satellite:', error);
+            applyLayerToggles();
+          }
+        } else {
+          // For streets-v12 style, add custom layers as overlays
+          try {
+            const customStyleUrl = 'https://api.mapbox.com/styles/v1/accizard-lucban-official/cmhox8ita005o01sr1psmbgp6?access_token=' + mapboxgl.accessToken;
+            fetch(customStyleUrl)
+              .then(response => response.json())
+              .then(customStyle => {
+                if (!map.current) return;
+                
+                // Add custom sources
+                if (customStyle.sources) {
+                  Object.keys(customStyle.sources).forEach(sourceId => {
+                    try {
+                      if (!map.current!.getSource(sourceId)) {
+                        const source = customStyle.sources[sourceId];
+                        if (source.type === 'vector' || source.type === 'raster') {
+                          map.current!.addSource(sourceId, source);
+                        }
+                      }
+                    } catch (error) {
+                      console.warn(`Could not add source ${sourceId}:`, error);
+                    }
+                  });
+                }
+                
+                // Add custom layers
+                if (customStyle.layers) {
+                  const layersToAdd = new Set([
+                    'lucban-boundary', 'lucban-brgys', 'lucban-brgys-satellite', 'lucban-fill', 'lucban-brgy-names'
+                  ]);
+                  const waterwayPattern = /^waterway/;
+                  const roadPattern = /^(road|roads|road-network|highway|road-label)/;
+                  
+                  customStyle.layers.forEach((layer: any) => {
+                    try {
+                      const shouldAdd = layersToAdd.has(layer.id) || 
+                                        waterwayPattern.test(layer.id) || 
+                                        roadPattern.test(layer.id);
+                      
+                      if (shouldAdd && !map.current!.getLayer(layer.id)) {
+                        if (layer.source && map.current!.getSource(layer.source)) {
+                          map.current!.addLayer(layer);
+                          // Set initial visibility - will be updated by applyLayerToggles
+                          if (layer.id === 'lucban-boundary') {
+                            map.current!.setLayoutProperty(layer.id, 'visibility', 'visible');
+                          } else {
+                            map.current!.setLayoutProperty(layer.id, 'visibility', 'none');
+                          }
+                        }
+                      }
+                    } catch (error) {
+                      console.warn(`Could not add layer ${layer.id}:`, error);
+                    }
+                  });
+                }
+                
+                // Re-add traffic source after style change if needed
+                if (mapLayerMode === 'traffic' || mapLayerMode === 'normal') {
+                  if (!map.current.getSource('mapbox-traffic')) {
+                    map.current.addSource('mapbox-traffic', {
+                      type: 'vector',
+                      url: 'mapbox://mapbox.mapbox-traffic-v1'
+                    });
+                  }
+
+                  if (!map.current.getLayer('traffic')) {
+                    map.current.addLayer({
+                      id: 'traffic',
+                      type: 'line',
+                      source: 'mapbox-traffic',
+                      'source-layer': 'traffic',
+                      paint: {
+                        'line-width': 2,
+                        'line-color': [
+                          'case',
+                          ['==', ['get', 'congestion'], 'low'], '#4ade80',
+                          ['==', ['get', 'congestion'], 'moderate'], '#fbbf24',
+                          ['==', ['get', 'congestion'], 'heavy'], '#f87171',
+                          ['==', ['get', 'congestion'], 'severe'], '#dc2626',
+                          '#94a3b8'
+                        ]
+                      },
+                      layout: {
+                        'visibility': mapLayerMode === 'traffic' ? 'visible' : 'none'
+                      }
+                    });
+                  }
+                }
+
+                // Apply layer toggles after layers are added
+                applyLayerToggles();
+              })
+              .catch(error => {
+                console.error('Error fetching custom style for streets:', error);
+                // Still apply layer toggles even if custom layers fail
+                applyLayerToggles();
+              });
+          } catch (error) {
+            console.error('Error adding custom layers to streets:', error);
+            applyLayerToggles();
+          }
+        }
+      });
+
+      currentMap.setStyle(targetStyle);
+      return;
+    }
+
+    // Apply layer toggles if style is already correct
+    applyLayerToggles();
   }, [mapLayerMode, pins]);
 
   // Format current time for display
@@ -3197,10 +3513,12 @@ ${calendarChart ? `
             variant="secondary"
             className="absolute top-2 right-2 bg-brand-orange/90 hover:bg-brand-orange text-white border border-brand-orange shadow-sm"
             onClick={() => {
-              // Cycle through layer modes: normal -> traffic -> heatmap -> normal
+              // Cycle through: normal -> roadNetwork -> waterways -> traffic -> satellite -> normal
               setMapLayerMode(prev => {
-                if (prev === 'normal') return 'traffic';
-                if (prev === 'traffic') return 'heatmap';
+                if (prev === 'normal') return 'roadNetwork';
+                if (prev === 'roadNetwork') return 'waterways';
+                if (prev === 'waterways') return 'traffic';
+                if (prev === 'traffic') return 'satellite';
                 return 'normal';
               });
             }}
@@ -3211,16 +3529,28 @@ ${calendarChart ? `
                 Normal
               </>
             )}
+            {mapLayerMode === 'roadNetwork' && (
+              <>
+                <Navigation className="h-3 w-3 mr-1" />
+                Road Network
+              </>
+            )}
+            {mapLayerMode === 'waterways' && (
+              <>
+                <Waves className="h-3 w-3 mr-1" />
+                Waterways
+              </>
+            )}
             {mapLayerMode === 'traffic' && (
               <>
                 <Car className="h-3 w-3 mr-1" />
                 Traffic
               </>
             )}
-            {mapLayerMode === 'heatmap' && (
+            {mapLayerMode === 'satellite' && (
               <>
-                <Flame className="h-3 w-3 mr-1" />
-                Heatmap
+                <Satellite className="h-3 w-3 mr-1" />
+                Satellite
               </>
             )}
           </Button>

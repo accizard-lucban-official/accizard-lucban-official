@@ -41,8 +41,8 @@ export { auth, db, storage };
 
 ### 2. Storage Bucket
 
-The storage bucket is configured as: `accizard-lucban.firebasestorage.app`
-
+The storage bucket is configured as: `accizard-lucban-official-65ba3.firebasestorage.app`
+  
 ## Storage Utilities (`src/lib/storage.ts`)
 
 ### File Type Validation
