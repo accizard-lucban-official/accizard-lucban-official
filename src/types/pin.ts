@@ -21,6 +21,7 @@ export type PinType =
   | 'Obstructions'
   | 'Electrical Hazard'
   | 'Environmental Hazard'
+  | 'Animal Concerns'
   | 'Others'
   // Emergency Facilities
   | 'Evacuation Centers'

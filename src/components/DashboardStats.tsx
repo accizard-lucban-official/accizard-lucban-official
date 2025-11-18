@@ -982,6 +982,7 @@ export function DashboardStats() {
       'Civil Disturbance': '/markers/civil-disturbance.svg',
       'Armed Conflict': '/markers/armed-conflict.svg',
       'Infectious Disease': '/markers/infectious-disease.svg',
+      'Animal Concerns': '/markers/animal-concern.svg',
       'Others': '/markers/default.svg',
       'Evacuation Centers': '/markers/evacuation-center.svg',
       'Health Facilities': '/markers/health-facility.svg',

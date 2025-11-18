@@ -588,9 +588,25 @@ export function ChatSupportPage() {
         console.log("💬 Aggregated messages:", mergedMessages.map(m => ({
           id: m.id,
           sender: m.senderName,
+          senderId: m.senderId,
+          userId: m.userId,
+          userID: m.userID,
           timestamp: m.timestamp,
           message: m.message?.substring(0, 30)
         })));
+
+        if (mergedMessages.length === 0) {
+          console.warn(`⚠️ No messages found for session:`, {
+            primaryUserId,
+            selectedSession: {
+              id: selectedSession?.id,
+              userId: selectedSession?.userId,
+              firebaseUid: selectedSession?.firebaseUid
+            },
+            queriesExecuted: queries.length,
+            queryKeys: queries.map(q => q.key)
+          });
+        }
 
         setMessages(mergedMessages);
         setLoadingMessages(false);
@@ -668,11 +684,25 @@ export function ChatSupportPage() {
         return onSnapshot(q, 
           (snapshot) => {
             console.log(`✅ Snapshot callback fired for ${queryKey}`);
+            // Check for permission errors
+            if (snapshot.metadata.fromCache && snapshot.metadata.hasPendingWrites === false) {
+              console.warn(`⚠️ Query ${queryKey} returned cached data only - may indicate permission issue`);
+            }
             handleSnapshot(snapshot, queryKey);
           }, 
           (error) => {
             console.error(`❌ Error in listener for ${queryKey}:`, error);
             console.error("Error details:", error.code, error.message);
+            
+            // Show user-facing error for permission issues
+            if (error.code === 'permission-denied') {
+              toast.error(`Permission denied: Unable to load messages. Please check Firestore rules.`);
+            } else if (error.code === 'failed-precondition') {
+              toast.error(`Query failed: Missing Firestore index. Check console for index creation link.`);
+            } else {
+              toast.error(`Error loading messages: ${error.message}`);
+            }
+            
             setLoadingMessages(false);
           }
         );
@@ -1612,7 +1642,14 @@ export function ChatSupportPage() {
                           <p className="text-sm text-gray-500">Loading messages...</p>
                         </div>
                       ) : messages.length === 0 ? (
-                        <div className="text-center text-gray-500 py-4">No messages yet. Start the conversation!</div>
+                        <div className="text-center text-gray-500 py-4">
+                          <p className="mb-2">No messages yet. Start the conversation!</p>
+                          <p className="text-xs text-gray-400">
+                            Session ID: {selectedSession?.id || 'N/A'} | 
+                            User ID: {selectedSession?.userId || 'N/A'} | 
+                            Firebase UID: {selectedSession?.firebaseUid || 'N/A'}
+                          </p>
+                        </div>
                       ) : (
                         messages.map((msg) => {
                           // Check if message is from admin by comparing senderId with user IDs

@@ -27,7 +27,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "@/components/ui/sonner";
 
 // Pin type icons mapping (for the select dropdown)
-import { Car, Flame, Ambulance, Waves, Mountain, CircleAlert, Users, ShieldAlert, Activity, Building, Building2, Wrench, AlertTriangle, Zap, Leaf, HelpCircle, AlertCircle } from "lucide-react";
+import { Car, Flame, Ambulance, Waves, Mountain, CircleAlert, Users, ShieldAlert, Activity, Building, Building2, Wrench, AlertTriangle, Zap, Leaf, HelpCircle, AlertCircle, Heart } from "lucide-react";
 
 const pinTypeIcons: Record<string, any> = {
   "Road Crash": Car,
@@ -44,6 +44,7 @@ const pinTypeIcons: Record<string, any> = {
   "Obstructions": AlertTriangle,
   "Electrical Hazard": Zap,
   "Environmental Hazard": Leaf,
+  "Animal Concerns": Heart,
   "Others": AlertCircle,
   "Evacuation Centers": Building,
   "Health Facilities": Building2,
@@ -83,7 +84,7 @@ export interface PinFormData {
 const accidentHazardTypes = [
   "Road Crash", "Fire", "Medical Emergency", "Flooding", "Volcanic Activity",
   "Landslide", "Earthquake", "Civil Disturbance", "Armed Conflict", "Infectious Disease",
-  "Poor Infrastructure", "Obstructions", "Electrical Hazard", "Environmental Hazard", "Others"
+  "Poor Infrastructure", "Obstructions", "Electrical Hazard", "Environmental Hazard", "Animal Concerns", "Others"
 ];
 
 // Emergency facility types

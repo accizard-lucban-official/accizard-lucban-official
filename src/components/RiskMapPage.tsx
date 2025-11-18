@@ -13,7 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel, SelectSeparator } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Plus, MapPin, Layers, CalendarIcon, Search, Building2, Ambulance, Waves, Mountain, Building, CircleAlert, Users, ShieldAlert, Activity, Flame, Car, Siren, Home, Navigation, RotateCcw, HelpCircle, Info, ZoomIn, ZoomOut, LocateFixed, X, Filter, Download, FileText, Globe, Wrench, AlertTriangle, Zap, Leaf, Satellite } from "lucide-react";
+import { Plus, MapPin, Layers, CalendarIcon, Search, Building2, Ambulance, Waves, Mountain, Building, CircleAlert, Users, ShieldAlert, Activity, Flame, Car, Siren, Home, Navigation, RotateCcw, HelpCircle, Info, ZoomIn, ZoomOut, LocateFixed, X, Filter, Download, FileText, Globe, Wrench, AlertTriangle, Zap, Leaf, Satellite, Heart } from "lucide-react";
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear } from "date-fns";
 import { cn, ensureOk } from "@/lib/utils";
 import { Layout } from "./Layout";
@@ -45,6 +45,7 @@ const pinTypeIcons: Record<string, any> = {
   "Obstructions": AlertTriangle,
   "Electrical Hazard": Zap,
   "Environmental Hazard": Leaf,
+  "Animal Concerns": Heart,
   "Others": HelpCircle,
   "Evacuation Centers": Building,
   "Health Facilities": Building2,
@@ -118,6 +119,7 @@ export function RiskMapPage() {
     obstructions: false,
     electricalHazard: false,
     environmentalHazard: false,
+    animalConcern: false,
     others: false
   });
 
@@ -143,7 +145,7 @@ export function RiskMapPage() {
   const accidentHazardTypes = [
     "Road Crash", "Fire", "Medical Emergency", "Flooding", "Volcanic Activity",
     "Landslide", "Earthquake", "Civil Disturbance", "Armed Conflict", "Infectious Disease",
-    "Poor Infrastructure", "Obstructions", "Electrical Hazard", "Environmental Hazard", "Others"
+    "Poor Infrastructure", "Obstructions", "Electrical Hazard", "Environmental Hazard", "Animal Concerns", "Others"
   ];
 
   // Emergency facility types
@@ -324,6 +326,7 @@ export function RiskMapPage() {
       obstructions: false,
       electricalHazard: false,
       environmentalHazard: false,
+      animalConcern: false,
       others: false,
       [key]: true
     };
@@ -356,6 +359,7 @@ export function RiskMapPage() {
       obstructions: false,
       electricalHazard: false,
       environmentalHazard: false,
+      animalConcern: false,
       others: false
     });
     
@@ -429,6 +433,7 @@ export function RiskMapPage() {
       obstructions: checked,
       electricalHazard: checked,
       environmentalHazard: checked,
+      animalConcern: checked,
       others: checked
     };
     setAccidentFilters(newFilters);
@@ -748,6 +753,7 @@ ${placemarks}
       'obstructions': 'Obstructions',
       'electricalHazard': 'Electrical Hazard',
       'environmentalHazard': 'Environmental Hazard',
+      'animalConcern': 'Animal Concerns',
       'others': 'Others',
       // Emergency Facilities
       'evacuationCenters': 'Evacuation Centers',
@@ -1106,6 +1112,10 @@ ${placemarks}
                       <div className="flex items-center gap-3">
                         <img src="/markers/environmental-hazard.svg" alt="Environmental Hazard" className="w-10 h-10 flex-shrink-0" />
                         <span className="text-sm text-gray-700">Environmental Hazard</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <img src="/markers/animal-concern.svg" alt="Animal Concerns" className="w-10 h-10 flex-shrink-0" />
+                        <span className="text-sm text-gray-700">Animal Concerns</span>
                       </div>
                       <div className="flex items-center gap-3">
                         <img src="/markers/default.svg" alt="Others" className="w-10 h-10 flex-shrink-0" />

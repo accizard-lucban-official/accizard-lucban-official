@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Calendar as DatePickerCalendar } from "@/components/ui/calendar";
-import { Eye, Edit, Trash2, Plus, FileText, Calendar as CalendarIcon, Clock, MapPin, Upload, FileIcon, Image, Printer, Download, X, Search, FileDown, Car, Flame, Ambulance, Waves, Mountain, CircleAlert, Users, ShieldAlert, Activity, ArrowUpRight, ArrowUpDown, ArrowUp, ArrowDown, Layers, ZoomIn, ZoomOut, LocateFixed, Wrench, AlertTriangle, Zap, Leaf, Check, ChevronDown, Info, CheckSquare } from "lucide-react";
+import { Eye, Edit, Trash2, Plus, FileText, Calendar as CalendarIcon, Clock, MapPin, Upload, FileIcon, Image, Printer, Download, X, Search, FileDown, Car, Flame, Ambulance, Waves, Mountain, CircleAlert, Users, ShieldAlert, Activity, ArrowUpRight, ArrowUpDown, ArrowUp, ArrowDown, Layers, ZoomIn, ZoomOut, LocateFixed, Wrench, AlertTriangle, Zap, Leaf, Check, ChevronDown, Info, CheckSquare, Heart } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -54,6 +54,7 @@ const getReportTypeIcon = (type: string) => {
     'Obstructions': AlertTriangle,
     'Electrical Hazard': Zap,
     'Environmental Hazard': Leaf,
+    'Animal Concerns': Heart,
   };
   return iconMap[type] || FileText;
 };
@@ -72,6 +73,7 @@ const REPORT_TYPE_OPTIONS = [
   { value: 'obstructions', label: 'Obstructions' },
   { value: 'electrical-hazard', label: 'Electrical Hazard' },
   { value: 'environmental-hazard', label: 'Environmental Hazard' },
+  { value: 'animal-concern', label: 'Animal Concerns' },
   { value: 'others', label: 'Others' },
 ];
 
@@ -129,6 +131,7 @@ type DispatchDataState = {
   vehicleName: string;
   typeOfEmergency: string;
   vehicleInvolved: string;
+  causeOfAccident: string[];
   injuryClassification: string;
   majorInjuryTypes: string[];
   minorInjuryTypes: string[];
@@ -173,6 +176,7 @@ const createInitialDispatchState = (): DispatchDataState => ({
   vehicleName: "",
   typeOfEmergency: "",
   vehicleInvolved: "",
+  causeOfAccident: [],
   injuryClassification: "",
   majorInjuryTypes: [],
   minorInjuryTypes: [],
@@ -232,6 +236,11 @@ const normalizeDispatchData = (data: any): DispatchDataState => {
       ? data.minorInjuryTypes
       : data.minorInjuryTypes
         ? [data.minorInjuryTypes]
+        : [],
+    causeOfAccident: Array.isArray(data.causeOfAccident)
+      ? data.causeOfAccident
+      : data.causeOfAccident
+        ? [data.causeOfAccident]
         : [],
     majorMedicalSymptoms: Array.isArray(data.majorMedicalSymptoms)
       ? data.majorMedicalSymptoms
@@ -425,6 +434,7 @@ export function ManageReportsPage() {
   const [newReportData, setNewReportData] = useState<any>(null);
   const previousReportCountRef = useRef<number>(0);
   const alarmIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isInitialLoadRef = useRef<boolean>(true);
   
   // Sync viewed reports to localStorage and notify Layout component
   useEffect(() => {
@@ -677,21 +687,48 @@ export function ManageReportsPage() {
           };
         });
         
-        // Check for new reports and trigger alert (only if count increased)
+        // Check for new reports and trigger alert
         const previousCount = previousReportCountRef.current;
-        if (previousCount > 0 && fetched.length > previousCount) {
+        const isInitialLoad = isInitialLoadRef.current;
+        
+        // Get current viewed reports from localStorage to ensure we have the latest value
+        const viewedReportsData = localStorage.getItem("viewedReports");
+        const currentViewedReports = viewedReportsData ? new Set(JSON.parse(viewedReportsData)) : new Set();
+        
+        if (isInitialLoad) {
+          // On initial load (or when user logs in), check for unviewed reports
+          isInitialLoadRef.current = false;
+          
+          // Find the most recent unviewed report
+          const unviewedReport = fetched.find(report => !currentViewedReports.has(report.id));
+          
+          if (unviewedReport) {
+            // Set alert data and show modal
+            setNewReportData(unviewedReport);
+            setShowNewReportAlert(true);
+            
+            // Play alarm sound (continuous until dismissed)
+            playAlarmSound();
+          }
+        } else if (fetched.length > previousCount) {
+          // For subsequent updates, check if count increased (new report submitted)
+          // This handles both: normal new reports (previousCount > 0) and 
+          // reports added after all were deleted (previousCount === 0)
           const newReportCount = fetched.length - previousCount;
           
           if (newReportCount > 0) {
             // Get the newest report (first in the array since we order by timestamp desc)
             const latestNewReport = fetched[0];
             
+            // Only trigger alarm if this report hasn't been viewed yet
+            if (!currentViewedReports.has(latestNewReport.id)) {
             // Set alert data and show modal
             setNewReportData(latestNewReport);
             setShowNewReportAlert(true);
             
             // Play alarm sound (continuous until dismissed)
             playAlarmSound();
+            }
           }
         }
         
@@ -1287,16 +1324,20 @@ useEffect(() => {
       const reportToDeleteData = reports.find(r => r.firestoreId === reportToDelete);
       
       if (reportToDeleteData) {
-        // Load dispatch and patient data if available
-        let dispatchDataForPDF = dispatchData;
-        let patientsDataForPDF = patients;
+        // Load dispatch and patient data if available (without updating state)
+        let dispatchDataForPDF = createInitialDispatchState();
+        let patientsDataForPDF: any[] = [];
         
         try {
-          const loadedDispatch = await loadDispatchDataFromDatabase(reportToDelete);
-          if (loadedDispatch) dispatchDataForPDF = loadedDispatch;
+          const loadedDispatch = await loadDispatchDataFromDatabase(reportToDelete, false);
+          if (loadedDispatch) {
+            dispatchDataForPDF = loadedDispatch;
+          }
           
-          const loadedPatients = await loadPatientDataFromDatabase(reportToDelete);
-          if (loadedPatients && loadedPatients.patients) patientsDataForPDF = loadedPatients.patients;
+          const loadedPatients = await loadPatientDataFromDatabase(reportToDelete, false);
+          if (loadedPatients && loadedPatients.patients) {
+            patientsDataForPDF = loadedPatients.patients;
+          }
         } catch (error) {
           console.log("Error loading additional data for PDF:", error);
         }
@@ -1309,11 +1350,307 @@ useEffect(() => {
           return eyes + verbal + motor;
         };
 
+        // Helper function to check if a value exists
+        const hasValue = (value: any): boolean => {
+          if (value === null || value === undefined) return false;
+          if (typeof value === 'string' && value.trim() === '') return false;
+          if (Array.isArray(value) && value.length === 0) return false;
+          if (typeof value === 'object' && Object.keys(value).length === 0) return false;
+          return true;
+        };
+
+        // Helper function to render a table row only if value exists
+        const renderRow = (label: string, value: any, formatter?: (val: any) => string): string => {
+          if (!hasValue(value)) return '';
+          const formattedValue = formatter ? formatter(value) : value;
+          return `
+            <tr>
+              <th>${label}</th>
+              <td class="value-cell">${formattedValue}</td>
+            </tr>
+          `;
+        };
+
+        // Helper function to calculate response time
+        const calculateResponseTime = (dispatchTime: string, arrivalTime: string): string => {
+          try {
+            const [dispatchHours, dispatchMinutes] = dispatchTime.split(':').map(Number);
+            const [arrivalHours, arrivalMinutes] = arrivalTime.split(':').map(Number);
+            
+            const dispatchTotalMinutes = dispatchHours * 60 + dispatchMinutes;
+            const arrivalTotalMinutes = arrivalHours * 60 + arrivalMinutes;
+            
+            let diffMinutes = arrivalTotalMinutes - dispatchTotalMinutes;
+            if (diffMinutes < 0) diffMinutes += 24 * 60;
+            
+            const hours = Math.floor(diffMinutes / 60);
+            const minutes = diffMinutes % 60;
+            
+            if (hours > 0) {
+              return `${hours} hr ${minutes} min`;
+            }
+            return `${minutes} min`;
+          } catch (error) {
+            return 'N/A';
+          }
+        };
+
         // Generate PDF HTML content
         const generatePDFHTML = () => {
           const report = reportToDeleteData;
           const dispatch = dispatchDataForPDF;
           const patientData = patientsDataForPDF;
+          
+          // Build Report Details rows
+          const reportDetailsRows = [
+            renderRow('Report Type', report?.type),
+            renderRow('Status', report?.status, (val) => 
+              `<span class="badge status-${val?.toLowerCase().replace(' ', '-') || 'pending'}">${val}</span>`
+            ),
+            renderRow('Reported By', report?.reportedBy),
+            renderRow('Date and Time Submitted', 
+              report?.dateSubmitted 
+                ? `${report.dateSubmitted}${report?.timeSubmitted ? ` at ${report.timeSubmitted}` : ''}`
+                : null
+            ),
+            renderRow('Mobile Number', report?.mobileNumber),
+            renderRow('Barangay', report?.barangay),
+            renderRow('Description', report?.description),
+            renderRow('Location', 
+              report?.location 
+                ? `${report.location}${report?.latitude && report?.longitude 
+                    ? `<br><small style="color: #666;">Coordinates: ${report.latitude}, ${report.longitude}</small>`
+                    : ''}`
+                : null
+            ),
+          ].filter(row => row !== '').join('');
+
+          // Build Dispatch Form rows
+          const dispatchRows = [
+            renderRow('Received By', dispatch?.receivedBy),
+            renderRow('Responders', 
+              dispatch?.responders && dispatch.responders.length > 0
+                ? dispatch.responders.map((r: any) => 
+                    `${r.team}: ${r.responders ? r.responders.join(', ') : ''}`
+                  ).filter((item: string) => item.trim() !== '').join('<br>')
+                : null
+            ),
+            renderRow('Driver', dispatch?.driverName || dispatch?.driverId),
+            renderRow('Vehicle Used', dispatch?.vehicleName || dispatch?.vehicleId),
+            renderRow('Time Call Received', dispatch?.timeCallReceived),
+            renderRow('Time of Dispatch', dispatch?.timeOfDispatch),
+            renderRow('Time of Arrival', dispatch?.timeOfArrival),
+            renderRow('Response Time',
+              dispatch?.timeOfDispatch && dispatch?.timeOfArrival
+                ? calculateResponseTime(dispatch.timeOfDispatch, dispatch.timeOfArrival)
+                : null
+            ),
+            renderRow('Hospital Arrival', dispatch?.hospitalArrival),
+            renderRow('Returned to OPCEN', dispatch?.returnedToOpcen),
+            renderRow('Disaster Related', dispatch?.disasterRelated),
+            renderRow('Agency Present',
+              Array.isArray(dispatch?.agencyPresent) && dispatch.agencyPresent.length > 0
+                ? dispatch.agencyPresent.join(', ')
+                : (dispatch?.agencyPresent || null)
+            ),
+            renderRow('Type of Emergency', dispatch?.typeOfEmergency),
+            renderRow('Vehicle Involved', dispatch?.vehicleInvolved),
+            renderRow('Classification of Injury', dispatch?.injuryClassification),
+            // Major Injury Types (only if classification is Major)
+            ...(dispatch?.injuryClassification === 'Major' && dispatch?.majorInjuryTypes && dispatch.majorInjuryTypes.length > 0
+              ? [renderRow('Major Injury Types', dispatch.majorInjuryTypes.join(', '))]
+              : []
+            ),
+            // Minor Injury Types (only if classification is Minor)
+            ...(dispatch?.injuryClassification === 'Minor' && dispatch?.minorInjuryTypes && dispatch.minorInjuryTypes.length > 0
+              ? [renderRow('Minor Injury Types', dispatch.minorInjuryTypes.join(', '))]
+              : []
+            ),
+            // Medical Classification (only if typeOfEmergency is Medical Emergency)
+            ...(dispatch?.typeOfEmergency === 'Medical Emergency'
+              ? [renderRow('Medical Classification', dispatch?.medicalClassification)]
+              : []
+            ),
+            // Major Medical Symptoms (only if medicalClassification is Major)
+            ...(dispatch?.medicalClassification === 'Major' && dispatch?.majorMedicalSymptoms && dispatch.majorMedicalSymptoms.length > 0
+              ? [renderRow('Major Medical Symptoms', dispatch.majorMedicalSymptoms.join(', '))]
+              : []
+            ),
+            // Minor Medical Symptoms (only if medicalClassification is Minor)
+            ...(dispatch?.medicalClassification === 'Minor' && dispatch?.minorMedicalSymptoms && dispatch.minorMedicalSymptoms.length > 0
+              ? [renderRow('Minor Medical Symptoms', dispatch.minorMedicalSymptoms.join(', '))]
+              : []
+            ),
+            // Chief Complaint (only if typeOfEmergency is Medical Assistance)
+            ...(dispatch?.typeOfEmergency === 'Medical Assistance'
+              ? [renderRow('Chief Complaint', dispatch?.chiefComplaint)]
+              : []
+            ),
+            // Diagnosis (only if typeOfEmergency is Medical Assistance)
+            ...(dispatch?.typeOfEmergency === 'Medical Assistance'
+              ? [renderRow('Diagnosis', dispatch?.diagnosis)]
+              : []
+            ),
+            // Nature of Illness (only if typeOfEmergency is Medical Assistance)
+            ...(dispatch?.typeOfEmergency === 'Medical Assistance' && dispatch?.natureOfIllness
+              ? [renderRow('Nature of Illness', 
+                  dispatch.natureOfIllness === 'Others' && dispatch.natureOfIllnessOthers
+                    ? `${dispatch.natureOfIllness} - ${dispatch.natureOfIllnessOthers}`
+                    : dispatch.natureOfIllness
+                )]
+              : []
+            ),
+            renderRow('Actions Taken',
+              dispatch?.actionsTaken && dispatch.actionsTaken.length > 0
+                ? '<ul style="margin: 0; padding-left: 20px;">' + 
+                  dispatch.actionsTaken.map((action: string) => `<li>${action}</li>`).join('') +
+                  '</ul>'
+                : null
+            ),
+            // Referred To (only if actionsTaken includes "Referred")
+            ...(dispatch?.actionsTaken && dispatch.actionsTaken.includes('Referred') && dispatch?.referredTo
+              ? [renderRow('Referred To', dispatch.referredTo)]
+              : []
+            ),
+            // Transport Details (only if actionsTaken includes "Transported")
+            ...(dispatch?.actionsTaken && dispatch.actionsTaken.includes('Transported') && (dispatch?.transportFrom || dispatch?.transportTo)
+              ? [renderRow('Transport', 
+                  dispatch.transportFrom && dispatch.transportTo
+                    ? `From: ${dispatch.transportFrom} → To: ${dispatch.transportTo}`
+                    : dispatch.transportFrom || dispatch.transportTo
+                )]
+              : []
+            ),
+            // Others Description (only if actionsTaken includes "Others")
+            ...(dispatch?.actionsTaken && dispatch.actionsTaken.includes('Others') && dispatch?.othersDescription
+              ? [renderRow('Others - Description', dispatch.othersDescription)]
+              : []
+            ),
+            // Vital Signs (only if actionsTaken includes "Vital Signs Taken")
+            ...(dispatch?.actionsTaken && dispatch.actionsTaken.includes('Vital Signs Taken') && dispatch?.vitalSigns
+              ? [
+                  ...(hasValue(dispatch.vitalSigns.temperature) ? [renderRow('Temperature', dispatch.vitalSigns.temperature, (val) => `${val}°C`)] : []),
+                  ...(hasValue(dispatch.vitalSigns.pulseRate) ? [renderRow('Pulse Rate', dispatch.vitalSigns.pulseRate, (val) => `${val} bpm`)] : []),
+                  ...(hasValue(dispatch.vitalSigns.respiratoryRate) ? [renderRow('Respiratory Rate', dispatch.vitalSigns.respiratoryRate, (val) => `${val} breaths/min`)] : []),
+                  ...(hasValue(dispatch.vitalSigns.bloodPressure) ? [renderRow('Blood Pressure', dispatch.vitalSigns.bloodPressure, (val) => `${val} mmHg`)] : []),
+                ]
+              : []
+            ),
+          ].filter(row => row !== '').join('');
+
+          // Build Patient Information
+          const patientSections = patientData && patientData.length > 0
+            ? patientData.map((patient: any, index: number) => {
+                const gcsTotal = calculateGCSTotal(patient);
+                
+                // Basic patient info rows
+                const basicInfoRows = [
+                  renderRow('Name', patient.name),
+                  renderRow('Contact Number', patient.contactNumber),
+                  renderRow('Address', patient.address),
+                  renderRow('Age', patient.age, (val) => `${val} years old`),
+                  renderRow('Gender', patient.gender),
+                ].filter(row => row !== '').join('');
+
+                // GCS rows
+                const hasGCS = hasValue(patient.gcs?.eyes) || hasValue(patient.gcs?.verbal) || hasValue(patient.gcs?.motor);
+                const gcsRows = hasGCS ? [
+                  renderRow('Eyes Response', patient.gcs?.eyes),
+                  renderRow('Verbal Response', patient.gcs?.verbal),
+                  renderRow('Motor Response', patient.gcs?.motor),
+                  renderRow('GCS Total Score', gcsTotal > 0 ? gcsTotal : null, (val) => 
+                    `<span style="font-weight: bold; color: #f97316;">${val}</span>`
+                  ),
+                ].filter(row => row !== '').join('') : '';
+
+                // Pupil Assessment
+                const pupilRow = renderRow('Pupil', patient.pupil);
+                const hasPupil = hasValue(patient.pupil);
+
+                // Lung Sounds
+                const lungSoundsRow = renderRow('Lung Sounds', patient.lungSounds);
+                const hasLungSounds = hasValue(patient.lungSounds);
+
+                // Perfusion Assessment
+                const hasPerfusion = hasValue(patient.perfusion?.skin) || hasValue(patient.perfusion?.pulse);
+                const perfusionRows = hasPerfusion ? [
+                  renderRow('Skin', patient.perfusion?.skin),
+                  renderRow('Pulse', patient.perfusion?.pulse),
+                ].filter(row => row !== '').join('') : '';
+
+                // Vital Signs
+                const hasVitalSigns = hasValue(patient.vitalSigns?.timeTaken) ||
+                  hasValue(patient.vitalSigns?.temperature) ||
+                  hasValue(patient.vitalSigns?.pulseRate) ||
+                  hasValue(patient.vitalSigns?.respiratoryRate) ||
+                  hasValue(patient.vitalSigns?.bloodPressure) ||
+                  hasValue(patient.vitalSigns?.spo2) ||
+                  hasValue(patient.vitalSigns?.randomBloodSugar) ||
+                  hasValue(patient.vitalSigns?.painScale);
+                
+                const vitalSignsRows = hasVitalSigns ? [
+                  renderRow('Time Taken', patient.vitalSigns?.timeTaken),
+                  renderRow('Temperature', patient.vitalSigns?.temperature, (val) => `${val}°C`),
+                  renderRow('Pulse Rate', patient.vitalSigns?.pulseRate, (val) => `${val} bpm`),
+                  renderRow('Respiratory Rate', patient.vitalSigns?.respiratoryRate, (val) => `${val} breaths/min`),
+                  renderRow('Blood Pressure', patient.vitalSigns?.bloodPressure, (val) => `${val} mmHg`),
+                  renderRow('SPO2', 
+                    patient.vitalSigns?.spo2 
+                      ? `${patient.vitalSigns.spo2}%${patient.vitalSigns.spo2WithO2Support ? ' (with O2 support)' : ''}`
+                      : null
+                  ),
+                  renderRow('Random Blood Sugar', patient.vitalSigns?.randomBloodSugar, (val) => `${val} mg/dL`),
+                  renderRow('Pain Scale', patient.vitalSigns?.painScale),
+                ].filter(row => row !== '').join('') : '';
+
+                // Only show patient section if there's at least basic info
+                if (!hasValue(patient.name) && basicInfoRows === '') {
+                  return '';
+                }
+
+                return `
+                  <div class="patient-section">
+                    <div class="patient-header">Patient ${index + 1}${patient.name ? ` - ${patient.name}` : ''}</div>
+                    ${basicInfoRows ? `<table>${basicInfoRows}</table>` : ''}
+                    ${hasGCS ? `
+                      <div class="sub-section">
+                        <div class="sub-section-title">A. Glasgow Coma Scale</div>
+                        <table>${gcsRows}</table>
+                      </div>
+                    ` : ''}
+                    ${hasPupil ? `
+                      <div class="sub-section">
+                        <div class="sub-section-title">B. Pupil Assessment</div>
+                        <table>${pupilRow}</table>
+                      </div>
+                    ` : ''}
+                    ${hasLungSounds ? `
+                      <div class="sub-section">
+                        <div class="sub-section-title">C. Lung Sounds</div>
+                        <table>${lungSoundsRow}</table>
+                      </div>
+                    ` : ''}
+                    ${hasPerfusion ? `
+                      <div class="sub-section">
+                        <div class="sub-section-title">D. Perfusion Assessment</div>
+                        <table>${perfusionRows}</table>
+                      </div>
+                    ` : ''}
+                    ${hasVitalSigns ? `
+                      <div class="sub-section">
+                        <div class="sub-section-title">E. Vital Signs</div>
+                        <table>${vitalSignsRows}</table>
+                      </div>
+                    ` : ''}
+                  </div>
+                `;
+              }).filter(section => section !== '').join('')
+            : '';
+
+          // Only show sections if they have data
+          const hasReportDetails = reportDetailsRows !== '';
+          const hasDispatchInfo = dispatchRows !== '';
+          const hasPatientInfo = patientSections !== '';
           
           return `
             <!DOCTYPE html>
@@ -1333,75 +1670,93 @@ useEffect(() => {
                   }
                   
                   .header {
-                    text-align: center;
-                    margin-bottom: 15px;
-                    padding-bottom: 10px;
+                    display: flex;
+                    align-items: flex-start;
+                    justify-content: space-between;
+                    margin-bottom: 20px;
+                    padding-bottom: 15px;
+                    border-bottom: 2px solid #000;
                   }
                   
-                  .header-logo {
-                    width: 80px;
-                    height: 80px;
-                    margin: 0 auto 8px;
-                    display: block;
+                  .header-left-logo {
+                    width: 90px;
+                    height: 90px;
+                    object-fit: contain;
+                    flex-shrink: 0;
+                  }
+                  
+                  .header-right-logo {
+                    width: 90px;
+                    height: 90px;
+                    object-fit: contain;
+                    flex-shrink: 0;
+                  }
+                  
+                  .header-center {
+                    flex: 1;
+                    text-align: center;
+                    padding: 0 15px;
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: center;
                   }
                   
                   .header-org {
                     font-size: 10px;
                     color: #000;
                     margin: 2px 0;
-                    line-height: 1.3;
+                    line-height: 1.4;
+                  }
+                  
+                  .header-org strong {
+                    color: #0066cc;
+                    font-weight: 700;
                   }
                   
                   .header-province {
                     font-size: 10px;
                     color: #000;
                     margin: 2px 0;
-                    line-height: 1.3;
+                    line-height: 1.4;
                   }
                   
-                  .header-divider {
-                    border-top: 1px solid #000;
-                    margin: 4px auto;
-                    width: 180px;
+                  .header-province strong {
+                    color: #0066cc;
+                    font-weight: 700;
                   }
                   
                   .header-municipality {
-                    font-size: 12px;
-                    font-weight: bold;
-                    color: #000;
+                    font-size: 11px;
+                    font-weight: 700;
+                    color: #0066cc;
                     margin: 4px 0;
-                    line-height: 1.3;
+                    line-height: 1.4;
                   }
                   
                   .header-office {
-                    font-size: 13px;
-                    font-weight: bold;
+                    font-size: 11px;
+                    font-weight: 600;
                     color: #000;
-                    margin: 6px 0 2px;
-                    line-height: 1.3;
+                    margin: 8px 0 4px;
+                    line-height: 1.4;
+                    text-transform: uppercase;
                   }
                   
                   .header-title {
-                    font-size: 15px;
-                    font-weight: bold;
-                    color: #000;
-                    margin: 6px 0 8px;
-                    letter-spacing: 0.3px;
-                    line-height: 1.3;
+                    font-size: 13px;
+                    font-weight: 700;
+                    color: #0066cc;
+                    margin: 6px 0;
+                    letter-spacing: 0.5px;
+                    line-height: 1.4;
+                    text-transform: uppercase;
                   }
                   
-                  .header-for {
-                    font-size: 11px;
+                  .header-date-time {
+                    font-size: 10px;
                     color: #000;
-                    margin: 6px 0 2px;
-                    line-height: 1.3;
-                  }
-                  
-                  .header-mayor {
-                    font-size: 11px;
-                    color: #000;
-                    margin: 2px 0 10px;
-                    line-height: 1.3;
+                    margin-top: 10px;
+                    text-align: left;
                   }
                   
                   .section {
@@ -1412,11 +1767,11 @@ useEffect(() => {
                     background: #f97316;
                     color: white;
                     font-weight: bold;
-                    font-size: 14px;
+                    font-size: 11px;
                   }
                   
                   .section-title-row td {
-                    padding: 8px 12px;
+                    padding: 0;
                     border: 1px solid #ddd;
                   }
                   
@@ -1441,10 +1796,11 @@ useEffect(() => {
                   }
                   
                   table td, table th {
-                    padding: 6px 8px;
+                    padding: 0;
                     border: 1px solid #ddd;
                     text-align: left;
-                    font-size: 12px;
+                    font-size: 9px;
+                    vertical-align: top;
                   }
                   
                   table th {
@@ -1509,236 +1865,244 @@ useEffect(() => {
                     font-size: 11px;
                     color: #666;
                   }
+                  
+                  .consent-section {
+                    margin-top: 30px;
+                    display: flex;
+                    gap: 0;
+                    position: relative;
+                    z-index: 1;
+                  }
+                  
+                  .consent-column {
+                    flex: 1;
+                    border: 1px solid #ddd;
+                    border-right: none;
+                    padding: 0;
+                    font-size: 10px;
+                    line-height: 1.5;
+                  }
+                  
+                  .consent-column:last-child {
+                    border-right: 1px solid #ddd;
+                  }
+                  
+                  .consent-header {
+                    font-weight: bold;
+                    font-size: 12px;
+                    margin-bottom: 10px;
+                    text-align: center;
+                    border-bottom: 1px solid #ddd;
+                    padding: 8px 5px 5px;
+                  }
+                  
+                  .consent-content {
+                    margin-bottom: 15px;
+                    font-size: 8px;
+                    padding: 0 5px;
+                  }
+                  
+                  .consent-content b {
+                    font-weight: bold;
+                  }
+                  
+                  .signature-line {
+                    border-top: 1px solid #000;
+                    margin-top: 8px;
+                    margin-bottom: 5px;
+                    height: 1px;
+                  }
+                  
+                  .signature-label {
+                    font-size: 8px;
+                    text-align: center;
+                    margin-top: 3px;
+                    color: #666;
+                  }
+                  
+                  .checkbox-item {
+                    margin-top: 8px;
+                    font-size: 9px;
+                  }
+                  
+                  .footer-section {
+                    margin-top: 40px;
+                    position: relative;
+                    z-index: 1;
+                  }
+                  
+                  .footer-signatures {
+                    display: flex;
+                    gap: 30px;
+                    margin-bottom: 30px;
+                  }
+                  
+                  .footer-signature-column {
+                    flex: 1;
+                  }
+                  
+                  .footer-signature-label {
+                    font-size: 11px;
+                    margin-bottom: 5px;
+                  }
+                  
+                  .footer-signature-line {
+                    border-top: 1px solid #000;
+                    margin-top: 5px;
+                    margin-bottom: 5px;
+                    height: 1px;
+                  }
+                  
+                  .footer-signature-note {
+                    font-size: 9px;
+                    text-align: center;
+                    color: #666;
+                    margin-top: 3px;
+                  }
+                  
+                  .footer-report-section {
+                    margin-top: 20px;
+                  }
+                  
+                  .footer-report-item {
+                    margin-bottom: 15px;
+                  }
+                  
+                  .footer-report-checkbox {
+                    font-size: 11px;
+                    margin-bottom: 3px;
+                  }
+                  
+                  .footer-report-note {
+                    font-size: 9px;
+                    color: #ff0000;
+                    margin-top: 2px;
+                    margin-left: 20px;
+                  }
+                  
+                  .footer-reviewed {
+                    margin-top: 20px;
+                    font-size: 11px;
+                  }
                 </style>
               </head>
               <body>
-                <div class="header">
-                  <img src="/accizard-uploads/logo-ldrrmo-png.png" alt="LDRRMO Logo" class="header-logo" />
-                  <div class="header-org">Republic of the Philippines</div>
-                  <div class="header-province">Province of Quezon</div>
-                  <div class="header-divider"></div>
-                  <div class="header-municipality">Municipality of Lucban</div>
-                  <div class="header-office">Local Disaster Risk Reduction and Management Office</div>
-                  <div class="header-title">Incident Patient Report</div>
-                  <div class="header-for">FOR: [Name]</div>
-                  <div class="header-mayor">Municipal Mayor Chair, MDRRMC</div>
+                <div class="watermark">
+                  <img src="/accizard-uploads/logo-ldrrmo-png.png" alt="Watermark" />
                 </div>
+                <div class="header">
+                  <img src="/accizard-uploads/lucban-logo.png" alt="Lucban Logo" class="header-left-logo" />
+                  <div class="header-center">
+                    <div class="header-org">Republic of the <strong>PHILIPPINES</strong></div>
+                    <div class="header-province">Province of <strong>QUEZON</strong></div>
+                    <div class="header-municipality"><strong>MUNICIPALITY OF LUCBAN</strong></div>
+                    <div class="header-office">Municipal Disaster Risk Reduction and Management Office</div>
+                </div>
+                  <img src="/accizard-uploads/logo-ldrrmo-png.png" alt="LDRRMO Logo" class="header-right-logo" />
+                </div>
+                <div class="header-title">Emergency Dispatch Form & Patient Assessment Record</div>
+                <div class="header-date-time">DATE/TIME:________</div>
                 
+                ${hasReportDetails ? `
                 <table>
                   <tr class="section-title-row">
                     <td colspan="2">I. Report Details</td>
                   </tr>
-                  <tr>
-                    <th>Report Type</th>
-                    <td class="value-cell">${report?.type || 'N/A'}</td>
-                  </tr>
-                    <tr>
-                      <th>Status</th>
-                      <td class="value-cell">
-                        <span class="badge status-${report?.status?.toLowerCase().replace(' ', '-') || 'pending'}">
-                          ${report?.status || 'N/A'}
-                        </span>
-                      </td>
-                    </tr>
-                    <tr>
-                      <th>Reported By</th>
-                      <td class="value-cell">${report?.reportedBy || 'N/A'}</td>
-                    </tr>
-                    <tr>
-                      <th>Date and Time Submitted</th>
-                      <td class="value-cell">
-                        ${report?.dateSubmitted || 'N/A'} ${report?.timeSubmitted ? `at ${report.timeSubmitted}` : ''}
-                      </td>
-                    </tr>
-                    <tr>
-                      <th>Mobile Number</th>
-                      <td class="value-cell">${report?.mobileNumber || 'N/A'}</td>
-                    </tr>
-                    <tr>
-                      <th>Barangay</th>
-                      <td class="value-cell">${report?.barangay || 'N/A'}</td>
-                    </tr>
-                    <tr>
-                      <th>Description</th>
-                      <td class="value-cell">${report?.description || 'N/A'}</td>
-                    </tr>
-                    <tr>
-                      <th>Location</th>
-                      <td class="value-cell">
-                        ${report?.location || 'N/A'}<br>
-                        <small style="color: #666;">
-                          Coordinates: ${report?.latitude && report?.longitude 
-                            ? `${report.latitude}, ${report.longitude}` 
-                            : 'N/A'}
-                        </small>
-                      </td>
-                    </tr>
+                    ${reportDetailsRows}
+                  </table>
+                ` : ''}
+                
+                ${hasDispatchInfo ? `
+                  <table>
                   <tr class="section-title-row">
                     <td colspan="2">II. Dispatch Form</td>
                   </tr>
-                  <tr>
-                    <th>Received By</th>
-                      <td class="value-cell">${dispatch?.receivedBy || 'N/A'}</td>
-                    </tr>
-                    <tr>
-                      <th>Responders</th>
-                      <td class="value-cell">
-                        ${dispatch?.responders && dispatch.responders.length > 0
-                          ? dispatch.responders.map((r: any) => 
-                              `${r.team}: ${r.responders ? r.responders.join(', ') : 'N/A'}`
-                            ).join('<br>')
-                          : 'N/A'}
-                      </td>
-                    </tr>
-                <tr>
-                  <th>Driver</th>
-                  <td class="value-cell">${dispatch?.driverName || dispatch?.driverId || 'N/A'}</td>
-                </tr>
-                <tr>
-                  <th>Vehicle Used</th>
-                  <td class="value-cell">${dispatch?.vehicleName || dispatch?.vehicleId || 'N/A'}</td>
-                </tr>
-                    <tr>
-                      <th>Time Call Received</th>
-                      <td class="value-cell">${dispatch?.timeCallReceived || 'N/A'}</td>
-                    </tr>
-                    <tr>
-                      <th>Time of Dispatch</th>
-                      <td class="value-cell">${dispatch?.timeOfDispatch || 'N/A'}</td>
-                    </tr>
-                    <tr>
-                      <th>Time of Arrival</th>
-                      <td class="value-cell">${dispatch?.timeOfArrival || 'N/A'}</td>
-                    </tr>
-                    <tr>
-                      <th>Response Time</th>
-                      <td class="value-cell">
-                        ${dispatch?.timeOfDispatch && dispatch?.timeOfArrival
-                          ? calculateResponseTime(dispatch.timeOfDispatch, dispatch.timeOfArrival)
-                          : 'N/A'}
-                      </td>
-                    </tr>
-                    <tr>
-                      <th>Hospital Arrival</th>
-                      <td class="value-cell">${dispatch?.hospitalArrival || 'N/A'}</td>
-                    </tr>
-                    <tr>
-                      <th>Returned to OPCEN</th>
-                      <td class="value-cell">${dispatch?.returnedToOpcen || 'N/A'}</td>
-                    </tr>
-                    <tr>
-                      <th>Disaster Related</th>
-                      <td class="value-cell">${dispatch?.disasterRelated || 'N/A'}</td>
-                    </tr>
-                    <tr>
-                      <th>Agency Present</th>
-                      <td class="value-cell">${Array.isArray(dispatch?.agencyPresent) ? dispatch.agencyPresent.join(', ') : (dispatch?.agencyPresent || 'N/A')}</td>
-                    </tr>
-                    <tr>
-                      <th>Type of Emergency</th>
-                      <td class="value-cell">${dispatch?.typeOfEmergency || 'N/A'}</td>
-                    </tr>
-                    <tr>
-                      <th>Vehicle Involved</th>
-                      <td class="value-cell">${dispatch?.vehicleInvolved || 'N/A'}</td>
-                    </tr>
-                    <tr>
-                      <th>Classification of Injury</th>
-                      <td class="value-cell">${dispatch?.injuryClassification || 'N/A'}</td>
-                    </tr>
-                    <tr>
-                      <th>Actions Taken</th>
-                      <td class="value-cell">
-                        ${dispatch?.actionsTaken && dispatch.actionsTaken.length > 0
-                          ? '<ul style="margin: 0; padding-left: 20px;">' + 
-                            dispatch.actionsTaken.map((action: string) => `<li>${action}</li>`).join('') +
-                            '</ul>'
-                          : 'N/A'}
-                      </td>
-                    </tr>
-                  <tr class="section-title-row">
-                    <td colspan="2">III. Patient Information</td>
-                  </tr>
-                  ${patientData && patientData.length > 0
-                    ? patientData.map((patient: any, index: number) => {
-                        const gcsTotal = calculateGCSTotal(patient);
-                        return `
-                          <div class="patient-section">
-                            <div class="patient-header">Patient ${index + 1}${patient.name ? ` - ${patient.name}` : ''}</div>
-                            
-                            <table>
-                              <tr>
-                                <th>Name</th>
-                                <td class="value-cell">${patient.name || 'N/A'}</td>
-                              </tr>
-                              <tr>
-                                <th>Contact Number</th>
-                                <td class="value-cell">${patient.contactNumber || 'N/A'}</td>
-                              </tr>
-                              <tr>
-                                <th>Address</th>
-                                <td class="value-cell">${patient.address || 'N/A'}</td>
-                              </tr>
-                              <tr>
-                                <th>Age</th>
-                                <td class="value-cell">${patient.age ? `${patient.age} years old` : 'N/A'}</td>
-                              </tr>
-                              <tr>
-                                <th>Gender</th>
-                                <td class="value-cell">${patient.gender || 'N/A'}</td>
-                              </tr>
+                    ${dispatchRows}
                             </table>
+                ` : ''}
                             
-                            <div class="sub-section">
-                              <div class="sub-section-title">A. Glasgow Coma Scale</div>
+                ${hasPatientInfo ? `
                               <table>
-                                <tr>
-                                  <th>Eyes Response</th>
-                                  <td class="value-cell">${patient.gcs?.eyes || 'N/A'}</td>
-                                </tr>
-                                <tr>
-                                  <th>Verbal Response</th>
-                                  <td class="value-cell">${patient.gcs?.verbal || 'N/A'}</td>
-                                </tr>
-                                <tr>
-                                  <th>Motor Response</th>
-                                  <td class="value-cell">${patient.gcs?.motor || 'N/A'}</td>
-                                </tr>
-                                <tr>
-                                  <th>GCS Total Score</th>
-                                  <td class="value-cell" style="font-weight: bold; color: #f97316;">${gcsTotal > 0 ? gcsTotal : 'N/A'}</td>
+                    <tr class="section-title-row">
+                      <td colspan="2">III. Patient Information</td>
                                 </tr>
                               </table>
+                  ${patientSections}
+                ` : ''}
+                
+                <div class="consent-section">
+                  <div class="consent-column">
+                    <div class="consent-header">I. Patient's Informed Consent</div>
+                    <div class="consent-content">
+                      Ako po si ________________________ (pangalan ng pasyente), ay pumapayag na malapatan ng pangunang lunas ng mga Responders ng <b>MUNICIPAL DISASTER RISK REDUCTION AND MANAGEMENT OFFICE (MDRRMO Lucban)</b> ayon sa kinakailangang pangunang lunas batay sa kalalagayan ng pasyente
+                    </div>
+                    <div class="signature-line"></div>
+                    <div class="signature-label">LAGDA SA IBABAW NG BUONG PANGALAN AT PETSA</div>
+                    <div class="checkbox-item">
+                      <input type="checkbox" style="margin-right: 5px;"> Unconscious (Unresponsive)
+                    </div>
                             </div>
                             
-                            <div class="sub-section">
-                              <div class="sub-section-title">E. Vital Signs</div>
-                              <table>
-                                <tr>
-                                  <th>Temperature</th>
-                                  <td class="value-cell">${patient.vitalSigns?.temperature ? `${patient.vitalSigns.temperature}°C` : 'N/A'}</td>
-                                </tr>
-                                <tr>
-                                  <th>Pulse Rate</th>
-                                  <td class="value-cell">${patient.vitalSigns?.pulseRate ? `${patient.vitalSigns.pulseRate} bpm` : 'N/A'}</td>
-                                </tr>
-                                <tr>
-                                  <th>Respiratory Rate</th>
-                                  <td class="value-cell">${patient.vitalSigns?.respiratoryRate ? `${patient.vitalSigns.respiratoryRate} breaths/min` : 'N/A'}</td>
-                                </tr>
-                                <tr>
-                                  <th>Blood Pressure</th>
-                                  <td class="value-cell">${patient.vitalSigns?.bloodPressure ? `${patient.vitalSigns.bloodPressure} mmHg` : 'N/A'}</td>
-                                </tr>
-                              </table>
+                  <div class="consent-column">
+                    <div class="consent-header">II. SIGNIFICANT OTHER'S INFORMED CONSENT</div>
+                    <div class="consent-content">
+                      Ako po si ____________________ (pangalan ng kasama), __________________ (relationship with patient) ay pumapayag na malapatan ng pangunang lunas ng mga Responders ng <b>MUNICIPAL DISASTER RISK REDUCTION AND MANAGEMENT OFFICE (MDRRMO Lucban)</b> si ___________________ (pangalan ng pasyente) ayon sa kinakailangang pangunang lunas batay sa kalalagayan ng pasyente at madala sa pinakamalapit na Hospital.
                             </div>
+                    <div class="signature-line"></div>
+                    <div class="signature-label">LAGDA SA IBABAW NG BUONG PANGALAN AT PETSA</div>
                           </div>
-                        `;
-                      }).join('')
-                    : '<p style="color: #666; font-style: italic;">No patient information available</p>'}
+                  
+                  <div class="consent-column">
+                    <div class="consent-header">III. WAIVER/REFUSAL-OF-FIRST AID MANAGEMENT & RELEASE FORM</div>
+                    <div class="consent-content">
+                      Ako po si _________________________ ay kusang loob na tumatanggi na:<br>
+                      <input type="checkbox" style="margin-right: 5px;"> MAGPALAPAT NG PANGUNANG LUNAS at/o<br>
+                      <input type="checkbox" style="margin-right: 5px;"> MAGPADALA SA PINAKAMALAPIT NA HOSPITAL<br><br>
+                      Ang <b>MUNICIPAL DISASTER RISK REDUCTION AND MANAGEMENT OFFICE (MDRRMO Lucban)</b> o ang <b>LOCAL GOVERNMENT UNIT OF LUCBAN</b> ay walang pananagutan sa ano mang pwedeng maidulot ng pagtanggi kong ito.
+                    </div>
+                    <div class="signature-line"></div>
+                    <div class="signature-label">LAGDA SA IBABAW NG BUONG PANGALAN AT PETSA</div>
+                  </div>
               </div>
               
+                <div class="footer-section">
+                  <div class="footer-signatures">
+                    <div class="footer-signature-column">
+                      <div class="footer-signature-label">Accomplished by:</div>
+                      <div class="footer-signature-line"></div>
+                      <div class="footer-signature-note">(Name and Signature)</div>
               </div>
+                    <div class="footer-signature-column">
+                      <div class="footer-signature-label">Endorsed to:</div>
+                      <div class="footer-signature-line"></div>
+                      <div class="footer-signature-note">(Name and Signature)</div>
+                    </div>
+                  </div>
+                  
+                  <div class="footer-report-section">
+                    <div class="footer-report-item">
+                      <div class="footer-report-checkbox">
+                        <input type="checkbox" style="margin-right: 5px;"> WITH INITIAL REPORT (DATE AND TIME SUBMITTED):
+                      </div>
+                      <div class="footer-report-signature-line"></div>
+                      <div class="footer-report-note">**TO SUBMIT BEFORE 0600H & 1800H</div>
+                    </div>
+                    
+                    <div class="footer-report-item">
+                      <div class="footer-report-checkbox">
+                        <input type="checkbox" style="margin-right: 5px;"> WITH SITUATION REPORT (DATE AND TIME SUBMITTED):
+                      </div>
+                      <div class="footer-report-signature-line"></div>
+                      <div class="footer-report-note">**TO SUBMIT WITHIN 24 HOURS AFTER THE RESPONSE</div>
+                    </div>
+                  </div>
+                  
+                  <div class="footer-reviewed">
+                    REVIEWED BY:
+                    <div class="footer-reviewed-line"></div>
+                  </div>
+                </div>
+                
             </body>
           </html>
         `;
@@ -1750,33 +2114,132 @@ useEffect(() => {
         pdfContent.innerHTML = htmlContent;
         pdfContent.style.position = 'absolute';
         pdfContent.style.left = '-9999px';
-        pdfContent.style.width = '210mm';
+        // 0.5 inch = 12.7mm, so content width = 210mm - 25.4mm (left + right margins) = 184.6mm
+        pdfContent.style.width = '184.6mm';
         document.body.appendChild(pdfContent);
         
         try {
+          // Ensure DM Sans font is loaded
+          // Check if font is already loaded in the document
+          let fontLoaded = false;
+          if (document.fonts && document.fonts.check) {
+            fontLoaded = document.fonts.check("1em 'DM Sans'");
+          }
+          
+          // If not loaded, add font link and wait
+          if (!fontLoaded) {
+            const existingFontLink = document.head.querySelector('link[href*="DM+Sans"]');
+            if (!existingFontLink) {
+              const fontLink = document.createElement('link');
+              fontLink.rel = 'stylesheet';
+              fontLink.href = 'https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&display=swap';
+              document.head.appendChild(fontLink);
+              
+              // Wait for font to load
+              await new Promise((resolve) => {
+                fontLink.onload = resolve;
+                fontLink.onerror = resolve;
+                setTimeout(resolve, 2000);
+              });
+            }
+          }
+          
+          // Wait for all fonts to be ready
+          if (document.fonts && document.fonts.ready) {
+            await document.fonts.ready;
+          }
+          
+          // Verify DM Sans is loaded by checking font availability
+          const checkFontLoaded = () => {
+            if (document.fonts && document.fonts.check) {
+              return document.fonts.check("12px 'DM Sans'");
+            }
+            return true; // Assume loaded if check not available
+          };
+          
+          // Wait until font is confirmed loaded or timeout
+          let attempts = 0;
+          while (!checkFontLoaded() && attempts < 10) {
+            await new Promise(resolve => setTimeout(resolve, 200));
+            attempts++;
+          }
+          
+          // Additional wait to ensure fonts are fully rendered in the DOM
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          // Force font application to all elements in the PDF content
+          const allElements = pdfContent.querySelectorAll('*');
+          allElements.forEach((el: any) => {
+            if (el.style) {
+              el.style.fontFamily = "'DM Sans', sans-serif";
+            }
+          });
+          
+          // Also apply to the root element
+          if (pdfContent.style) {
+            pdfContent.style.fontFamily = "'DM Sans', sans-serif";
+          }
+          
           const canvas = await html2canvas(pdfContent, {
             allowTaint: true,
             logging: false,
             useCORS: true,
-            scale: 2 as any
+            scale: 2 as any,
+            fontEmbedCSS: true,
+            onclone: (clonedDoc) => {
+              // Ensure fonts are applied in the cloned document
+              const clonedHead = clonedDoc.head;
+              const clonedBody = clonedDoc.body;
+              
+              // Add font link to cloned document
+              if (clonedHead) {
+                const existingLink = clonedHead.querySelector('link[href*="DM+Sans"]');
+                if (!existingLink) {
+                  const fontLink = clonedDoc.createElement('link');
+                  fontLink.rel = 'stylesheet';
+                  fontLink.href = 'https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&display=swap';
+                  clonedHead.appendChild(fontLink);
+                }
+              }
+              
+              // Apply font to all elements in cloned document
+              if (clonedBody) {
+                clonedBody.style.fontFamily = "'DM Sans', sans-serif";
+                const allClonedElements = clonedBody.querySelectorAll('*');
+                allClonedElements.forEach((el: any) => {
+                  if (el.style) {
+                    el.style.fontFamily = "'DM Sans', sans-serif";
+                  }
+                });
+              }
+            }
           } as any);
           
           const imgData = canvas.toDataURL('image/png');
           const pdf = new jsPDF('p', 'mm', 'a4');
-          const imgWidth = 210;
+          // 0.5 inch = 12.7mm margins
+          const margin = 12.7;
+          const contentWidth = 210 - (margin * 2); // 184.6mm
           const pageHeight = 297;
+          const contentHeight = pageHeight - (margin * 2); // 271.6mm per page
+          const imgWidth = contentWidth;
           const imgHeight = (canvas.height * imgWidth) / canvas.width;
           let heightLeft = imgHeight;
-          let position = 0;
           
-          pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-          heightLeft -= pageHeight;
+          // First page - show from top
+          pdf.addImage(imgData, 'PNG', margin, margin, imgWidth, imgHeight);
+          heightLeft -= contentHeight;
           
+          // Additional pages - shift image up to show next portion
+          let pageNumber = 1;
           while (heightLeft >= 0) {
-            position = heightLeft - imgHeight;
+            // Position the image so the next portion is visible
+            // Each page shows contentHeight worth of the image
+            const position = margin - (pageNumber * contentHeight);
             pdf.addPage();
-            pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-            heightLeft -= pageHeight;
+            pdf.addImage(imgData, 'PNG', margin, position, imgWidth, imgHeight);
+            heightLeft -= contentHeight;
+            pageNumber++;
           }
           
           pdf.save(`Report_${reportToDeleteData.id}_${new Date().getTime()}.pdf`);
@@ -1935,6 +2398,17 @@ useEffect(() => {
     "Sprains and Muscle Strain",
     "Bruises",
     "Minor Burns Covering Small Area of Skin"
+  ];
+  const causeOfAccidentOptions = [
+    "Driving under the influence of drugs",
+    "Drunk-driving",
+    "Human error",
+    "Vehicular malfunction",
+    "Overtaking",
+    "Speeding",
+    "Poor road/Infrastructure condition",
+    "Absence of early warning device (EWD)",
+    "Distracted Driving"
   ];
   const majorMedicalSymptomsOptions = [
     "Unconsciousness",
@@ -2242,11 +2716,198 @@ useEffect(() => {
         return eyes + verbal + motor;
       };
 
+      // Helper function to check if a value exists
+      const hasValue = (value: any): boolean => {
+        if (value === null || value === undefined) return false;
+        if (typeof value === 'string' && value.trim() === '') return false;
+        if (Array.isArray(value) && value.length === 0) return false;
+        if (typeof value === 'object' && Object.keys(value).length === 0) return false;
+        return true;
+      };
+
+      // Helper function to render a table row only if value exists
+      const renderRow = (label: string, value: any, formatter?: (val: any) => string): string => {
+        if (!hasValue(value)) return '';
+        const formattedValue = formatter ? formatter(value) : value;
+        return `
+          <tr>
+            <th>${label}</th>
+            <td class="value-cell">${formattedValue}</td>
+          </tr>
+        `;
+      };
+
       // Generate PDF HTML content
       const generatePDFHTML = () => {
         const report = reportData;
         const dispatch = dispatchDataForPDF;
         const patientData = patientsDataForPDF;
+        
+        // Build Report Details rows
+        const reportDetailsRows = [
+          renderRow('Report Type', report?.type),
+          renderRow('Status', report?.status, (val) => 
+            `<span class="badge status-${val?.toLowerCase().replace(' ', '-') || 'pending'}">${val}</span>`
+          ),
+          renderRow('Reported By', report?.reportedBy),
+          renderRow('Date and Time Submitted', 
+            report?.dateSubmitted 
+              ? `${report.dateSubmitted}${report?.timeSubmitted ? ` at ${report.timeSubmitted}` : ''}`
+              : null
+          ),
+          renderRow('Mobile Number', report?.mobileNumber),
+          renderRow('Description', report?.description),
+          renderRow('Location', 
+            report?.location 
+              ? `${report.location}${report?.latitude && report?.longitude 
+                  ? `<br><small style="color: #666;">Coordinates: ${report.latitude}, ${report.longitude}</small>`
+                  : ''}`
+              : null
+          ),
+        ].filter(row => row !== '').join('');
+
+        // Build Dispatch Form rows
+        const dispatchRows = [
+          renderRow('Received By', dispatch?.receivedBy),
+          renderRow('Responders', 
+            dispatch?.responders && dispatch.responders.length > 0
+              ? dispatch.responders.map((r: any) => 
+                  `${r.team}: ${r.responders ? r.responders.join(', ') : ''}`
+                ).filter((item: string) => item.trim() !== '').join('<br>')
+              : null
+          ),
+          renderRow('Driver', dispatch?.driverName || dispatch?.driverId),
+          renderRow('Vehicle Used', dispatch?.vehicleName || dispatch?.vehicleId),
+          renderRow('Time Call Received', dispatch?.timeCallReceived),
+          renderRow('Time of Dispatch', dispatch?.timeOfDispatch),
+          renderRow('Time of Arrival', dispatch?.timeOfArrival),
+          renderRow('Response Time',
+            dispatch?.timeOfDispatch && dispatch?.timeOfArrival
+              ? calculateResponseTime(dispatch.timeOfDispatch, dispatch.timeOfArrival)
+              : null
+          ),
+          renderRow('Hospital Arrival', dispatch?.hospitalArrival),
+          renderRow('Returned to OPCEN', dispatch?.returnedToOpcen),
+          renderRow('Disaster Related', dispatch?.disasterRelated),
+          renderRow('Agency Present',
+            Array.isArray(dispatch?.agencyPresent) && dispatch.agencyPresent.length > 0
+              ? dispatch.agencyPresent.join(', ')
+              : (dispatch?.agencyPresent || null)
+          ),
+          renderRow('Type of Emergency', dispatch?.typeOfEmergency),
+          renderRow('Vehicle Involved', dispatch?.vehicleInvolved),
+          renderRow('Classification of Injury', dispatch?.injuryClassification),
+          // Major Injury Types (only if classification is Major)
+          ...(dispatch?.injuryClassification === 'Major' && dispatch?.majorInjuryTypes && dispatch.majorInjuryTypes.length > 0
+            ? [renderRow('Major Injury Types', dispatch.majorInjuryTypes.join(', '))]
+            : []
+          ),
+          // Minor Injury Types (only if classification is Minor)
+          ...(dispatch?.injuryClassification === 'Minor' && dispatch?.minorInjuryTypes && dispatch.minorInjuryTypes.length > 0
+            ? [renderRow('Minor Injury Types', dispatch.minorInjuryTypes.join(', '))]
+            : []
+          ),
+          // Medical Classification (only if typeOfEmergency is Medical Emergency)
+          ...(dispatch?.typeOfEmergency === 'Medical Emergency'
+            ? [renderRow('Medical Classification', dispatch?.medicalClassification)]
+            : []
+          ),
+          // Major Medical Symptoms (only if medicalClassification is Major)
+          ...(dispatch?.medicalClassification === 'Major' && dispatch?.majorMedicalSymptoms && dispatch.majorMedicalSymptoms.length > 0
+            ? [renderRow('Major Medical Symptoms', dispatch.majorMedicalSymptoms.join(', '))]
+            : []
+          ),
+          // Minor Medical Symptoms (only if medicalClassification is Minor)
+          ...(dispatch?.medicalClassification === 'Minor' && dispatch?.minorMedicalSymptoms && dispatch.minorMedicalSymptoms.length > 0
+            ? [renderRow('Minor Medical Symptoms', dispatch.minorMedicalSymptoms.join(', '))]
+            : []
+          ),
+          // Chief Complaint (only if typeOfEmergency is Medical Assistance)
+          ...(dispatch?.typeOfEmergency === 'Medical Assistance'
+            ? [renderRow('Chief Complaint', dispatch?.chiefComplaint)]
+            : []
+          ),
+          // Diagnosis (only if typeOfEmergency is Medical Assistance)
+          ...(dispatch?.typeOfEmergency === 'Medical Assistance'
+            ? [renderRow('Diagnosis', dispatch?.diagnosis)]
+            : []
+          ),
+          // Nature of Illness (only if typeOfEmergency is Medical Assistance)
+          ...(dispatch?.typeOfEmergency === 'Medical Assistance' && dispatch?.natureOfIllness
+            ? [renderRow('Nature of Illness', 
+                dispatch.natureOfIllness === 'Others' && dispatch.natureOfIllnessOthers
+                  ? `${dispatch.natureOfIllness} - ${dispatch.natureOfIllnessOthers}`
+                  : dispatch.natureOfIllness
+              )]
+            : []
+          ),
+          renderRow('Actions Taken',
+            dispatch?.actionsTaken && dispatch.actionsTaken.length > 0
+              ? '<ul style="margin: 0; padding-left: 20px;">' + 
+                dispatch.actionsTaken.map((action: string) => `<li>${action}</li>`).join('') +
+                '</ul>'
+              : null
+          ),
+          // Referred To (only if actionsTaken includes "Referred")
+          ...(dispatch?.actionsTaken && dispatch.actionsTaken.includes('Referred') && dispatch?.referredTo
+            ? [renderRow('Referred To', dispatch.referredTo)]
+            : []
+          ),
+          // Transport Details (only if actionsTaken includes "Transported")
+          ...(dispatch?.actionsTaken && dispatch.actionsTaken.includes('Transported') && (dispatch?.transportFrom || dispatch?.transportTo)
+            ? [renderRow('Transport', 
+                dispatch.transportFrom && dispatch.transportTo
+                  ? `From: ${dispatch.transportFrom} → To: ${dispatch.transportTo}`
+                  : dispatch.transportFrom || dispatch.transportTo
+              )]
+            : []
+          ),
+          // Others Description (only if actionsTaken includes "Others")
+          ...(dispatch?.actionsTaken && dispatch.actionsTaken.includes('Others') && dispatch?.othersDescription
+            ? [renderRow('Others - Description', dispatch.othersDescription)]
+            : []
+          ),
+          // Vital Signs (only if actionsTaken includes "Vital Signs Taken")
+          ...(dispatch?.actionsTaken && dispatch.actionsTaken.includes('Vital Signs Taken') && dispatch?.vitalSigns
+            ? [
+                ...(hasValue(dispatch.vitalSigns.temperature) ? [renderRow('Temperature', dispatch.vitalSigns.temperature, (val) => `${val}°C`)] : []),
+                ...(hasValue(dispatch.vitalSigns.pulseRate) ? [renderRow('Pulse Rate', dispatch.vitalSigns.pulseRate, (val) => `${val} bpm`)] : []),
+                ...(hasValue(dispatch.vitalSigns.respiratoryRate) ? [renderRow('Respiratory Rate', dispatch.vitalSigns.respiratoryRate, (val) => `${val} breaths/min`)] : []),
+                ...(hasValue(dispatch.vitalSigns.bloodPressure) ? [renderRow('Blood Pressure', dispatch.vitalSigns.bloodPressure, (val) => `${val} mmHg`)] : []),
+              ]
+            : []
+          ),
+        ].filter(row => row !== '').join('');
+
+        // Build Patient Information (simplified for PDF)
+        const patientSections = patientData && patientData.length > 0
+          ? patientData.map((patient: any, index: number) => {
+              const basicInfoRows = [
+                renderRow('Name', patient.name),
+                renderRow('Contact Number', patient.contactNumber),
+                renderRow('Address', patient.address),
+                renderRow('Age', patient.age, (val) => `${val} years old`),
+                renderRow('Gender', patient.gender),
+              ].filter(row => row !== '').join('');
+
+              // Only show patient section if there's at least basic info
+              if (!hasValue(patient.name) && basicInfoRows === '') {
+                return '';
+              }
+
+              return `
+                <div class="patient-section">
+                  <div class="patient-header">Patient ${index + 1}${patient.name ? ` - ${patient.name}` : ''}</div>
+                  ${basicInfoRows ? `<table>${basicInfoRows}</table>` : ''}
+                </div>
+              `;
+            }).filter(section => section !== '').join('')
+          : '';
+
+        // Only show sections if they have data
+        const hasReportDetails = reportDetailsRows !== '';
+        const hasDispatchInfo = dispatchRows !== '';
+        const hasPatientInfo = patientSections !== '';
         
         return `
           <!DOCTYPE html>
@@ -2257,99 +2918,148 @@ useEffect(() => {
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
               <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
               <style>
+                @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&display=swap');
+              </style>
+              <style>
                 body {
                   font-family: 'DM Sans', sans-serif;
                   margin: 0;
                   padding: 20px;
                   color: #000;
                   background: #fff;
+                  position: relative;
+                }
+                
+                .watermark {
+                  position: absolute;
+                  top: 50%;
+                  left: 50%;
+                  transform: translate(-50%, -50%);
+                  opacity: 0.08;
+                  z-index: 0;
+                  pointer-events: none;
+                  width: 100%;
+                  height: 100%;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                }
+                
+                .watermark img {
+                  width: 500px;
+                  height: auto;
+                  max-width: 80%;
                 }
                 
                 .header {
-                  text-align: center;
-                  margin-bottom: 15px;
-                  padding-bottom: 10px;
+                  display: flex;
+                  align-items: flex-start;
+                  justify-content: space-between;
+                  margin: 0;
+                  padding: 0;
+                  position: relative;
+                  z-index: 1;
                 }
                 
-                .header-logo {
-                  width: 80px;
-                  height: 80px;
-                  margin: 0 auto 8px;
-                  display: block;
+                .header-left-logo {
+                  width: 90px;
+                  height: 90px;
+                  object-fit: contain;
+                  flex-shrink: 0;
+                }
+                
+                .header-right-logo {
+                  width: 90px;
+                  height: 90px;
+                  object-fit: contain;
+                  flex-shrink: 0;
+                }
+                
+                .header-center {
+                  flex: 1;
+                  text-align: center;
+                  padding: 0 15px;
+                  display: flex;
+                  flex-direction: column;
+                  justify-content: center;
                 }
                 
                 .header-org {
-                  font-size: 10px;
+                  font-size: 12pt;
                   color: #000;
-                  margin: 2px 0;
-                  line-height: 1.3;
+                  margin: 0;
+                  line-height: 1.2;
+                }
+                
+                .header-org strong {
+                  color: #0066cc;
+                  font-weight: 700;
                 }
                 
                 .header-province {
-                  font-size: 10px;
+                  font-size: 12pt;
                   color: #000;
-                  margin: 2px 0;
-                  line-height: 1.3;
+                  margin: 0;
+                  line-height: 1.2;
                 }
                 
-                .header-divider {
-                  border-top: 1px solid #000;
-                  margin: 4px auto;
-                  width: 180px;
+                .header-province strong {
+                  color: #0066cc;
+                  font-weight: 700;
                 }
                 
                 .header-municipality {
-                  font-size: 12px;
-                  font-weight: bold;
-                  color: #000;
-                  margin: 4px 0;
-                  line-height: 1.3;
+                  font-size: 14pt;
+                  font-weight: 700;
+                  color: #0066cc;
+                  margin: 2px 0;
+                  line-height: 1.2;
                 }
                 
                 .header-office {
-                  font-size: 13px;
-                  font-weight: bold;
+                  font-size: 14pt;
+                  font-weight: 600;
                   color: #000;
-                  margin: 6px 0 2px;
-                  line-height: 1.3;
+                  margin: 2px 0;
+                  line-height: 1.2;
+                  text-transform: uppercase;
                 }
                 
                 .header-title {
-                  font-size: 15px;
-                  font-weight: bold;
-                  color: #000;
-                  margin: 6px 0 8px;
-                  letter-spacing: 0.3px;
-                  line-height: 1.3;
+                  font-size: 16pt;
+                  font-weight: 700;
+                  color: #0066cc;
+                  margin: 5px 0;
+                  letter-spacing: 0.5px;
+                  line-height: 1.4;
+                  text-transform: uppercase;
+                  text-align: center;
+                  width: 100%;
                 }
                 
-                .header-for {
-                  font-size: 11px;
+                .header-date-time {
+                  font-size: 10px;
                   color: #000;
-                  margin: 6px 0 2px;
-                  line-height: 1.3;
-                }
-                
-                .header-mayor {
-                  font-size: 11px;
-                  color: #000;
-                  margin: 2px 0 10px;
-                  line-height: 1.3;
+                  margin-top: 5px;
+                  text-align: left;
+                  width: 100%;
                 }
                 
                 .section {
                   margin-bottom: 0;
+                  position: relative;
+                  z-index: 1;
                 }
                 
                 .section-title-row {
                   background: #f97316;
                   color: white;
                   font-weight: bold;
-                  font-size: 14px;
+                  font-size: 11px;
                 }
                 
                 .section-title-row td {
-                  padding: 8px 12px;
+                  padding: 4px 6px;
                   border: 1px solid #ddd;
                 }
                 
@@ -2374,10 +3084,11 @@ useEffect(() => {
                 }
                 
                 table td, table th {
-                  padding: 6px 8px;
+                  padding: 4px 6px;
                   border: 1px solid #ddd;
                   text-align: left;
-                  font-size: 12px;
+                  font-size: 9px;
+                  vertical-align: top;
                 }
                 
                 table th {
@@ -2410,6 +3121,8 @@ useEffect(() => {
                   border: 2px solid #e5e7eb;
                   padding: 15px;
                   border-radius: 8px;
+                  position: relative;
+                  z-index: 1;
                 }
                 
                 .patient-header {
@@ -2441,142 +3154,264 @@ useEffect(() => {
                   font-size: 11px;
                   color: #666;
                 }
+                
+                .consent-section {
+                  margin-top: 30px;
+                  display: flex;
+                  gap: 0;
+                  position: relative;
+                  z-index: 1;
+                }
+                
+                .consent-column {
+                  flex: 1;
+                  border: 1px solid #ddd;
+                  border-right: none;
+                  padding: 0;
+                  font-size: 10px;
+                  line-height: 1.5;
+                }
+                
+                .consent-column:last-child {
+                  border-right: 1px solid #ddd;
+                }
+                
+                .consent-header {
+                  font-weight: bold;
+                  font-size: 12px;
+                  margin-bottom: 10px;
+                  text-align: center;
+                  border-bottom: 1px solid #ddd;
+                  padding: 8px 5px 5px;
+                }
+                
+                .consent-content {
+                  margin-bottom: 15px;
+                  font-size: 8px;
+                  padding: 0 5px;
+                }
+                
+                .consent-content b {
+                  font-weight: bold;
+                }
+                
+                .signature-line {
+                  border-top: 1px solid #000;
+                  margin-top: 8px;
+                  margin-bottom: 5px;
+                  height: 1px;
+                  margin-left: 5px;
+                  margin-right: 5px;
+                }
+                
+                .signature-label {
+                  font-size: 8px;
+                  text-align: center;
+                  margin-top: 3px;
+                  color: #666;
+                  padding: 0 5px;
+                }
+                
+                .checkbox-item {
+                  margin-top: 8px;
+                  font-size: 9px;
+                  padding: 0 5px;
+                }
+                
+                .footer-section {
+                  margin-top: 40px;
+                  position: relative;
+                  z-index: 1;
+                }
+                
+                .footer-signatures {
+                  display: flex;
+                  gap: 30px;
+                  margin-bottom: 30px;
+                }
+                
+                .footer-signature-column {
+                  flex: 1;
+                }
+                
+                .footer-signature-label {
+                  font-size: 11px;
+                  margin-bottom: 5px;
+                }
+                
+                .footer-signature-line {
+                  border-top: 1px solid #000;
+                  margin-top: 5px;
+                  margin-bottom: 5px;
+                  height: 1px;
+                }
+                
+                .footer-signature-note {
+                  font-size: 9px;
+                  text-align: center;
+                  color: #666;
+                  margin-top: 3px;
+                }
+                
+                .footer-report-section {
+                  margin-top: 20px;
+                }
+                
+                .footer-report-item {
+                  margin-bottom: 15px;
+                }
+                
+                .footer-report-checkbox {
+                  font-size: 11px;
+                  margin-bottom: 3px;
+                }
+                
+                .footer-report-signature-line {
+                  border-top: 1px solid #000;
+                  margin-top: 5px;
+                  margin-bottom: 5px;
+                  height: 1px;
+                  width: 200px;
+                }
+                
+                .footer-report-note {
+                  font-size: 9px;
+                  color: #ff0000;
+                  margin-top: 2px;
+                  margin-left: 20px;
+                }
+                
+                .footer-reviewed {
+                  margin-top: 20px;
+                  font-size: 11px;
+                }
+                
+                .footer-reviewed-line {
+                  border-top: 1px solid #000;
+                  margin-top: 5px;
+                  margin-bottom: 5px;
+                  height: 1px;
+                  width: 200px;
+                }
               </style>
             </head>
             <body>
-              <div class="header">
-                <img src="/accizard-uploads/logo-ldrrmo-png.png" alt="LDRRMO Logo" class="header-logo" />
-                <div class="header-org">Republic of the Philippines</div>
-                <div class="header-province">Province of Quezon</div>
-                <div class="header-divider"></div>
-                <div class="header-municipality">Municipality of Lucban</div>
-                <div class="header-office">Local Disaster Risk Reduction and Management Office</div>
-                <div class="header-title">Incident Patient Report</div>
-                <div class="header-for">FOR: [Name]</div>
-                <div class="header-mayor">Municipal Mayor Chair, MDRRMC</div>
+              <div class="watermark">
+                <img src="/accizard-uploads/logo-ldrrmo-png.png" alt="Watermark" />
               </div>
+              <div class="header">
+                <img src="/accizard-uploads/lucban-logo.png" alt="Lucban Logo" class="header-left-logo" />
+                <div class="header-center">
+                  <div class="header-org">Republic of the <strong>PHILIPPINES</strong></div>
+                  <div class="header-province">Province of <strong>QUEZON</strong></div>
+                  <div class="header-municipality"><strong>MUNICIPALITY OF LUCBAN</strong></div>
+                  <div class="header-office">Municipal Disaster Risk Reduction and Management Office</div>
+              </div>
+                <img src="/accizard-uploads/logo-ldrrmo-png.png" alt="LDRRMO Logo" class="header-right-logo" />
+              </div>
+              <div class="header-title">Emergency Dispatch Form & Patient Assessment Record</div>
+              <div class="header-date-time">DATE/TIME:________</div>
               
+              ${hasReportDetails ? `
               <table>
                 <tr class="section-title-row">
                   <td colspan="2">I. Report Details</td>
                 </tr>
-                <tr>
-                  <th>Report Type</th>
-                    <td class="value-cell">${report?.type || 'N/A'}</td>
-                  </tr>
-                  <tr>
-                    <th>Status</th>
-                    <td class="value-cell">
-                      <span class="badge status-${report?.status?.toLowerCase().replace(' ', '-') || 'pending'}">
-                        ${report?.status || 'N/A'}
-                      </span>
-                    </td>
-                  </tr>
-                  <tr>
-                    <th>Reported By</th>
-                    <td class="value-cell">${report?.reportedBy || 'N/A'}</td>
-                  </tr>
-                  <tr>
-                    <th>Date and Time Submitted</th>
-                    <td class="value-cell">
-                      ${report?.dateSubmitted || 'N/A'} ${report?.timeSubmitted ? `at ${report.timeSubmitted}` : ''}
-                    </td>
-                  </tr>
-                  <tr>
-                    <th>Mobile Number</th>
-                    <td class="value-cell">${report?.mobileNumber || 'N/A'}</td>
-                  </tr>
-                  <tr>
-                    <th>Description</th>
-                    <td class="value-cell">${report?.description || 'N/A'}</td>
-                  </tr>
-                  <tr>
-                    <th>Location</th>
-                    <td class="value-cell">
-                      ${report?.location || 'N/A'}<br>
-                      <small style="color: #666;">
-                        Coordinates: ${report?.latitude && report?.longitude 
-                          ? `${report.latitude}, ${report.longitude}` 
-                          : 'N/A'}
-                      </small>
-                    </td>
-                  </tr>
+                  ${reportDetailsRows}
+                </table>
+              ` : ''}
+              
+              ${hasDispatchInfo ? `
+                <table>
                 <tr class="section-title-row">
                   <td colspan="2">II. Dispatch Form</td>
                 </tr>
-                <tr>
-                  <th>Received By</th>
-                    <td class="value-cell">${dispatch?.receivedBy || 'N/A'}</td>
-                  </tr>
-                  <tr>
-                    <th>Responders</th>
-                    <td class="value-cell">
-                      ${dispatch?.responders && dispatch.responders.length > 0
-                        ? dispatch.responders.map((r: any) => 
-                            `${r.team}: ${r.responders ? r.responders.join(', ') : 'N/A'}`
-                          ).join('<br>')
-                        : 'N/A'}
-                    </td>
-                  </tr>
-                  <tr>
-                    <th>Time Call Received</th>
-                    <td class="value-cell">${dispatch?.timeCallReceived || 'N/A'}</td>
-                  </tr>
-                  <tr>
-                    <th>Time of Dispatch</th>
-                    <td class="value-cell">${dispatch?.timeOfDispatch || 'N/A'}</td>
-                  </tr>
-                  <tr>
-                    <th>Time of Arrival</th>
-                    <td class="value-cell">${dispatch?.timeOfArrival || 'N/A'}</td>
-                  </tr>
-                  <tr>
-                    <th>Response Time</th>
-                    <td class="value-cell">
-                      ${dispatch?.timeOfDispatch && dispatch?.timeOfArrival
-                        ? calculateResponseTime(dispatch.timeOfDispatch, dispatch.timeOfArrival)
-                        : 'N/A'}
-                    </td>
-                  </tr>
+                  ${dispatchRows}
+                </table>
+              ` : ''}
+              
+              ${hasPatientInfo ? `
+                <table>
                 <tr class="section-title-row">
                   <td colspan="2">III. Patient Information</td>
-                </tr>
-                ${patientData && patientData.length > 0
-                  ? patientData.map((patient: any, index: number) => {
-                      const gcsTotal = calculateGCSTotal(patient);
-                      return `
-                        <div class="patient-section">
-                          <div class="patient-header">Patient ${index + 1}${patient.name ? ` - ${patient.name}` : ''}</div>
-                          
-                          <table>
-                            <tr>
-                              <th>Name</th>
-                              <td class="value-cell">${patient.name || 'N/A'}</td>
-                            </tr>
-                            <tr>
-                              <th>Contact Number</th>
-                              <td class="value-cell">${patient.contactNumber || 'N/A'}</td>
-                            </tr>
-                            <tr>
-                              <th>Address</th>
-                              <td class="value-cell">${patient.address || 'N/A'}</td>
-                            </tr>
-                            <tr>
-                              <th>Age</th>
-                              <td class="value-cell">${patient.age ? `${patient.age} years old` : 'N/A'}</td>
-                            </tr>
-                            <tr>
-                              <th>Gender</th>
-                              <td class="value-cell">${patient.gender || 'N/A'}</td>
                             </tr>
                           </table>
+                ${patientSections}
+              ` : ''}
+              
+              <div class="consent-section">
+                <div class="consent-column">
+                  <div class="consent-header">I. Patient's Informed Consent</div>
+                  <div class="consent-content">
+                    Ako po si ________________________ (pangalan ng pasyente), ay pumapayag na malapatan ng pangunang lunas ng mga Responders ng <b>MUNICIPAL DISASTER RISK REDUCTION AND MANAGEMENT OFFICE (MDRRMO Lucban)</b> ayon sa kinakailangang pangunang lunas batay sa kalalagayan ng pasyente
                         </div>
-                      `;
-                    }).join('')
-                  : '<p style="color: #666; font-style: italic;">No patient information available</p>'}
+                  <div class="signature-line"></div>
+                  <div class="signature-label">LAGDA SA IBABAW NG BUONG PANGALAN AT PETSA</div>
+                  <div class="checkbox-item">
+                    <input type="checkbox" style="margin-right: 5px;"> Unconscious (Unresponsive)
+                  </div>
             </div>
             
+                <div class="consent-column">
+                  <div class="consent-header">II. SIGNIFICANT OTHER'S INFORMED CONSENT</div>
+                  <div class="consent-content">
+                    Ako po si ____________________ (pangalan ng kasama), __________________ (relationship with patient) ay pumapayag na malapatan ng pangunang lunas ng mga Responders ng <b>MUNICIPAL DISASTER RISK REDUCTION AND MANAGEMENT OFFICE (MDRRMO Lucban)</b> si ___________________ (pangalan ng pasyente) ayon sa kinakailangang pangunang lunas batay sa kalalagayan ng pasyente at madala sa pinakamalapit na Hospital.
             </div>
+                  <div class="signature-line"></div>
+                  <div class="signature-label">LAGDA SA IBABAW NG BUONG PANGALAN AT PETSA</div>
+                </div>
+                
+                <div class="consent-column">
+                  <div class="consent-header">III. WAIVER/REFUSAL-OF-FIRST AID MANAGEMENT & RELEASE FORM</div>
+                  <div class="consent-content">
+                    Ako po si _________________________ ay kusang loob na tumatanggi na:<br>
+                    → MAGPALAPAT NG PANGUNANG LUNAS at/o<br>
+                    → MAGPADALA SA PINAKAMALAPIT NA HOSPITAL<br><br>
+                    Ang <b>MUNICIPAL DISASTER RISK REDUCTION AND MANAGEMENT OFFICE (MDRRMO Lucban)</b> o ang <b>LOCAL GOVERNMENT UNIT OF LUCBAN</b> ay walang pananagutan sa ano mang pwedeng maidulot ng pagtanggi kong ito.
+                  </div>
+                  <div class="signature-line"></div>
+                  <div class="signature-label">LAGDA SA IBABAW NG BUONG PANGALAN AT PETSA</div>
+                </div>
+              </div>
+              
+                <div class="footer-section">
+                  <div class="footer-signatures">
+                    <div class="footer-signature-column">
+                      <div class="footer-signature-label">Accomplished by: ________</div>
+                      <div class="footer-signature-line"></div>
+                      <div class="footer-signature-note">(Name and Signature)</div>
+                    </div>
+                    <div class="footer-signature-column">
+                      <div class="footer-signature-label">Endorsed to: ________</div>
+                      <div class="footer-signature-line"></div>
+                      <div class="footer-signature-note">(Name and Signature)</div>
+                    </div>
+                  </div>
+                  
+                  <div class="footer-report-section">
+                    <div class="footer-report-item">
+                      <div class="footer-report-checkbox">
+                        <input type="checkbox" style="margin-right: 5px;"> WITH INITIAL REPORT (DATE AND TIME SUBMITTED): ________
+                      </div>
+                      <div class="footer-report-signature-line"></div>
+                      <div class="footer-report-note">**TO SUBMIT BEFORE 0600H & 1800H</div>
+                    </div>
+                    
+                    <div class="footer-report-item">
+                      <div class="footer-report-checkbox">
+                        <input type="checkbox" style="margin-right: 5px;"> WITH SITUATION REPORT (DATE AND TIME SUBMITTED): ________
+                      </div>
+                      <div class="footer-report-signature-line"></div>
+                      <div class="footer-report-note">**TO SUBMIT WITHIN 24 HOURS AFTER THE RESPONSE</div>
+                    </div>
+                  </div>
+                  
+                  <div class="footer-reviewed">
+                    REVIEWED BY: ________
+                    <div class="footer-reviewed-line"></div>
+                  </div>
+                </div>
+              
           </body>
         </html>
       `;
@@ -2588,33 +3423,132 @@ useEffect(() => {
       pdfContent.innerHTML = htmlContent;
       pdfContent.style.position = 'absolute';
       pdfContent.style.left = '-9999px';
-      pdfContent.style.width = '210mm';
+      // 1 inch = 25.4mm, so content width = 210mm - 50.8mm (left + right margins) = 159.2mm
+      pdfContent.style.width = '159.2mm';
       document.body.appendChild(pdfContent);
       
       try {
+        // Ensure DM Sans font is loaded
+        // Check if font is already loaded in the document
+        let fontLoaded = false;
+        if (document.fonts && document.fonts.check) {
+          fontLoaded = document.fonts.check("1em 'DM Sans'");
+        }
+        
+        // If not loaded, add font link and wait
+        if (!fontLoaded) {
+          const existingFontLink = document.head.querySelector('link[href*="DM+Sans"]');
+          if (!existingFontLink) {
+            const fontLink = document.createElement('link');
+            fontLink.rel = 'stylesheet';
+            fontLink.href = 'https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&display=swap';
+            document.head.appendChild(fontLink);
+            
+            // Wait for font to load
+            await new Promise((resolve) => {
+              fontLink.onload = resolve;
+              fontLink.onerror = resolve;
+              setTimeout(resolve, 2000);
+            });
+          }
+        }
+        
+        // Wait for all fonts to be ready
+        if (document.fonts && document.fonts.ready) {
+          await document.fonts.ready;
+        }
+        
+        // Verify DM Sans is loaded by checking font availability
+        const checkFontLoaded = () => {
+          if (document.fonts && document.fonts.check) {
+            return document.fonts.check("12px 'DM Sans'");
+          }
+          return true; // Assume loaded if check not available
+        };
+        
+        // Wait until font is confirmed loaded or timeout
+        let attempts = 0;
+        while (!checkFontLoaded() && attempts < 10) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+          attempts++;
+        }
+        
+        // Additional wait to ensure fonts are fully rendered in the DOM
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Force font application to all elements in the PDF content
+        const allElements = pdfContent.querySelectorAll('*');
+        allElements.forEach((el: any) => {
+          if (el.style) {
+            el.style.fontFamily = "'DM Sans', sans-serif";
+          }
+        });
+        
+        // Also apply to the root element
+        if (pdfContent.style) {
+          pdfContent.style.fontFamily = "'DM Sans', sans-serif";
+        }
+        
         const canvas = await html2canvas(pdfContent, {
           allowTaint: true,
           logging: false,
           useCORS: true,
-          scale: 2 as any
+          scale: 2 as any,
+          fontEmbedCSS: true,
+          onclone: (clonedDoc) => {
+            // Ensure fonts are applied in the cloned document
+            const clonedHead = clonedDoc.head;
+            const clonedBody = clonedDoc.body;
+            
+            // Add font link to cloned document
+            if (clonedHead) {
+              const existingLink = clonedHead.querySelector('link[href*="DM+Sans"]');
+              if (!existingLink) {
+                const fontLink = clonedDoc.createElement('link');
+                fontLink.rel = 'stylesheet';
+                fontLink.href = 'https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&display=swap';
+                clonedHead.appendChild(fontLink);
+              }
+            }
+            
+            // Apply font to all elements in cloned document
+            if (clonedBody) {
+              clonedBody.style.fontFamily = "'DM Sans', sans-serif";
+              const allClonedElements = clonedBody.querySelectorAll('*');
+              allClonedElements.forEach((el: any) => {
+                if (el.style) {
+                  el.style.fontFamily = "'DM Sans', sans-serif";
+                }
+              });
+            }
+          }
         } as any);
         
         const imgData = canvas.toDataURL('image/png');
         const pdf = new jsPDF('p', 'mm', 'a4');
-        const imgWidth = 210;
+        // 0.5 inch = 12.7mm margins
+        const margin = 12.7;
+        const contentWidth = 210 - (margin * 2); // 184.6mm
         const pageHeight = 297;
+        const contentHeight = pageHeight - (margin * 2); // 271.6mm per page
+        const imgWidth = contentWidth;
         const imgHeight = (canvas.height * imgWidth) / canvas.width;
         let heightLeft = imgHeight;
-        let position = 0;
         
-        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-        heightLeft -= pageHeight;
+        // First page - show from top
+        pdf.addImage(imgData, 'PNG', margin, margin, imgWidth, imgHeight);
+        heightLeft -= contentHeight;
         
+        // Additional pages - shift image up to show next portion
+        let pageNumber = 1;
         while (heightLeft >= 0) {
-          position = heightLeft - imgHeight;
+          // Position the image so the next portion is visible
+          // Each page shows contentHeight worth of the image
+          const position = margin - (pageNumber * contentHeight);
           pdf.addPage();
-          pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-          heightLeft -= pageHeight;
+          pdf.addImage(imgData, 'PNG', margin, position, imgWidth, imgHeight);
+          heightLeft -= contentHeight;
+          pageNumber++;
         }
         
         // Get PDF as blob
@@ -2654,16 +3588,20 @@ useEffect(() => {
           if (reportData) {
             const pdfPromise = (async () => {
               try {
-                // Load dispatch and patient data if available
-                let dispatchDataForPDF = dispatchData;
-                let patientsDataForPDF = patients;
+                // Load dispatch and patient data if available (without updating state)
+                let dispatchDataForPDF = createInitialDispatchState();
+                let patientsDataForPDF: any[] = [];
                 
                 try {
-                  const loadedDispatch = await loadDispatchDataFromDatabase(reportId);
-                  if (loadedDispatch) dispatchDataForPDF = loadedDispatch;
+                  const loadedDispatch = await loadDispatchDataFromDatabase(reportId, false);
+                  if (loadedDispatch) {
+                    dispatchDataForPDF = loadedDispatch;
+                  }
                   
-                  const loadedPatients = await loadPatientDataFromDatabase(reportId);
-                  if (loadedPatients && loadedPatients.patients) patientsDataForPDF = loadedPatients.patients;
+                  const loadedPatients = await loadPatientDataFromDatabase(reportId, false);
+                  if (loadedPatients && loadedPatients.patients) {
+                    patientsDataForPDF = loadedPatients.patients;
+                  }
                 } catch (error) {
                   console.log("Error loading additional data for PDF:", error);
                 }
@@ -2699,16 +3637,20 @@ useEffect(() => {
           const reportData = reports.find(r => r.firestoreId === reportId);
           if (reportData) {
             try {
-              // Load dispatch and patient data if available
-              let dispatchDataForPDF = dispatchData;
-              let patientsDataForPDF = patients;
+              // Load dispatch and patient data if available (without updating state)
+              let dispatchDataForPDF = createInitialDispatchState();
+              let patientsDataForPDF: any[] = [];
               
               try {
-                const loadedDispatch = await loadDispatchDataFromDatabase(reportId);
-                if (loadedDispatch) dispatchDataForPDF = loadedDispatch;
+                const loadedDispatch = await loadDispatchDataFromDatabase(reportId, false);
+                if (loadedDispatch) {
+                  dispatchDataForPDF = loadedDispatch;
+                }
                 
-                const loadedPatients = await loadPatientDataFromDatabase(reportId);
-                if (loadedPatients && loadedPatients.patients) patientsDataForPDF = loadedPatients.patients;
+                const loadedPatients = await loadPatientDataFromDatabase(reportId, false);
+                if (loadedPatients && loadedPatients.patients) {
+                  patientsDataForPDF = loadedPatients.patients;
+                }
               } catch (error) {
                 console.log("Error loading additional data for PDF:", error);
               }
@@ -2916,14 +3858,84 @@ useEffect(() => {
       toast.error('Failed to export CSV. Please try again.');
     }
   };
-  const handlePrintPreview = async () => {
-    // Load dispatch and patient data if not already loaded
-    if (selectedReport) {
-      if (!dispatchData.timeCallReceived && !dispatchData.receivedBy) {
-        await loadDispatchDataFromDatabase(selectedReport.firestoreId);
+  // Function to generate and download PDF for a single report
+  const handleGeneratePDF = async (report: any) => {
+    try {
+      if (!report) {
+        console.error('No report provided for PDF generation');
+        toast.error('No report selected for PDF generation');
+        return;
       }
+
+      // Load dispatch and patient data
+      let dispatchDataForPDF = createInitialDispatchState();
+      let patientsDataForPDF: any[] = [];
+
+      try {
+        const loadedDispatch = await loadDispatchDataFromDatabase(report.firestoreId, false);
+        if (loadedDispatch) {
+          dispatchDataForPDF = loadedDispatch;
+        }
+      } catch (error) {
+        console.log("No dispatch data found, using empty state");
+      }
+
+      try {
+        const loadedPatients = await loadPatientDataFromDatabase(report.firestoreId, false);
+        if (loadedPatients && loadedPatients.patients) {
+          patientsDataForPDF = loadedPatients.patients;
+        }
+      } catch (error) {
+        console.log("No patient data found, using empty array");
+      }
+
+      // Generate PDF
+      const pdfResult = await generatePDFBlob(report, dispatchDataForPDF, patientsDataForPDF);
+      
+      if (pdfResult) {
+        // Download the PDF
+        const url = URL.createObjectURL(pdfResult.blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = pdfResult.filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        toast.success('PDF generated and downloaded successfully');
+      } else {
+        toast.error('Failed to generate PDF');
+      }
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      toast.error('Failed to generate PDF. Please try again.');
+    }
+  };
+
+  const handlePrintPreview = async () => {
+    // Check if a report is selected
+    if (!selectedReport) {
+      console.error('No report selected for printing');
+      return;
+    }
+
+    // Load dispatch and patient data - use returned values instead of state
+    let loadedDispatchData = dispatchData;
+    let loadedPatientData = patients;
+
+    // Load dispatch data if not already loaded
+      if (!dispatchData.timeCallReceived && !dispatchData.receivedBy) {
+      const loadedDispatch = await loadDispatchDataFromDatabase(selectedReport.firestoreId);
+      if (loadedDispatch) {
+        loadedDispatchData = loadedDispatch;
+      }
+    }
+
+    // Load patient data if not already loaded
       if (!patients[0]?.name && patients.length === 1) {
-        await loadPatientDataFromDatabase(selectedReport.firestoreId);
+      const loadedPatient = await loadPatientDataFromDatabase(selectedReport.firestoreId);
+      if (loadedPatient && loadedPatient.patients) {
+        loadedPatientData = loadedPatient.patients;
       }
     }
 
@@ -2935,11 +3947,302 @@ useEffect(() => {
       return eyes + verbal + motor;
     };
 
+    // Helper function to check if a value exists
+    const hasValue = (value: any): boolean => {
+      if (value === null || value === undefined) return false;
+      if (typeof value === 'string' && value.trim() === '') return false;
+      if (Array.isArray(value) && value.length === 0) return false;
+      if (typeof value === 'object' && Object.keys(value).length === 0) return false;
+      return true;
+    };
+
+    // Helper function to render a table row only if value exists
+    const renderRow = (label: string, value: any, formatter?: (val: any) => string): string => {
+      if (!hasValue(value)) return '';
+      const formattedValue = formatter ? formatter(value) : value;
+      return `
+        <tr>
+          <th>${label}</th>
+          <td class="value-cell">${formattedValue}</td>
+        </tr>
+      `;
+    };
+
     // Create comprehensive HTML template
     const generateHTML = () => {
       const report = selectedReport;
-      const dispatch = dispatchData;
-      const patientData = patients;
+      const dispatch = loadedDispatchData;
+      const patientData = loadedPatientData;
+      
+      // Build Report Details rows
+      const reportDetailsRows = [
+        renderRow('Report Type', report?.type),
+        renderRow('Status', report?.status, (val) => 
+          `<span class="badge status-${val?.toLowerCase().replace(' ', '-') || 'pending'}">${val}</span>`
+        ),
+        renderRow('Reported By', report?.reportedBy),
+        renderRow('Date and Time Submitted', 
+          report?.dateSubmitted 
+            ? `${report.dateSubmitted}${report?.timeSubmitted ? ` at ${report.timeSubmitted}` : ''}`
+            : null
+        ),
+        renderRow('Mobile Number', report?.mobileNumber),
+        renderRow('Barangay', report?.barangay),
+        renderRow('Description', report?.description),
+        renderRow('Location', 
+          report?.location 
+            ? `${report.location}${report?.latitude && report?.longitude 
+                ? `<br><small style="color: #666;">Coordinates: ${report.latitude}, ${report.longitude}</small>`
+                : ''}`
+            : null
+        ),
+      ].filter(row => row !== '').join('');
+
+      // Build Dispatch Form rows
+      const dispatchRows = [
+        renderRow('Received By', dispatch?.receivedBy),
+        renderRow('Responders', 
+          dispatch?.responders && dispatch.responders.length > 0
+            ? dispatch.responders.map((r: any) => 
+                `${r.team}: ${r.responders ? r.responders.join(', ') : ''}`
+              ).filter((item: string) => item.trim() !== '').join('<br>')
+            : null
+        ),
+        renderRow('Driver', dispatch?.driverName || dispatch?.driverId),
+        renderRow('Vehicle Used', dispatch?.vehicleName || dispatch?.vehicleId),
+        renderRow('Time Call Received', dispatch?.timeCallReceived),
+        renderRow('Time of Dispatch', dispatch?.timeOfDispatch),
+        renderRow('Time of Arrival', dispatch?.timeOfArrival),
+        renderRow('Response Time',
+          dispatch?.timeOfDispatch && dispatch?.timeOfArrival
+            ? calculateResponseTime(dispatch.timeOfDispatch, dispatch.timeOfArrival)
+            : null
+        ),
+        renderRow('Hospital Arrival', dispatch?.hospitalArrival),
+        renderRow('Returned to OPCEN', dispatch?.returnedToOpcen),
+        renderRow('Disaster Related', dispatch?.disasterRelated),
+        renderRow('Agency Present',
+          Array.isArray(dispatch?.agencyPresent) && dispatch.agencyPresent.length > 0
+            ? dispatch.agencyPresent.join(', ')
+            : (dispatch?.agencyPresent || null)
+        ),
+        renderRow('Type of Emergency', dispatch?.typeOfEmergency),
+        renderRow('Vehicle Involved', dispatch?.vehicleInvolved),
+        // Cause of Accident (only if typeOfEmergency is Road Crash)
+        ...(dispatch?.typeOfEmergency === 'Road Crash' && dispatch?.causeOfAccident && dispatch.causeOfAccident.length > 0
+          ? [renderRow('Cause of Accident', dispatch.causeOfAccident.join(', '))]
+          : []
+        ),
+        renderRow('Classification of Injury', dispatch?.injuryClassification),
+        // Major Injury Types (only if classification is Major)
+        ...(dispatch?.injuryClassification === 'Major' && dispatch?.majorInjuryTypes && dispatch.majorInjuryTypes.length > 0
+          ? [renderRow('Major Injury Types', dispatch.majorInjuryTypes.join(', '))]
+          : []
+        ),
+        // Minor Injury Types (only if classification is Minor)
+        ...(dispatch?.injuryClassification === 'Minor' && dispatch?.minorInjuryTypes && dispatch.minorInjuryTypes.length > 0
+          ? [renderRow('Minor Injury Types', dispatch.minorInjuryTypes.join(', '))]
+          : []
+        ),
+        // Medical Classification (only if typeOfEmergency is Medical Emergency)
+        ...(dispatch?.typeOfEmergency === 'Medical Emergency'
+          ? [renderRow('Medical Classification', dispatch?.medicalClassification)]
+          : []
+        ),
+        // Major Medical Symptoms (only if medicalClassification is Major)
+        ...(dispatch?.medicalClassification === 'Major' && dispatch?.majorMedicalSymptoms && dispatch.majorMedicalSymptoms.length > 0
+          ? [renderRow('Major Medical Symptoms', dispatch.majorMedicalSymptoms.join(', '))]
+          : []
+        ),
+        // Minor Medical Symptoms (only if medicalClassification is Minor)
+        ...(dispatch?.medicalClassification === 'Minor' && dispatch?.minorMedicalSymptoms && dispatch.minorMedicalSymptoms.length > 0
+          ? [renderRow('Minor Medical Symptoms', dispatch.minorMedicalSymptoms.join(', '))]
+          : []
+        ),
+        // Chief Complaint (only if typeOfEmergency is Medical Assistance)
+        ...(dispatch?.typeOfEmergency === 'Medical Assistance'
+          ? [renderRow('Chief Complaint', dispatch?.chiefComplaint)]
+          : []
+        ),
+        // Diagnosis (only if typeOfEmergency is Medical Assistance)
+        ...(dispatch?.typeOfEmergency === 'Medical Assistance'
+          ? [renderRow('Diagnosis', dispatch?.diagnosis)]
+          : []
+        ),
+        // Nature of Illness (only if typeOfEmergency is Medical Assistance)
+        ...(dispatch?.typeOfEmergency === 'Medical Assistance' && dispatch?.natureOfIllness
+          ? [renderRow('Nature of Illness', 
+              dispatch.natureOfIllness === 'Others' && dispatch.natureOfIllnessOthers
+                ? `${dispatch.natureOfIllness} - ${dispatch.natureOfIllnessOthers}`
+                : dispatch.natureOfIllness
+            )]
+          : []
+        ),
+        renderRow('Actions Taken',
+          dispatch?.actionsTaken && dispatch.actionsTaken.length > 0
+            ? '<ul style="margin: 0; padding-left: 20px;">' + 
+              dispatch.actionsTaken.map((action: string) => `<li>${action}</li>`).join('') +
+              '</ul>'
+            : null
+        ),
+        // Referred To (only if actionsTaken includes "Referred")
+        ...(dispatch?.actionsTaken && dispatch.actionsTaken.includes('Referred') && dispatch?.referredTo
+          ? [renderRow('Referred To', dispatch.referredTo)]
+          : []
+        ),
+        // Transport Details (only if actionsTaken includes "Transported")
+        ...(dispatch?.actionsTaken && dispatch.actionsTaken.includes('Transported') && (dispatch?.transportFrom || dispatch?.transportTo)
+          ? [renderRow('Transport', 
+              dispatch.transportFrom && dispatch.transportTo
+                ? `From: ${dispatch.transportFrom} → To: ${dispatch.transportTo}`
+                : dispatch.transportFrom || dispatch.transportTo
+            )]
+          : []
+        ),
+        // Others Description (only if actionsTaken includes "Others")
+        ...(dispatch?.actionsTaken && dispatch.actionsTaken.includes('Others') && dispatch?.othersDescription
+          ? [renderRow('Others - Description', dispatch.othersDescription)]
+          : []
+        ),
+        // Vital Signs (only if actionsTaken includes "Vital Signs Taken")
+        ...(dispatch?.actionsTaken && dispatch.actionsTaken.includes('Vital Signs Taken') && dispatch?.vitalSigns
+          ? [
+              ...(hasValue(dispatch.vitalSigns.temperature) ? [renderRow('Temperature', dispatch.vitalSigns.temperature, (val) => `${val}°C`)] : []),
+              ...(hasValue(dispatch.vitalSigns.pulseRate) ? [renderRow('Pulse Rate', dispatch.vitalSigns.pulseRate, (val) => `${val} bpm`)] : []),
+              ...(hasValue(dispatch.vitalSigns.respiratoryRate) ? [renderRow('Respiratory Rate', dispatch.vitalSigns.respiratoryRate, (val) => `${val} breaths/min`)] : []),
+              ...(hasValue(dispatch.vitalSigns.bloodPressure) ? [renderRow('Blood Pressure', dispatch.vitalSigns.bloodPressure, (val) => `${val} mmHg`)] : []),
+            ]
+          : []
+        ),
+      ].filter(row => row !== '').join('');
+
+      // Build Patient Information
+      const patientSections = patientData && patientData.length > 0
+        ? patientData.map((patient: any, index: number) => {
+            const gcsTotal = calculateGCSTotal(patient);
+            
+            // Basic patient info rows
+            const basicInfoRows = [
+              renderRow('Name', patient.name),
+              renderRow('Contact Number', patient.contactNumber),
+              renderRow('Address', patient.address),
+              renderRow('Religion', patient.religion),
+              renderRow('Birthday', patient.birthday, (val) => new Date(val).toLocaleDateString()),
+              renderRow('Blood Type', patient.bloodType),
+              renderRow('Civil Status', patient.civilStatus),
+              renderRow('Age', patient.age, (val) => `${val} years old`),
+              renderRow('PWD', patient.pwd),
+              renderRow('Age Group', patient.ageGroup),
+              renderRow('Gender', patient.gender),
+              renderRow('Name of Companion/Relative', patient.companionName),
+              renderRow('Companion Contact Number', patient.companionContact),
+            ].filter(row => row !== '').join('');
+
+            // GCS rows
+            const hasGCS = hasValue(patient.gcs?.eyes) || hasValue(patient.gcs?.verbal) || hasValue(patient.gcs?.motor);
+            const gcsRows = hasGCS ? [
+              renderRow('Eyes Response', patient.gcs?.eyes),
+              renderRow('Verbal Response', patient.gcs?.verbal),
+              renderRow('Motor Response', patient.gcs?.motor),
+              renderRow('GCS Total Score', gcsTotal > 0 ? gcsTotal : null, (val) => 
+                `<span style="font-weight: bold; color: #f97316;">${val}</span>`
+              ),
+            ].filter(row => row !== '').join('') : '';
+
+            // Pupil Assessment
+            const pupilRow = renderRow('Pupil', patient.pupil);
+            const hasPupil = hasValue(patient.pupil);
+
+            // Lung Sounds
+            const lungSoundsRow = renderRow('Lung Sounds', patient.lungSounds);
+            const hasLungSounds = hasValue(patient.lungSounds);
+
+            // Perfusion Assessment
+            const hasPerfusion = hasValue(patient.perfusion?.skin) || hasValue(patient.perfusion?.pulse);
+            const perfusionRows = hasPerfusion ? [
+              renderRow('Skin', patient.perfusion?.skin),
+              renderRow('Pulse', patient.perfusion?.pulse),
+            ].filter(row => row !== '').join('') : '';
+
+            // Vital Signs
+            const hasVitalSigns = hasValue(patient.vitalSigns?.timeTaken) ||
+              hasValue(patient.vitalSigns?.temperature) ||
+              hasValue(patient.vitalSigns?.pulseRate) ||
+              hasValue(patient.vitalSigns?.respiratoryRate) ||
+              hasValue(patient.vitalSigns?.bloodPressure) ||
+              hasValue(patient.vitalSigns?.spo2) ||
+              hasValue(patient.vitalSigns?.randomBloodSugar) ||
+              hasValue(patient.vitalSigns?.painScale);
+            
+            const vitalSignsRows = hasVitalSigns ? [
+              renderRow('Time Taken', patient.vitalSigns?.timeTaken),
+              renderRow('Temperature', patient.vitalSigns?.temperature, (val) => `${val}°C`),
+              renderRow('Pulse Rate', patient.vitalSigns?.pulseRate, (val) => `${val} bpm`),
+              renderRow('Respiratory Rate', patient.vitalSigns?.respiratoryRate, (val) => `${val} breaths/min`),
+              renderRow('Blood Pressure', patient.vitalSigns?.bloodPressure, (val) => `${val} mmHg`),
+              renderRow('SPO2', 
+                patient.vitalSigns?.spo2 
+                  ? `${patient.vitalSigns.spo2}%${patient.vitalSigns.spo2WithO2Support ? ' (with O2 support)' : ''}`
+                  : null
+              ),
+              renderRow('Random Blood Sugar', patient.vitalSigns?.randomBloodSugar, (val) => `${val} mg/dL`),
+              renderRow('Pain Scale', patient.vitalSigns?.painScale),
+            ].filter(row => row !== '').join('') : '';
+
+            // Only show patient section if there's at least basic info
+            if (!hasValue(patient.name) && basicInfoRows === '') {
+              return '';
+            }
+
+            return `
+              <div class="patient-section">
+                <div class="patient-header">Patient ${index + 1}${patient.name ? ` - ${patient.name}` : ''}</div>
+                
+                ${basicInfoRows ? `<table>${basicInfoRows}</table>` : ''}
+                
+                ${hasGCS ? `
+                  <div class="sub-section">
+                    <div class="sub-section-title">A. Glasgow Coma Scale</div>
+                    <table>${gcsRows}</table>
+                  </div>
+                ` : ''}
+                
+                ${hasPupil ? `
+                  <div class="sub-section">
+                    <div class="sub-section-title">B. Pupil Assessment</div>
+                    <table>${pupilRow}</table>
+                  </div>
+                ` : ''}
+                
+                ${hasLungSounds ? `
+                  <div class="sub-section">
+                    <div class="sub-section-title">C. Lung Sounds</div>
+                    <table>${lungSoundsRow}</table>
+                  </div>
+                ` : ''}
+                
+                ${hasPerfusion ? `
+                  <div class="sub-section">
+                    <div class="sub-section-title">D. Perfusion Assessment</div>
+                    <table>${perfusionRows}</table>
+                  </div>
+                ` : ''}
+                
+                ${hasVitalSigns ? `
+                  <div class="sub-section">
+                    <div class="sub-section-title">E. Vital Signs</div>
+                    <table>${vitalSignsRows}</table>
+                  </div>
+                ` : ''}
+              </div>
+            `;
+          }).filter(section => section !== '').join('')
+        : '';
+
+      // Only show sections if they have data
+      const hasReportDetails = reportDetailsRows !== '';
+      const hasDispatchInfo = dispatchRows !== '';
+      const hasPatientInfo = patientSections !== '';
       
       return `
         <!DOCTYPE html>
@@ -2965,75 +4268,93 @@ useEffect(() => {
               }
               
               .header {
-                text-align: center;
-                margin-bottom: 30px;
-                padding-bottom: 20px;
+                display: flex;
+                align-items: flex-start;
+                justify-content: space-between;
+                margin-bottom: 20px;
+                padding-bottom: 15px;
+                border-bottom: 2px solid #000;
               }
               
-              .header-logo {
-                width: 100px;
-                height: 100px;
-                margin: 0 auto 15px;
-                display: block;
+              .header-left-logo {
+                width: 90px;
+                height: 90px;
+                object-fit: contain;
+                flex-shrink: 0;
+              }
+              
+              .header-right-logo {
+                width: 90px;
+                height: 90px;
+                object-fit: contain;
+                flex-shrink: 0;
+              }
+              
+              .header-center {
+                flex: 1;
+                text-align: center;
+                padding: 0 15px;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
               }
               
               .header-org {
-                font-size: 11px;
+                font-size: 10px;
                 color: #000;
-                margin: 5px 0;
+                margin: 2px 0;
                 line-height: 1.4;
+              }
+              
+              .header-org strong {
+                color: #0066cc;
+                font-weight: 700;
               }
               
               .header-province {
-                font-size: 11px;
+                font-size: 10px;
                 color: #000;
-                margin: 5px 0;
+                margin: 2px 0;
                 line-height: 1.4;
               }
               
-              .header-divider {
-                border-top: 1px solid #000;
-                margin: 8px auto;
-                width: 200px;
+              .header-province strong {
+                color: #0066cc;
+                font-weight: 700;
               }
               
               .header-municipality {
-                font-size: 13px;
-                font-weight: bold;
-                color: #000;
-                margin: 8px 0;
+                font-size: 11px;
+                font-weight: 700;
+                color: #0066cc;
+                margin: 4px 0;
                 line-height: 1.4;
               }
               
               .header-office {
-                font-size: 14px;
-                font-weight: bold;
+                font-size: 11px;
+                font-weight: 600;
                 color: #000;
-                margin: 15px 0 5px;
+                margin: 8px 0 4px;
                 line-height: 1.4;
+                text-transform: uppercase;
               }
               
               .header-title {
-                font-size: 16px;
-                font-weight: bold;
-                color: #000;
-                margin: 10px 0 20px;
+                font-size: 13px;
+                font-weight: 700;
+                color: #0066cc;
+                margin: 6px 0;
                 letter-spacing: 0.5px;
                 line-height: 1.4;
+                text-transform: uppercase;
               }
               
-              .header-for {
-                font-size: 12px;
+              .header-date-time {
+                font-size: 10px;
                 color: #000;
-                margin: 15px 0 5px;
-                line-height: 1.4;
-              }
-              
-              .header-mayor {
-                font-size: 12px;
-                color: #000;
-                margin: 5px 0 25px;
-                line-height: 1.4;
+                margin-top: 10px;
+                text-align: left;
               }
               
               .section {
@@ -3044,11 +4365,11 @@ useEffect(() => {
                 background: #f97316;
                 color: white;
                 font-weight: bold;
-                font-size: 14px;
+                font-size: 11px;
               }
               
               .section-title-row td {
-                padding: 8px 12px;
+                padding: 0;
                 border: 1px solid #ddd;
               }
               
@@ -3059,10 +4380,11 @@ useEffect(() => {
               }
               
               table td, table th {
-                padding: 6px 8px;
+                padding: 0;
                 border: 1px solid #ddd;
                 text-align: left;
-                font-size: 12px;
+                font-size: 9px;
+                vertical-align: top;
               }
               
               table th {
@@ -3136,316 +4458,44 @@ useEffect(() => {
           </head>
           <body>
             <div class="header">
-              <img src="/accizard-uploads/logo-ldrrmo-png.png" alt="LDRRMO Logo" class="header-logo" />
-              <div class="header-org">Republic of the Philippines</div>
-              <div class="header-province">Province of Quezon</div>
-              <div class="header-divider"></div>
-              <div class="header-municipality">Municipality of Lucban</div>
-              <div class="header-office">Local Disaster Risk Reduction and Management Office</div>
-              <div class="header-title">Incident Patient Report</div>
-              <div class="header-for">FOR: [Name]</div>
-              <div class="header-mayor">Municipal Mayor Chair, MDRRMC</div>
+              <img src="/accizard-uploads/lucban-logo.png" alt="Lucban Logo" class="header-left-logo" />
+              <div class="header-center">
+                <div class="header-org">Republic of the <strong>PHILIPPINES</strong></div>
+                <div class="header-province">Province of <strong>QUEZON</strong></div>
+                <div class="header-municipality"><strong>MUNICIPALITY OF LUCBAN</strong></div>
+                <div class="header-office">Municipal Disaster Risk Reduction and Management Office</div>
+                <div class="header-title">Emergency Dispatch Form & Patient Assessment Record</div>
+                <div class="header-date-time">DATE/TIME:________</div>
+              </div>
+              <img src="/accizard-uploads/logo-ldrrmo-png.png" alt="LDRRMO Logo" class="header-right-logo" />
             </div>
             
+            ${hasReportDetails ? `
             <table>
               <tr class="section-title-row">
                 <td colspan="2">I. Report Details</td>
               </tr>
-              <tr>
-                <th>Report Type</th>
-                  <td class="value-cell">${report?.type || 'N/A'}</td>
-                </tr>
-                <tr>
-                  <th>Status</th>
-                  <td class="value-cell">
-                    <span class="badge status-${report?.status?.toLowerCase().replace(' ', '-') || 'pending'}">
-                      ${report?.status || 'N/A'}
-                    </span>
-                  </td>
-                </tr>
-                <tr>
-                  <th>Reported By</th>
-                  <td class="value-cell">${report?.reportedBy || 'N/A'}</td>
-                </tr>
-                <tr>
-                  <th>Date and Time Submitted</th>
-                  <td class="value-cell">
-                    ${report?.dateSubmitted || 'N/A'} ${report?.timeSubmitted ? `at ${report.timeSubmitted}` : ''}
-                  </td>
-                </tr>
-                <tr>
-                  <th>Mobile Number</th>
-                  <td class="value-cell">${report?.mobileNumber || 'N/A'}</td>
-                </tr>
-                <tr>
-                  <th>Barangay</th>
-                  <td class="value-cell">${report?.barangay || 'N/A'}</td>
-                </tr>
-                <tr>
-                  <th>Description</th>
-                  <td class="value-cell">${report?.description || 'N/A'}</td>
-                </tr>
-                <tr>
-                  <th>Location</th>
-                  <td class="value-cell">
-                    ${report?.location || 'N/A'}<br>
-                    <small style="color: #666;">
-                      Coordinates: ${report?.latitude && report?.longitude 
-                        ? `${report.latitude}, ${report.longitude}` 
-                        : 'N/A'}
-                    </small>
-                  </td>
-                </tr>
-              <tr class="section-title-row">
-                <td colspan="2">II. Dispatch Form</td>
-              </tr>
-              <tr>
-                <th>Received By</th>
-                  <td class="value-cell">${dispatch?.receivedBy || 'N/A'}</td>
-                </tr>
-                <tr>
-                  <th>Responders</th>
-                  <td class="value-cell">
-                    ${dispatch?.responders && dispatch.responders.length > 0
-                      ? dispatch.responders.map((r: any) => 
-                          `${r.team}: ${r.responders ? r.responders.join(', ') : 'N/A'}`
-                        ).join('<br>')
-                      : 'N/A'}
-                  </td>
-                </tr>
-                <tr>
-                  <th>Driver</th>
-                  <td class="value-cell">${dispatch?.driverName || dispatch?.driverId || 'N/A'}</td>
-                </tr>
-                <tr>
-                  <th>Vehicle Used</th>
-                  <td class="value-cell">${dispatch?.vehicleName || dispatch?.vehicleId || 'N/A'}</td>
-                </tr>
-                <tr>
-                  <th>Time Call Received</th>
-                  <td class="value-cell">${dispatch?.timeCallReceived || 'N/A'}</td>
-                </tr>
-                <tr>
-                  <th>Time of Dispatch</th>
-                  <td class="value-cell">${dispatch?.timeOfDispatch || 'N/A'}</td>
-                </tr>
-                <tr>
-                  <th>Time of Arrival</th>
-                  <td class="value-cell">${dispatch?.timeOfArrival || 'N/A'}</td>
-                </tr>
-                <tr>
-                  <th>Response Time</th>
-                  <td class="value-cell">
-                    ${dispatch?.timeOfDispatch && dispatch?.timeOfArrival
-                      ? calculateResponseTime(dispatch.timeOfDispatch, dispatch.timeOfArrival)
-                      : 'N/A'}
-                  </td>
-                </tr>
-                <tr>
-                  <th>Hospital Arrival</th>
-                  <td class="value-cell">${dispatch?.hospitalArrival || 'N/A'}</td>
-                </tr>
-                <tr>
-                  <th>Returned to OPCEN</th>
-                  <td class="value-cell">${dispatch?.returnedToOpcen || 'N/A'}</td>
-                </tr>
-                <tr>
-                  <th>Disaster Related</th>
-                  <td class="value-cell">${dispatch?.disasterRelated || 'N/A'}</td>
-                </tr>
-                <tr>
-                  <th>Agency Present</th>
-                  <td class="value-cell">${Array.isArray(dispatch?.agencyPresent) ? dispatch.agencyPresent.join(', ') : (dispatch?.agencyPresent || 'N/A')}</td>
-                </tr>
-                <tr>
-                  <th>Type of Emergency</th>
-                  <td class="value-cell">${dispatch?.typeOfEmergency || 'N/A'}</td>
-                </tr>
-                <tr>
-                  <th>Vehicle Involved</th>
-                  <td class="value-cell">${dispatch?.vehicleInvolved || 'N/A'}</td>
-                </tr>
-                <tr>
-                  <th>Classification of Injury</th>
-                  <td class="value-cell">${dispatch?.injuryClassification || 'N/A'}</td>
-                </tr>
-                <tr>
-                  <th>Actions Taken</th>
-                  <td class="value-cell">
-                    ${dispatch?.actionsTaken && dispatch.actionsTaken.length > 0
-                      ? '<ul style="margin: 0; padding-left: 20px;">' + 
-                        dispatch.actionsTaken.map((action: string) => `<li>${action}</li>`).join('') +
-                        '</ul>'
-                      : 'N/A'}
-                  </td>
-                </tr>
-              <tr class="section-title-row">
-                <td colspan="2">III. Patient Information</td>
-              </tr>
-              ${patientData && patientData.length > 0
-                ? patientData.map((patient: any, index: number) => {
-                    const gcsTotal = calculateGCSTotal(patient);
-                    return `
-                      <div class="patient-section">
-                        <div class="patient-header">Patient ${index + 1}${patient.name ? ` - ${patient.name}` : ''}</div>
-                        
-                        <table>
-                          <tr>
-                            <th>Name</th>
-                            <td class="value-cell">${patient.name || 'N/A'}</td>
-                          </tr>
-                          <tr>
-                            <th>Contact Number</th>
-                            <td class="value-cell">${patient.contactNumber || 'N/A'}</td>
-                          </tr>
-                          <tr>
-                            <th>Address</th>
-                            <td class="value-cell">${patient.address || 'N/A'}</td>
-                          </tr>
-                          <tr>
-                            <th>Religion</th>
-                            <td class="value-cell">${patient.religion || 'N/A'}</td>
-                          </tr>
-                          <tr>
-                            <th>Birthday</th>
-                            <td class="value-cell">${patient.birthday ? new Date(patient.birthday).toLocaleDateString() : 'N/A'}</td>
-                          </tr>
-                          <tr>
-                            <th>Blood Type</th>
-                            <td class="value-cell">${patient.bloodType || 'N/A'}</td>
-                          </tr>
-                          <tr>
-                            <th>Civil Status</th>
-                            <td class="value-cell">${patient.civilStatus || 'N/A'}</td>
-                          </tr>
-                          <tr>
-                            <th>Age</th>
-                            <td class="value-cell">${patient.age ? `${patient.age} years old` : 'N/A'}</td>
-                          </tr>
-                          <tr>
-                            <th>PWD</th>
-                            <td class="value-cell">${patient.pwd || 'N/A'}</td>
-                          </tr>
-                          <tr>
-                            <th>Age Group</th>
-                            <td class="value-cell">${patient.ageGroup || 'N/A'}</td>
-                          </tr>
-                          <tr>
-                            <th>Gender</th>
-                            <td class="value-cell">${patient.gender || 'N/A'}</td>
-                          </tr>
-                          <tr>
-                            <th>Name of Companion/Relative</th>
-                            <td class="value-cell">${patient.companionName || 'N/A'}</td>
-                          </tr>
-                          <tr>
-                            <th>Companion Contact Number</th>
-                            <td class="value-cell">${patient.companionContact || 'N/A'}</td>
-                          </tr>
+                ${reportDetailsRows}
                         </table>
+            ` : ''}
                         
-                        <div class="sub-section">
-                          <div class="sub-section-title">A. Glasgow Coma Scale</div>
+            ${hasDispatchInfo ? `
                           <table>
-                            <tr>
-                              <th>Eyes Response</th>
-                              <td class="value-cell">${patient.gcs?.eyes || 'N/A'}</td>
+                <tr class="section-title-row">
+                  <td colspan="2">II. Dispatch Form</td>
                             </tr>
-                            <tr>
-                              <th>Verbal Response</th>
-                              <td class="value-cell">${patient.gcs?.verbal || 'N/A'}</td>
-                            </tr>
-                            <tr>
-                              <th>Motor Response</th>
-                              <td class="value-cell">${patient.gcs?.motor || 'N/A'}</td>
-                            </tr>
-                            <tr>
-                              <th>GCS Total Score</th>
-                              <td class="value-cell" style="font-weight: bold; color: #f97316;">${gcsTotal > 0 ? gcsTotal : 'N/A'}</td>
+                ${dispatchRows}
+                          </table>
+            ` : ''}
+                        
+            ${hasPatientInfo ? `
+                          <table>
+                <tr class="section-title-row">
+                  <td colspan="2">III. Patient Information</td>
                             </tr>
                           </table>
-                        </div>
-                        
-                        <div class="sub-section">
-                          <div class="sub-section-title">B. Pupil Assessment</div>
-                          <table>
-                            <tr>
-                              <th>Pupil</th>
-                              <td class="value-cell">${patient.pupil || 'N/A'}</td>
-                            </tr>
-                          </table>
-                        </div>
-                        
-                        <div class="sub-section">
-                          <div class="sub-section-title">C. Lung Sounds</div>
-                          <table>
-                            <tr>
-                              <th>Lung Sounds</th>
-                              <td class="value-cell">${patient.lungSounds || 'N/A'}</td>
-                            </tr>
-                          </table>
-                        </div>
-                        
-                        <div class="sub-section">
-                          <div class="sub-section-title">D. Perfusion Assessment</div>
-                          <table>
-                            <tr>
-                              <th>Skin</th>
-                              <td class="value-cell">${patient.perfusion?.skin || 'N/A'}</td>
-                            </tr>
-                            <tr>
-                              <th>Pulse</th>
-                              <td class="value-cell">${patient.perfusion?.pulse || 'N/A'}</td>
-                            </tr>
-                          </table>
-                        </div>
-                        
-                        <div class="sub-section">
-                          <div class="sub-section-title">E. Vital Signs</div>
-                          <table>
-                            <tr>
-                              <th>Time Taken</th>
-                              <td class="value-cell">${patient.vitalSigns?.timeTaken || 'N/A'}</td>
-                            </tr>
-                            <tr>
-                              <th>Temperature</th>
-                              <td class="value-cell">${patient.vitalSigns?.temperature ? `${patient.vitalSigns.temperature}°C` : 'N/A'}</td>
-                            </tr>
-                            <tr>
-                              <th>Pulse Rate</th>
-                              <td class="value-cell">${patient.vitalSigns?.pulseRate ? `${patient.vitalSigns.pulseRate} bpm` : 'N/A'}</td>
-                            </tr>
-                            <tr>
-                              <th>Respiratory Rate</th>
-                              <td class="value-cell">${patient.vitalSigns?.respiratoryRate ? `${patient.vitalSigns.respiratoryRate} breaths/min` : 'N/A'}</td>
-                            </tr>
-                            <tr>
-                              <th>Blood Pressure</th>
-                              <td class="value-cell">${patient.vitalSigns?.bloodPressure ? `${patient.vitalSigns.bloodPressure} mmHg` : 'N/A'}</td>
-                            </tr>
-                            <tr>
-                              <th>SPO2</th>
-                              <td class="value-cell">
-                                ${patient.vitalSigns?.spo2 
-                                  ? `${patient.vitalSigns.spo2}%${patient.vitalSigns.spo2WithO2Support ? ' (with O2 support)' : ''}` 
-                                  : 'N/A'}
-                              </td>
-                            </tr>
-                            <tr>
-                              <th>Random Blood Sugar</th>
-                              <td class="value-cell">${patient.vitalSigns?.randomBloodSugar ? `${patient.vitalSigns.randomBloodSugar} mg/dL` : 'N/A'}</td>
-                            </tr>
-                            <tr>
-                              <th>Pain Scale</th>
-                              <td class="value-cell">${patient.vitalSigns?.painScale || 'N/A'}</td>
-                            </tr>
-                          </table>
-                        </div>
-                      </div>
-                    `;
-                  }).join('')
-                : '<p style="color: #666; font-style: italic;">No patient information available</p>'}
-            </div>
+              ${patientSections}
+            ` : ''}
             
           </body>
         </html>
@@ -3455,10 +4505,16 @@ useEffect(() => {
     // Create and open print window
     const printWindow = window.open('', '_blank');
     if (printWindow) {
-      printWindow.document.write(generateHTML());
+      const htmlContent = generateHTML();
+      printWindow.document.write(htmlContent);
       printWindow.document.close();
-      // Don't auto-print, let user preview first
-      // printWindow.print();
+      
+      // Auto-print after a short delay to ensure content is loaded
+      setTimeout(() => {
+        printWindow.print();
+      }, 500);
+    } else {
+      console.error('Unable to open print window. Please allow popups.');
     }
   };
 
@@ -3641,8 +4697,18 @@ useEffect(() => {
         const sanitizedDispatchData = normalizeDispatchData(dispatchData);
         const mergedDispatchInfo = {
           ...currentData.dispatchInfo,
-          ...sanitizedDispatchData
+          ...sanitizedDispatchData,
+          // Explicitly ensure agencyPresent is included as an array
+          agencyPresent: Array.isArray(sanitizedDispatchData.agencyPresent)
+            ? sanitizedDispatchData.agencyPresent
+            : sanitizedDispatchData.agencyPresent
+              ? [sanitizedDispatchData.agencyPresent]
+              : []
         };
+        
+        // Debug log to verify agencyPresent is being saved
+        console.log('Saving dispatch data - agencyPresent:', mergedDispatchInfo.agencyPresent);
+        console.log('Full mergedDispatchInfo:', mergedDispatchInfo);
         
         await updateDoc(docRef, {
           dispatchInfo: mergedDispatchInfo,
@@ -3674,7 +4740,7 @@ useEffect(() => {
   };
 
   // Function to load existing dispatch data from database
-  const loadDispatchDataFromDatabase = async (firestoreId: string) => {
+  const loadDispatchDataFromDatabase = async (firestoreId: string, updateState: boolean = true) => {
     try {
       // Use the Firestore document ID directly
       const docRef = doc(db, "reports", firestoreId);
@@ -3684,7 +4750,9 @@ useEffect(() => {
         const data = docSnap.data();
         if (data.dispatchInfo) {
           const normalized = normalizeDispatchData(data.dispatchInfo);
+          if (updateState) {
           setDispatchData(normalized);
+          }
           return normalized;
         }
       }
@@ -3742,7 +4810,7 @@ useEffect(() => {
   };
 
   // Function to load existing patient data from database
-  const loadPatientDataFromDatabase = async (firestoreId: string) => {
+  const loadPatientDataFromDatabase = async (firestoreId: string, updateState: boolean = true) => {
     try {
       // Use the Firestore document ID directly
       const docRef = doc(db, "reports", firestoreId);
@@ -3757,7 +4825,9 @@ useEffect(() => {
             latitude: patient.latitude || "",
             longitude: patient.longitude || ""
           }));
+          if (updateState) {
           setPatients(normalizedPatients);
+          }
           return { ...data.patientInfo, patients: normalizedPatients };
         }
       }
@@ -4023,6 +5093,19 @@ useEffect(() => {
         minorInjuryTypes: isSelected
           ? types.filter(type => type !== injuryType)
           : [...types, injuryType]
+      };
+    });
+  };
+
+  const toggleCauseOfAccident = (cause: string) => {
+    setDispatchData(prev => {
+      const causes = Array.isArray(prev.causeOfAccident) ? prev.causeOfAccident : [];
+      const isSelected = causes.includes(cause);
+      return {
+        ...prev,
+        causeOfAccident: isSelected
+          ? causes.filter(c => c !== cause)
+          : [...causes, cause]
       };
     });
   };
@@ -5040,6 +6123,7 @@ useEffect(() => {
                             report.type === 'Obstructions' ? 'text-yellow-600' :
                             report.type === 'Electrical Hazard' ? 'text-yellow-500' :
                             report.type === 'Environmental Hazard' ? 'text-green-600' :
+                            report.type === 'Animal Concerns' ? 'text-purple-600' :
                             'text-gray-600'
                           )}>
                             {(() => {
@@ -5201,13 +6285,8 @@ useEffect(() => {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => {
-                                  setSelectedReport(report);
-                                  setShowPreviewModal(true);
-                                  setPreviewTab("details");
-                                  setTimeout(() => {
-                                    handlePrintPreview();
-                                  }, 100);
+                                onClick={async () => {
+                                  await handleGeneratePDF(report);
                                 }}
                               >
                                 <Printer className="h-4 w-4" />
@@ -5942,6 +7021,7 @@ useEffect(() => {
                               <SelectItem value="Obstructions">Obstructions</SelectItem>
                               <SelectItem value="Electrical Hazard">Electrical Hazard</SelectItem>
                               <SelectItem value="Environmental Hazard">Environmental Hazard</SelectItem>
+                              <SelectItem value="Animal Concerns">Animal Concerns</SelectItem>
                             </SelectContent>
                           </Select>
                         ) : (
@@ -5961,6 +7041,7 @@ useEffect(() => {
                             selectedReport?.type === 'Obstructions' ? 'text-yellow-600' :
                             selectedReport?.type === 'Electrical Hazard' ? 'text-yellow-500' :
                             selectedReport?.type === 'Environmental Hazard' ? 'text-green-600' :
+                            selectedReport?.type === 'Animal Concerns' ? 'text-purple-600' :
                             'text-gray-600'
                           )}>
                             {(() => {
@@ -7190,6 +8271,7 @@ useEffect(() => {
                                 ...d, 
                                 typeOfEmergency: v, 
                                 vehicleInvolved: "",
+                                causeOfAccident: [],
                                 injuryClassification: "", 
                                 majorInjuryTypes: [], 
                                 minorInjuryTypes: [],
@@ -7239,6 +8321,70 @@ useEffect(() => {
                                   </Select>
                                 ) : (
                                   <span className="text-sm">{dispatchData.vehicleInvolved || "Not specified"}</span>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                            
+                            <TableRow>
+                              <TableCell className="font-medium text-gray-700 align-top w-1/3 min-w-[150px]">Cause of Accident</TableCell>
+                              <TableCell>
+                                {isDispatchEditMode ? (
+                                  <Popover>
+                                    <PopoverTrigger asChild>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        className={cn(
+                                          "w-full justify-between text-left font-normal",
+                                          dispatchData.causeOfAccident.length === 0 && "text-muted-foreground"
+                                        )}
+                                      >
+                                        <span className="flex flex-wrap gap-1">
+                                          {dispatchData.causeOfAccident.length > 0
+                                            ? dispatchData.causeOfAccident.map((cause, index) => (
+                                                <span
+                                                  key={`${cause}-${index}`}
+                                                  className="inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-md border border-brand-orange/40 bg-orange-50 text-brand-orange"
+                                                >
+                                                  {cause}
+                                                </span>
+                                              ))
+                                            : "Select cause of accident"}
+                                        </span>
+                                        <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                      </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-64 p-0" align="start">
+                                      <div className="max-h-60 overflow-y-auto">
+                                        {causeOfAccidentOptions.map((cause) => {
+                                          const isSelected = dispatchData.causeOfAccident.includes(cause);
+                                          return (
+                                            <button
+                                              key={cause}
+                                              type="button"
+                                              className={cn(
+                                                "flex w-full items-center gap-2 px-3 py-2 text-sm",
+                                                isSelected ? "bg-orange-50/70 text-brand-orange" : "text-gray-700 hover:bg-orange-50"
+                                              )}
+                                              onClick={() => toggleCauseOfAccident(cause)}
+                                            >
+                                              <Checkbox
+                                                checked={isSelected}
+                                                className="h-4 w-4"
+                                              />
+                                              <span className="flex-1 text-left">{cause}</span>
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    </PopoverContent>
+                                  </Popover>
+                                ) : (
+                                  <span className="text-sm">
+                                    {dispatchData.causeOfAccident.length > 0
+                                      ? dispatchData.causeOfAccident.join(", ")
+                                      : "No cause of accident selected"}
+                                  </span>
                                 )}
                               </TableCell>
                             </TableRow>
@@ -8261,8 +9407,21 @@ useEffect(() => {
                                   mode="single"
                                   selected={isCurrentPatientBirthdayValid ? currentPatientBirthdayDate ?? undefined : undefined}
                                   onSelect={date => {
+                                    const birthdayStr = date ? format(date, "yyyy-MM-dd") : "";
+                                    // Calculate age from birthday
+                                    let calculatedAge = "";
+                                    if (date) {
+                                      const today = new Date();
+                                      let age = today.getFullYear() - date.getFullYear();
+                                      const monthDiff = today.getMonth() - date.getMonth();
+                                      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < date.getDate())) {
+                                        age--;
+                                      }
+                                      calculatedAge = age.toString();
+                                    }
                                     updateCurrentPatient({
-                                      birthday: date ? format(date, "yyyy-MM-dd") : ""
+                                      birthday: birthdayStr,
+                                      age: calculatedAge
                                     });
                                   }}
                                   initialFocus
@@ -9599,10 +10758,32 @@ useEffect(() => {
                 
                 <div className="flex gap-2">
                   <Button 
-                    onClick={() => {
+                    onClick={async () => {
+                      try {
                       stopAlarm();
                       setShowNewReportAlert(false);
-                      // You can add navigation to the specific report here
+                        
+                        // Open the report preview
+                        if (newReportData) {
+                          console.log("Opening report preview for:", newReportData);
+                          setSelectedReport(newReportData);
+                          setShowPreviewModal(true);
+                          setPreviewTab("details"); // Reset to details tab
+                          
+                          // Mark report as viewed
+                          setViewedReports(prev => new Set(prev).add(newReportData.id));
+                          
+                          // Load existing dispatch data from database using Firestore document ID
+                          if (newReportData.firestoreId) {
+                            await loadDispatchDataFromDatabase(newReportData.firestoreId);
+                            
+                            // Load existing patient data from database using Firestore document ID
+                            await loadPatientDataFromDatabase(newReportData.firestoreId);
+                          }
+                        }
+                      } catch (error) {
+                        console.error("Error opening report preview:", error);
+                      }
                     }}
                     className="flex-1 bg-brand-red hover:bg-brand-red-700 text-white"
                   >

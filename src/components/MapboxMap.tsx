@@ -430,6 +430,7 @@ export function MapboxMap({
       'Obstructions': '/markers/obstruction.svg',
       'Electrical Hazard': '/markers/electrical-hazard.svg',
       'Environmental Hazard': '/markers/environmental-hazard.svg',
+      'Animal Concerns': '/markers/animal-concern.svg',
       'Others': '/markers/default.svg',
       // Emergency Facilities
       'Evacuation Centers': '/markers/evacuation-center.svg',
