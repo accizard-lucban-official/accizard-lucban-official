@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+  import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,7 +27,7 @@ import {
 
 export function ProfilePage() {
   const navigate = useNavigate();
-  const { canViewEmail, userRole, loading: roleLoading } = useUserRole();
+  const { canViewEmail, userRole, loading: roleLoading, refreshUserRole } = useUserRole();
   const [profile, setProfile] = useState({
     name: "",
     position: "",
@@ -116,44 +116,66 @@ export function ProfilePage() {
             await updateDoc(docRef, {
               [field]: tempValue
             });
-            setProfile(prev => ({ ...prev, [field]: tempValue }));
+            // Refresh userRole to get updated data from Firestore
+            await refreshUserRole();
             toast.success(`${field.charAt(0).toUpperCase() + field.slice(1)} updated successfully!`);
+          } else {
+            toast.error("Admin profile not found in database.");
           }
+        } else {
+          toast.error("Username not found. Please refresh the page and try again.");
         }
       } else {
         // Super-admin: use Firebase Auth
         const user = auth.currentUser;
         if (user) {
-          if (user.email === SUPER_ADMIN_EMAIL) {
             // Update superAdmin profile in Firestore by email
             const q = query(collection(db, "superAdmin"), where("email", "==", user.email));
             const querySnapshot = await getDocs(q);
             if (!querySnapshot.empty) {
               const docRef = doc(db, "superAdmin", querySnapshot.docs[0].id);
               const updateData: any = {};
-              if (field === 'name') updateData.fullName = tempValue;
-              else updateData[field] = tempValue;
+            if (field === 'name') {
+              updateData.fullName = tempValue;
+            } else {
+              updateData[field] = tempValue;
+            }
               
               await updateDoc(docRef, updateData);
-              setProfile(prev => ({ ...prev, [field]: tempValue }));
-              toast.success(`${field.charAt(0).toUpperCase() + field.slice(1)} updated successfully!`);
-            }
-          } else {
-            // For other super-admins, update Firebase Auth profile
+            
+            // Also update Firebase Auth for name field
             if (field === 'name') {
               await updateProfile(user, { displayName: tempValue });
             } else if (field === 'email' && tempValue !== user.email) {
               await updateEmail(user, tempValue);
             }
-            setProfile(prev => ({ ...prev, [field]: tempValue }));
+            
+            // Refresh userRole to get updated data from Firestore
+            await refreshUserRole();
+            toast.success(`${field.charAt(0).toUpperCase() + field.slice(1)} updated successfully!`);
+          } else {
+            // Super admin not found in Firestore, update Firebase Auth only
+            if (field === 'name') {
+              await updateProfile(user, { displayName: tempValue });
+            } else if (field === 'email' && tempValue !== user.email) {
+              await updateEmail(user, tempValue);
+            }
+            // Refresh userRole to get updated data
+            await refreshUserRole();
             toast.success(`${field.charAt(0).toUpperCase() + field.slice(1)} updated successfully!`);
           }
+        } else {
+          toast.error("User not authenticated. Please refresh the page and try again.");
         }
       }
       cancelEditing();
-    } catch (error) {
-      toast.error(`Failed to update ${field}.`);
+    } catch (error: any) {
       console.error("Error updating field:", error);
+      if (error.code === 'permission-denied') {
+        toast.error("Permission denied. Please check Firestore rules.");
+      } else {
+        toast.error(`Failed to update ${field}: ${error.message || 'Unknown error'}`);
+      }
     } finally {
       setSaving(false);
     }
@@ -202,10 +224,15 @@ export function ProfilePage() {
             await updateDoc(docRef, {
               profilePicture: pendingProfilePicture
             });
-            setProfile(prev => ({ ...prev, profilePicture: pendingProfilePicture }));
+            // Refresh userRole to get updated data from Firestore
+            await refreshUserRole();
             setPendingProfilePicture(null);
             toast.success("Profile picture saved successfully!");
+          } else {
+            toast.error("Admin profile not found in database.");
           }
+        } else {
+          toast.error("Username not found. Please refresh the page and try again.");
         }
       } else {
         // Super admin user - update superAdmin collection by email
@@ -218,17 +245,24 @@ export function ProfilePage() {
             await updateDoc(docRef, {
               profilePicture: pendingProfilePicture
             });
-            setProfile(prev => ({ ...prev, profilePicture: pendingProfilePicture }));
+            // Refresh userRole to get updated data from Firestore
+            await refreshUserRole();
             setPendingProfilePicture(null);
             toast.success("Profile picture saved successfully!");
           } else {
             toast.error("Super admin profile not found in database.");
           }
+        } else {
+          toast.error("User not authenticated. Please refresh the page and try again.");
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error saving profile picture:", error);
-      toast.error("Failed to save profile picture.");
+      if (error.code === 'permission-denied') {
+        toast.error("Permission denied. Please check Firestore rules.");
+      } else {
+        toast.error(`Failed to save profile picture: ${error.message || 'Unknown error'}`);
+      }
     } finally {
       setSaving(false);
     }
@@ -259,10 +293,15 @@ export function ProfilePage() {
             await updateDoc(docRef, {
               coverImage: pendingCoverImage
             });
-            setProfile(prev => ({ ...prev, coverImage: pendingCoverImage }));
+            // Refresh userRole to get updated data from Firestore
+            await refreshUserRole();
             setPendingCoverImage(null);
             toast.success("Cover image saved successfully!");
+          } else {
+            toast.error("Admin profile not found in database.");
           }
+        } else {
+          toast.error("Username not found. Please refresh the page and try again.");
         }
       } else {
         // Super admin user - update superAdmin collection by email
@@ -275,17 +314,24 @@ export function ProfilePage() {
             await updateDoc(docRef, {
               coverImage: pendingCoverImage
             });
-            setProfile(prev => ({ ...prev, coverImage: pendingCoverImage }));
+            // Refresh userRole to get updated data from Firestore
+            await refreshUserRole();
             setPendingCoverImage(null);
             toast.success("Cover image saved successfully!");
           } else {
             toast.error("Super admin profile not found in database.");
           }
+        } else {
+          toast.error("User not authenticated. Please refresh the page and try again.");
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error saving cover image:", error);
-      toast.error("Failed to save cover image.");
+      if (error.code === 'permission-denied') {
+        toast.error("Permission denied. Please check Firestore rules.");
+      } else {
+        toast.error(`Failed to save cover image: ${error.message || 'Unknown error'}`);
+      }
     } finally {
       setSaving(false);
     }
@@ -381,7 +427,10 @@ export function ProfilePage() {
 
   useEffect(() => {
     if (userRole && !roleLoading) {
-      setProfile({
+      // Only update profile if it's different to avoid unnecessary resets
+      // This prevents overwriting user edits with stale data
+      setProfile(prev => {
+        const newProfile = {
         name: userRole.name || "",
         position: userRole.position || "",
         idNumber: userRole.idNumber || "",
@@ -389,12 +438,30 @@ export function ProfilePage() {
         email: userRole.email || "",
         profilePicture: userRole.profilePicture || "/accizard-uploads/login-signup-cover.png",
         coverImage: userRole.coverImage || ""
+        };
+        // Only update if values actually changed (prevents overwriting during save)
+        // Check each field individually to avoid unnecessary updates
+        const hasChanges = 
+          prev.name !== newProfile.name ||
+          prev.position !== newProfile.position ||
+          prev.idNumber !== newProfile.idNumber ||
+          prev.username !== newProfile.username ||
+          prev.email !== newProfile.email ||
+          prev.profilePicture !== newProfile.profilePicture ||
+          prev.coverImage !== newProfile.coverImage;
+        
+        if (hasChanges && !editingField) {
+          return newProfile;
+        }
+        return prev;
       });
-      // Clear any pending changes when userRole changes
+      // Clear any pending changes when userRole changes (only when not editing)
+      if (!editingField) {
       setPendingProfilePicture(null);
       setPendingCoverImage(null);
     }
-  }, [userRole, roleLoading]);
+    }
+  }, [userRole, roleLoading, editingField]);
 
   // Fetch personal activity logs
   useEffect(() => {
