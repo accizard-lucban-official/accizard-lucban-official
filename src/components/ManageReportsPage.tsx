@@ -1415,6 +1415,22 @@ useEffect(() => {
           } catch (error) {
             return 'N/A';
           }
+        }
+
+        // Helper function to format time with AM/PM for PDF
+        const formatTimeForPDF = (timeString: string | null | undefined): string => {
+          if (!timeString) return '';
+          try {
+            const [hours, minutes] = timeString.split(':').map(Number);
+            if (isNaN(hours) || isNaN(minutes)) return timeString;
+            
+            const ampm = hours >= 12 ? 'PM' : 'AM';
+            const displayHours = hours % 12 || 12;
+            const displayMinutes = minutes.toString().padStart(2, '0');
+            return `${displayHours}:${displayMinutes} ${ampm}`;
+          } catch (error) {
+            return timeString;
+          }
         };
 
         // Generate PDF HTML content
@@ -1462,11 +1478,15 @@ useEffect(() => {
           const dispatchRows = [
             renderFourColumnRow(
               'Received By', dispatch?.receivedBy,
-              'Hospital Arrival', dispatch?.hospitalArrival
+              'Hospital Arrival', dispatch?.hospitalArrival,
+              undefined,
+              formatTimeForPDF
             ),
             renderFourColumnRow(
               'Driver', dispatch?.driverName || dispatch?.driverId,
-              'Returned to OPCEN', dispatch?.returnedToOpcen
+              'Returned to OPCEN', dispatch?.returnedToOpcen,
+              undefined,
+              formatTimeForPDF
             ),
             renderFourColumnRow(
               'Vehicle Used', dispatch?.vehicleName || dispatch?.vehicleId,
@@ -1474,15 +1494,18 @@ useEffect(() => {
             ),
             renderFourColumnRow(
               'Time Call Received', dispatch?.timeCallReceived,
-              'Type of Emergency', dispatch?.typeOfEmergency
+              'Type of Emergency', dispatch?.typeOfEmergency,
+              formatTimeForPDF
             ),
             renderFourColumnRow(
               'Time of Dispatch', dispatch?.timeOfDispatch,
-              'Vehicle Involved', dispatch?.vehicleInvolved
+              'Vehicle Involved', dispatch?.vehicleInvolved,
+              formatTimeForPDF
             ),
             renderFourColumnRow(
               'Time of Arrival', dispatch?.timeOfArrival,
-              'Classification of Injury', dispatch?.injuryClassification
+              'Classification of Injury', dispatch?.injuryClassification,
+              formatTimeForPDF
             ),
             renderFourColumnRow(
               'Response Time',
@@ -1501,7 +1524,7 @@ useEffect(() => {
             ? dispatch.actionsTaken.map((action: string) => action).join(', ')
             : '';
 
-          // Build Patient Information
+          // Build Patient Information - Matching the exact layout from the image
           const patientSections = patientData && patientData.length > 0
             ? patientData.map((patient: any, index: number) => {
                 const gcsTotal = calculateGCSTotal(patient);
@@ -1514,8 +1537,6 @@ useEffect(() => {
                   const leftFormatted = leftValue && hasValue(leftValue) ? leftValue : '';
                   const rightFormatted = rightValue && hasValue(rightValue) ? rightValue : '';
                   
-                  if (!leftFormatted && !rightFormatted) return '';
-                  
                   return `
                     <tr>
                       <th>${leftLabel}</th>
@@ -1526,132 +1547,180 @@ useEffect(() => {
                   `;
                 };
 
-                // Build Basic Info and GCS side-by-side (4-column)
-                const basicInfoAndGCSRows = [];
-                const basicInfoFields = [
-                  { label: 'Name', value: patient.name },
-                  { label: 'Contact Number', value: patient.contactNumber },
-                  { label: 'Address', value: patient.address },
-                  { label: 'Age', value: patient.age ? `${patient.age} years old` : null },
-                  { label: 'Gender', value: patient.gender },
-                ];
+                // Build patient table rows matching the exact layout from the image
+                const patientRows = [];
                 
                 const hasGCS = hasValue(patient.gcs?.eyes) || hasValue(patient.gcs?.verbal) || hasValue(patient.gcs?.motor);
-                const gcsFields = hasGCS ? [
-                  { label: 'Eyes Response', value: patient.gcs?.eyes },
-                  { label: 'Verbal Response', value: patient.gcs?.verbal },
-                  { label: 'Motor Response', value: patient.gcs?.motor },
-                ] : [];
-                
-                // Add GCS header on the right side
-                if (hasGCS) {
-                  basicInfoAndGCSRows.push(`
-                    <tr class="sub-section-title-row">
-                      <td colspan="2"></td>
-                      <td colspan="2">A. Glasgow Coma Scale [Total Score]</td>
-                    </tr>
-                  `);
-                }
-                
-                // Pair basic info with GCS fields
-                const maxRows = Math.max(basicInfoFields.length, gcsFields.length);
-                for (let i = 0; i < maxRows; i++) {
-                  const basicField = basicInfoFields[i];
-                  const gcsField = gcsFields[i];
-                  
-                  if (basicField || gcsField) {
-                    basicInfoAndGCSRows.push(renderPatientFourColumnRow(
-                      basicField?.label || '',
-                      basicField?.value || null,
-                      gcsField?.label || '',
-                      gcsField?.value || null
-                    ));
-                  }
-                }
-
-                // Build Pupil/Lung Sounds and Perfusion side-by-side (4-column)
-                const assessmentRows = [];
+                const hasPerfusion = hasValue(patient.perfusion?.skin) || hasValue(patient.perfusion?.pulse);
                 const hasPupil = hasValue(patient.pupil);
                 const hasLungSounds = hasValue(patient.lungSounds);
-                const hasPerfusion = hasValue(patient.perfusion?.skin) || hasValue(patient.perfusion?.pulse);
+                const hasVitalSigns = hasValue(patient.vitalSigns?.timeTaken) ||
+                  hasValue(patient.vitalSigns?.temperature) ||
+                  hasValue(patient.vitalSigns?.pulseRate) ||
+                  hasValue(patient.vitalSigns?.respiratoryRate) ||
+                  hasValue(patient.vitalSigns?.bloodPressure) ||
+                  hasValue(patient.vitalSigns?.spo2) ||
+                  hasValue(patient.vitalSigns?.randomBloodSugar) ||
+                  hasValue(patient.vitalSigns?.painScale);
                 
-                // Add Perfusion header on the right side first
-                if (hasPerfusion) {
-                  assessmentRows.push(`
-                    <tr class="sub-section-title-row">
-                      <td colspan="2"></td>
-                      <td colspan="2">D. Perfusion Assessment</td>
+                // Row 1: Name | A. Glasgow Coma Scale [Total Score] (header)
+                if (hasGCS) {
+                  patientRows.push(`
+                    <tr>
+                      <th>Name</th>
+                      <td class="value-cell">${patient.name || ''}</td>
+                      <td colspan="2" class="sub-section-title-cell">A. Glasgow Coma Scale [Total Score: ${gcsTotal}]</td>
                     </tr>
                   `);
+                } else {
+                  patientRows.push(renderPatientFourColumnRow(
+                    'Name',
+                    patient.name || '',
+                    '',
+                    ''
+                  ));
                 }
                 
-                // Add Pupil Assessment header and value
+                // Row 2: Contact Number | Eyes Response
+                patientRows.push(renderPatientFourColumnRow(
+                  'Contact Number',
+                  patient.contactNumber || '',
+                  hasGCS ? 'Eyes Response' : '',
+                  hasGCS ? patient.gcs?.eyes || '' : ''
+                ));
+                
+                // Row 3: Address | Verbal Response
+                patientRows.push(renderPatientFourColumnRow(
+                  'Address',
+                  patient.address || '',
+                  hasGCS ? 'Verbal Response' : '',
+                  hasGCS ? patient.gcs?.verbal || '' : ''
+                ));
+                
+                // Row 4: Age | Motor Response
+                patientRows.push(renderPatientFourColumnRow(
+                  'Age',
+                  patient.age ? `${patient.age} years old` : '',
+                  hasGCS ? 'Motor Response' : '',
+                  hasGCS ? patient.gcs?.motor || '' : ''
+                ));
+                
+                // Row 5: Gender | D. Perfusion Assessment (header)
+                if (hasPerfusion) {
+                  patientRows.push(`
+                    <tr>
+                      <th>Gender</th>
+                      <td class="value-cell">${patient.gender || ''}</td>
+                      <td colspan="2" class="sub-section-title-cell">D. Perfusion Assessment</td>
+                    </tr>
+                  `);
+                } else {
+                  patientRows.push(renderPatientFourColumnRow(
+                    'Gender',
+                    patient.gender || '',
+                    '',
+                    ''
+                  ));
+                }
+                
+                // Row 6: (blank left) | Skin
+                patientRows.push(renderPatientFourColumnRow(
+                  '',
+                  '',
+                  hasPerfusion ? 'Skin' : '',
+                  hasPerfusion ? patient.perfusion?.skin || '' : ''
+                ));
+                
+                // Row 7: (blank left) | Pulse
+                patientRows.push(renderPatientFourColumnRow(
+                  '',
+                  '',
+                  hasPerfusion ? 'Pulse' : '',
+                  hasPerfusion ? patient.perfusion?.pulse || '' : ''
+                ));
+                
+                // Row 8: B. Pupil Assessment (header) | (blank right)
                 if (hasPupil) {
-                  assessmentRows.push(`
+                  patientRows.push(`
                     <tr class="sub-section-title-row">
                       <td colspan="2">B. Pupil Assessment</td>
                       <td colspan="2"></td>
                     </tr>
                   `);
-                  assessmentRows.push(renderPatientFourColumnRow('', patient.pupil, '', null));
+                  // Row 9: (pupil value) | (blank right)
+                  patientRows.push(`
+                    <tr>
+                      <th></th>
+                      <td class="value-cell">${patient.pupil || ''}</td>
+                      <td colspan="2"></td>
+                    </tr>
+                  `);
                 }
                 
-                // Add Perfusion rows (Skin, Pulse) on the right
-                if (hasPerfusion) {
-                  if (hasValue(patient.perfusion?.skin)) {
-                    assessmentRows.push(renderPatientFourColumnRow('', null, 'Skin', patient.perfusion?.skin));
-                  }
-                  if (hasValue(patient.perfusion?.pulse)) {
-                    assessmentRows.push(renderPatientFourColumnRow('', null, 'Pulse', patient.perfusion?.pulse));
-                  }
-                }
-                
-                // Add Lung Sounds header and value
+                // Row 10: C. Lung Sounds (header) | (blank right)
                 if (hasLungSounds) {
-                  assessmentRows.push(`
+                  patientRows.push(`
                     <tr class="sub-section-title-row">
                       <td colspan="2">C. Lung Sounds</td>
                       <td colspan="2"></td>
                     </tr>
                   `);
-                  assessmentRows.push(renderPatientFourColumnRow('', patient.lungSounds, '', null));
+                  // Row 11: (lung sounds value) | (blank right)
+                  patientRows.push(`
+                    <tr>
+                      <th></th>
+                      <td class="value-cell">${patient.lungSounds || ''}</td>
+                      <td colspan="2"></td>
+                    </tr>
+                  `);
                 }
-
-                // Build Vital Signs (4-column: left and right columns)
-                const vitalSignsLeftFields = [
-                  { label: 'Time Taken', value: patient.vitalSigns?.timeTaken },
-                  { label: 'Temperature', value: patient.vitalSigns?.temperature ? `${patient.vitalSigns.temperature}°C` : null },
-                  { label: 'Pulse Rate', value: patient.vitalSigns?.pulseRate ? `${patient.vitalSigns.pulseRate} bpm` : null },
-                  { label: 'Respiratory Rate', value: patient.vitalSigns?.respiratoryRate ? `${patient.vitalSigns.respiratoryRate} breaths/min` : null },
-                ];
                 
-                const vitalSignsRightFields = [
-                  { label: 'Blood Pressure', value: patient.vitalSigns?.bloodPressure ? `${patient.vitalSigns.bloodPressure} mmHg` : null },
-                  { label: 'SPO2', value: patient.vitalSigns?.spo2 ? `${patient.vitalSigns.spo2}%${patient.vitalSigns.spo2WithO2Support ? ' (with O2 support)' : ''}` : null },
-                  { label: 'Random Blood Sugar', value: patient.vitalSigns?.randomBloodSugar ? `${patient.vitalSigns.randomBloodSugar} mg/dL` : null },
-                  { label: 'Pain Scale', value: patient.vitalSigns?.painScale },
-                ];
-                
-                const hasVitalSigns = vitalSignsLeftFields.some(f => hasValue(f.value)) || vitalSignsRightFields.some(f => hasValue(f.value));
-                const vitalSignsRows = [];
+                // Row 12: E. Vital Signs (header) | (blank right)
                 if (hasVitalSigns) {
-                  const maxVitalRows = Math.max(vitalSignsLeftFields.length, vitalSignsRightFields.length);
-                  for (let i = 0; i < maxVitalRows; i++) {
-                    const leftField = vitalSignsLeftFields[i];
-                    const rightField = vitalSignsRightFields[i];
-                    if (leftField || rightField) {
-                      vitalSignsRows.push(renderPatientFourColumnRow(
-                        leftField?.label || '',
-                        leftField?.value || null,
-                        rightField?.label || '',
-                        rightField?.value || null
-                      ));
-                    }
-                  }
+                  patientRows.push(`
+                    <tr class="sub-section-title-row">
+                      <td colspan="2">E. Vital Signs</td>
+                      <td colspan="2"></td>
+                    </tr>
+                  `);
+                  
+                  // Row 13: Time Taken | Blood Pressure
+                  patientRows.push(renderPatientFourColumnRow(
+                    'Time Taken',
+                    patient.vitalSigns?.timeTaken || '',
+                    'Blood Pressure',
+                    patient.vitalSigns?.bloodPressure ? `${patient.vitalSigns.bloodPressure} mmHg` : ''
+                  ));
+                  
+                  // Row 14: Temperature | SPO2
+                  patientRows.push(renderPatientFourColumnRow(
+                    'Temperature',
+                    patient.vitalSigns?.temperature ? `${patient.vitalSigns.temperature}°C` : '',
+                    'SPO2',
+                    patient.vitalSigns?.spo2 ? `${patient.vitalSigns.spo2}%${patient.vitalSigns.spo2WithO2Support ? ' (with O2 support)' : ''}` : ''
+                  ));
+                  
+                  // Row 15: Pulse Rate | Random Blood Sugar
+                  patientRows.push(renderPatientFourColumnRow(
+                    'Pulse Rate',
+                    patient.vitalSigns?.pulseRate ? `${patient.vitalSigns.pulseRate} bpm` : '',
+                    'Random Blood Sugar',
+                    patient.vitalSigns?.randomBloodSugar ? `${patient.vitalSigns.randomBloodSugar} mg/dL` : ''
+                  ));
+                  
+                  // Row 16: Respiratory Rate | Pain Scale
+                  patientRows.push(renderPatientFourColumnRow(
+                    'Respiratory Rate',
+                    patient.vitalSigns?.respiratoryRate ? `${patient.vitalSigns.respiratoryRate} breaths/min` : '',
+                    'Pain Scale',
+                    patient.vitalSigns?.painScale || ''
+                  ));
                 }
 
                 // Only show patient section if there's at least basic info
-                const hasBasicInfo = basicInfoFields.some(f => hasValue(f.value));
+                const hasBasicInfo = hasValue(patient.name) || hasValue(patient.contactNumber) || 
+                                     hasValue(patient.address) || hasValue(patient.age) || 
+                                     hasValue(patient.gender);
                 if (!hasBasicInfo) {
                   return '';
                 }
@@ -1661,14 +1730,7 @@ useEffect(() => {
                     <tr class="patient-header-row">
                       <td colspan="4">Patient ${index + 1}${patient.name ? ` - ${patient.name}` : ''}</td>
                     </tr>
-                    ${basicInfoAndGCSRows.join('')}
-                    ${assessmentRows.join('')}
-                    ${hasVitalSigns ? `
-                      <tr class="sub-section-title-row">
-                        <td colspan="4">E. Vital Signs</td>
-                      </tr>
-                      ${vitalSignsRows.join('')}
-                    ` : ''}
+                    ${patientRows.join('')}
                   </table>
                 `;
               }).filter(section => section !== '').join('')
@@ -1796,7 +1858,7 @@ useEffect(() => {
                   .sections-container {
                     display: flex;
                     gap: 15px;
-                    margin-bottom: 20px;
+                    margin-bottom: 5px;
                   }
                   
                   .sections-container > table:first-child {
@@ -1809,11 +1871,15 @@ useEffect(() => {
                     width: 60%;
                   }
                   
+                  .sections-container table {
+                    margin-bottom: 0;
+                  }
+                  
                   .section-title-row {
                     background: #f97316;
                     color: white;
                     font-weight: bold;
-                    font-size: 11px;
+                    font-size: 13px;
                   }
                   
                   .section-title-row td {
@@ -1846,14 +1912,14 @@ useEffect(() => {
                     border: 1px solid #ddd;
                     text-align: left;
                     font-size: 9px;
-                    vertical-align: top;
+                    vertical-align: middle;
                   }
                   
                   table th {
                     background-color: #f8f9fa;
                     font-weight: 600;
                     width: 30%;
-                    font-size: 11px;
+                    font-size: 9px;
                   }
                   
                   table.four-column th {
@@ -1866,12 +1932,13 @@ useEffect(() => {
                   
                   table.actions-taken {
                     width: 100%;
-                    margin-top: 5px;
+                    margin-top: 0;
+                    margin-bottom: 5px;
                   }
                   
                   table.actions-taken td {
-                    padding: 15px;
-                    min-height: 60px;
+                    padding: 6px;
+                    min-height: 30px;
                   }
                   
                   .value-cell {
@@ -1900,6 +1967,14 @@ useEffect(() => {
                   .sub-section-title-row td {
                     padding: 6px;
                     border: 1px solid #ddd;
+                  }
+                  
+                  .sub-section-title-cell {
+                    background-color: #fef3c7;
+                    font-weight: 600;
+                    color: #92400e;
+                    font-size: 11px;
+                    padding: 6px;
                   }
                   
                   .footer {
@@ -2132,15 +2207,6 @@ useEffect(() => {
                   </table>
                 ` : ''}
                             
-                ${hasPatientInfo ? `
-                              <table>
-                    <tr class="section-title-row">
-                      <td colspan="2">III. Patient Information</td>
-                                </tr>
-                              </table>
-                  ${patientSections}
-                ` : ''}
-                
                 <div class="consent-section">
                   <div class="consent-column">
                     <div class="consent-header">I. Patient's Informed Consent</div>
@@ -2908,6 +2974,22 @@ useEffect(() => {
         }
       };
 
+      // Helper function to format time with AM/PM for PDF
+      const formatTimeForPDF = (timeString: string | null | undefined): string => {
+        if (!timeString) return '';
+        try {
+          const [hours, minutes] = timeString.split(':').map(Number);
+          if (isNaN(hours) || isNaN(minutes)) return timeString;
+          
+          const ampm = hours >= 12 ? 'PM' : 'AM';
+          const displayHours = hours % 12 || 12;
+          const displayMinutes = minutes.toString().padStart(2, '0');
+          return `${displayHours}:${displayMinutes} ${ampm}`;
+        } catch (error) {
+          return timeString;
+        }
+      };
+
       // Generate PDF HTML content
       const generatePDFHTML = () => {
         const report = reportData;
@@ -2952,11 +3034,15 @@ useEffect(() => {
         const dispatchRows = [
           renderFourColumnRow(
             'Received By', dispatch?.receivedBy,
-            'Hospital Arrival', dispatch?.hospitalArrival
+            'Hospital Arrival', dispatch?.hospitalArrival,
+            undefined,
+            formatTimeForPDF
           ),
           renderFourColumnRow(
             'Driver', dispatch?.driverName || dispatch?.driverId,
-            'Returned to OPCEN', dispatch?.returnedToOpcen
+            'Returned to OPCEN', dispatch?.returnedToOpcen,
+            undefined,
+            formatTimeForPDF
           ),
           renderFourColumnRow(
             'Vehicle Used', dispatch?.vehicleName || dispatch?.vehicleId,
@@ -2964,15 +3050,18 @@ useEffect(() => {
           ),
           renderFourColumnRow(
             'Time Call Received', dispatch?.timeCallReceived,
-            'Type of Emergency', dispatch?.typeOfEmergency
+            'Type of Emergency', dispatch?.typeOfEmergency,
+            formatTimeForPDF
           ),
           renderFourColumnRow(
             'Time of Dispatch', dispatch?.timeOfDispatch,
-            'Vehicle Involved', dispatch?.vehicleInvolved
+            'Vehicle Involved', dispatch?.vehicleInvolved,
+            formatTimeForPDF
           ),
           renderFourColumnRow(
             'Time of Arrival', dispatch?.timeOfArrival,
-            'Classification of Injury', dispatch?.injuryClassification
+            'Classification of Injury', dispatch?.injuryClassification,
+            formatTimeForPDF
           ),
           renderFourColumnRow(
             'Response Time',
@@ -3075,17 +3164,6 @@ useEffect(() => {
                 `);
               }
               
-              // Add Pupil Assessment header and value
-              if (hasPupil) {
-                assessmentRows.push(`
-                  <tr class="sub-section-title-row">
-                    <td colspan="2">B. Pupil Assessment</td>
-                    <td colspan="2"></td>
-                  </tr>
-                `);
-                assessmentRows.push(renderPatientFourColumnRow('', patient.pupil, '', null));
-              }
-              
               // Add Perfusion rows (Skin, Pulse) on the right
               if (hasPerfusion) {
                 if (hasValue(patient.perfusion?.skin)) {
@@ -3096,6 +3174,23 @@ useEffect(() => {
                 }
               }
               
+              // Add Pupil Assessment header and value
+              if (hasPupil) {
+                assessmentRows.push(`
+                  <tr class="sub-section-title-row">
+                    <td colspan="2">B. Pupil Assessment</td>
+                    <td colspan="2"></td>
+                  </tr>
+                `);
+                assessmentRows.push(`
+                  <tr>
+                    <th></th>
+                    <td class="value-cell">${patient.pupil || ''}</td>
+                    <td colspan="2"></td>
+                  </tr>
+                `);
+              }
+              
               // Add Lung Sounds header and value
               if (hasLungSounds) {
                 assessmentRows.push(`
@@ -3104,7 +3199,13 @@ useEffect(() => {
                     <td colspan="2"></td>
                   </tr>
                 `);
-                assessmentRows.push(renderPatientFourColumnRow('', patient.lungSounds, '', null));
+                assessmentRows.push(`
+                  <tr>
+                    <th></th>
+                    <td class="value-cell">${patient.lungSounds || ''}</td>
+                    <td colspan="2"></td>
+                  </tr>
+                `);
               }
 
               // Build Vital Signs (4-column: left and right columns)
@@ -3155,7 +3256,8 @@ useEffect(() => {
                   ${assessmentRows.join('')}
                   ${hasVitalSigns ? `
                     <tr class="sub-section-title-row">
-                      <td colspan="4">E. Vital Signs</td>
+                      <td colspan="2">E. Vital Signs</td>
+                      <td colspan="2"></td>
                     </tr>
                     ${vitalSignsRows.join('')}
                   ` : ''}
@@ -3318,7 +3420,7 @@ useEffect(() => {
                 .sections-container {
                   display: flex;
                   gap: 15px;
-                  margin-bottom: 20px;
+                  margin-bottom: 5px;
                 }
                 
                 .sections-container > table:first-child {
@@ -3331,11 +3433,15 @@ useEffect(() => {
                   width: 60%;
                 }
                 
+                .sections-container table {
+                  margin-bottom: 0;
+                }
+                
                 .section-title-row {
                   background: #f97316;
                   color: white;
                   font-weight: bold;
-                  font-size: 11px;
+                  font-size: 13px;
                 }
                 
                 .section-title-row td {
@@ -3368,14 +3474,14 @@ useEffect(() => {
                   border: 1px solid #ddd;
                   text-align: left;
                   font-size: 9px;
-                  vertical-align: top;
+                  vertical-align: middle;
                 }
                 
                 table th {
                   background-color: #f8f9fa;
                   font-weight: 600;
                   width: 30%;
-                  font-size: 11px;
+                  font-size: 9px;
                 }
                 
                 table.four-column th {
@@ -3388,12 +3494,13 @@ useEffect(() => {
                 
                 table.actions-taken {
                   width: 100%;
-                  margin-top: 5px;
+                  margin-top: 0;
+                  margin-bottom: 5px;
                 }
                 
                 table.actions-taken td {
-                  padding: 15px;
-                  min-height: 60px;
+                  padding: 6px;
+                  min-height: 30px;
                 }
                 
                 .value-cell {
@@ -3421,6 +3528,14 @@ useEffect(() => {
                 .sub-section-title-row td {
                   padding: 6px;
                   border: 1px solid #ddd;
+                }
+                
+                .sub-section-title-cell {
+                  background-color: #fef3c7;
+                  font-weight: 600;
+                  color: #92400e;
+                  font-size: 11px;
+                  padding: 6px;
                 }
                 
                 .footer {
@@ -3655,15 +3770,6 @@ useEffect(() => {
                     <td colspan="2" class="value-cell">${actionsTakenContent}</td>
                   </tr>
                 </table>
-              ` : ''}
-              
-              ${hasPatientInfo ? `
-                <table>
-                <tr class="section-title-row">
-                  <td colspan="2">III. Patient Information</td>
-                            </tr>
-                          </table>
-                ${patientSections}
               ` : ''}
               
               <div class="consent-section">
@@ -4355,6 +4461,22 @@ useEffect(() => {
       }
     };
 
+    // Helper function to format time with AM/PM for PDF
+    const formatTimeForPDF = (timeString: string | null | undefined): string => {
+      if (!timeString) return '';
+      try {
+        const [hours, minutes] = timeString.split(':').map(Number);
+        if (isNaN(hours) || isNaN(minutes)) return timeString;
+        
+        const ampm = hours >= 12 ? 'PM' : 'AM';
+        const displayHours = hours % 12 || 12;
+        const displayMinutes = minutes.toString().padStart(2, '0');
+        return `${displayHours}:${displayMinutes} ${ampm}`;
+      } catch (error) {
+        return timeString;
+      }
+    };
+
     // Create comprehensive HTML template
     const generateHTML = () => {
       const report = selectedReport;
@@ -4397,11 +4519,15 @@ useEffect(() => {
       const dispatchRows = [
         renderFourColumnRow(
           'Received By', dispatch?.receivedBy,
-          'Hospital Arrival', dispatch?.hospitalArrival
+          'Hospital Arrival', dispatch?.hospitalArrival,
+          undefined,
+          formatTimeForPDF
         ),
         renderFourColumnRow(
           'Driver', dispatch?.driverName || dispatch?.driverId,
-          'Returned to OPCEN', dispatch?.returnedToOpcen
+          'Returned to OPCEN', dispatch?.returnedToOpcen,
+          undefined,
+          formatTimeForPDF
         ),
         renderFourColumnRow(
           'Vehicle Used', dispatch?.vehicleName || dispatch?.vehicleId,
@@ -4409,15 +4535,18 @@ useEffect(() => {
         ),
         renderFourColumnRow(
           'Time Call Received', dispatch?.timeCallReceived,
-          'Type of Emergency', dispatch?.typeOfEmergency
+          'Type of Emergency', dispatch?.typeOfEmergency,
+          formatTimeForPDF
         ),
         renderFourColumnRow(
           'Time of Dispatch', dispatch?.timeOfDispatch,
-          'Vehicle Involved', dispatch?.vehicleInvolved
+          'Vehicle Involved', dispatch?.vehicleInvolved,
+          formatTimeForPDF
         ),
         renderFourColumnRow(
           'Time of Arrival', dispatch?.timeOfArrival,
-          'Classification of Injury', dispatch?.injuryClassification
+          'Classification of Injury', dispatch?.injuryClassification,
+          formatTimeForPDF
         ),
         renderFourColumnRow(
           'Response Time',
@@ -4520,17 +4649,6 @@ useEffect(() => {
               `);
             }
             
-            // Add Pupil Assessment header and value
-            if (hasPupil) {
-              assessmentRows.push(`
-                <tr class="sub-section-title-row">
-                  <td colspan="2">B. Pupil Assessment</td>
-                  <td colspan="2"></td>
-                </tr>
-              `);
-              assessmentRows.push(renderPatientFourColumnRow('', patient.pupil, '', null));
-            }
-            
             // Add Perfusion rows (Skin, Pulse) on the right
             if (hasPerfusion) {
               if (hasValue(patient.perfusion?.skin)) {
@@ -4541,6 +4659,23 @@ useEffect(() => {
               }
             }
             
+            // Add Pupil Assessment header and value
+            if (hasPupil) {
+              assessmentRows.push(`
+                <tr class="sub-section-title-row">
+                  <td colspan="2">B. Pupil Assessment</td>
+                  <td colspan="2"></td>
+                </tr>
+              `);
+              assessmentRows.push(`
+                <tr>
+                  <th></th>
+                  <td class="value-cell">${patient.pupil || ''}</td>
+                  <td colspan="2"></td>
+                </tr>
+              `);
+            }
+            
             // Add Lung Sounds header and value
             if (hasLungSounds) {
               assessmentRows.push(`
@@ -4549,7 +4684,13 @@ useEffect(() => {
                   <td colspan="2"></td>
                 </tr>
               `);
-              assessmentRows.push(renderPatientFourColumnRow('', patient.lungSounds, '', null));
+              assessmentRows.push(`
+                <tr>
+                  <th></th>
+                  <td class="value-cell">${patient.lungSounds || ''}</td>
+                  <td colspan="2"></td>
+                </tr>
+              `);
             }
 
             // Build Vital Signs (4-column: left and right columns)
@@ -4600,7 +4741,8 @@ useEffect(() => {
                 ${assessmentRows.join('')}
                 ${hasVitalSigns ? `
                   <tr class="sub-section-title-row">
-                    <td colspan="4">E. Vital Signs</td>
+                    <td colspan="2">E. Vital Signs</td>
+                    <td colspan="2"></td>
                   </tr>
                   ${vitalSignsRows.join('')}
                 ` : ''}
@@ -4737,7 +4879,7 @@ useEffect(() => {
               .sections-container {
                 display: flex;
                 gap: 15px;
-                margin-bottom: 20px;
+                margin-bottom: 5px;
               }
               
               .sections-container > table:first-child {
@@ -4750,11 +4892,15 @@ useEffect(() => {
                 width: 60%;
               }
               
+              .sections-container table {
+                margin-bottom: 0;
+              }
+              
               .section-title-row {
                 background: #f97316;
                 color: white;
                 font-weight: bold;
-                font-size: 11px;
+                font-size: 13px;
               }
               
               .section-title-row td {
@@ -4773,14 +4919,14 @@ useEffect(() => {
                 border: 1px solid #ddd;
                 text-align: left;
                 font-size: 9px;
-                vertical-align: top;
+                vertical-align: middle;
               }
               
               table th {
                 background-color: #f8f9fa;
                 font-weight: 600;
                 width: 30%;
-                font-size: 11px;
+                font-size: 9px;
               }
               
               table.four-column th {
@@ -4793,12 +4939,13 @@ useEffect(() => {
               
               table.actions-taken {
                 width: 100%;
-                margin-top: 5px;
+                margin-top: 0;
+                margin-bottom: 5px;
               }
               
               table.actions-taken td {
-                padding: 15px;
-                min-height: 60px;
+                padding: 6px;
+                min-height: 30px;
               }
               
               .value-cell {
@@ -4826,6 +4973,14 @@ useEffect(() => {
               .sub-section-title-row td {
                 padding: 6px;
                 border: 1px solid #ddd;
+              }
+              
+              .sub-section-title-cell {
+                background-color: #fef3c7;
+                font-weight: 600;
+                color: #92400e;
+                font-size: 11px;
+                padding: 6px;
               }
               
               .grid {
@@ -4889,15 +5044,6 @@ useEffect(() => {
               </table>
             ` : ''}
                         
-            ${hasPatientInfo ? `
-                          <table>
-                <tr class="section-title-row">
-                  <td colspan="2">III. Patient Information</td>
-                            </tr>
-                          </table>
-              ${patientSections}
-            ` : ''}
-            
           </body>
         </html>
       `;
@@ -5058,6 +5204,22 @@ useEffect(() => {
     const hours = now.getHours().toString().padStart(2, '0');
     const minutes = now.getMinutes().toString().padStart(2, '0');
     return `${hours}:${minutes}`;
+  };
+
+  // Helper function to convert 24-hour time format (HH:MM) to 12-hour format with AM/PM
+  const formatTimeWithAMPM = (timeString: string | null | undefined): string => {
+    if (!timeString) return "Not specified";
+    try {
+      const [hours, minutes] = timeString.split(':').map(Number);
+      if (isNaN(hours) || isNaN(minutes)) return timeString;
+      
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      const displayHours = hours % 12 || 12; // Convert to 12-hour format
+      const displayMinutes = minutes.toString().padStart(2, '0');
+      return `${displayHours}:${displayMinutes} ${ampm}`;
+    } catch (error) {
+      return timeString; // Return original if parsing fails
+    }
   };
 
 
@@ -6542,20 +6704,20 @@ useEffect(() => {
                       </TableCell>
                       <TableCell>
                         {report.reportedBy ? (
-                          <>
+                          <div className="flex flex-col gap-1">
                             <button
                               type="button"
-                              className="text-gray-900 hover:underline focus:outline-none flex items-center gap-1"
+                              className="text-gray-900 hover:underline focus:outline-none flex items-start gap-1.5 group text-left w-fit max-w-full"
                               onClick={() => navigate("/manage-users", { state: { tab: "residents", search: report.reportedBy } })}
                               title="View Resident Account"
                             >
-                              {report.reportedBy}
-                              <ArrowUpRight className="h-3 w-3" />
+                              <span className="break-words">{report.reportedBy}</span>
+                              <ArrowUpRight className="h-3 w-3 flex-shrink-0 mt-0.5" />
                             </button>
                             {report.mobileNumber && (
-                              <span className="text-xs text-gray-500 block -mt-1">{report.mobileNumber}</span>
+                              <span className="text-xs text-gray-500">{report.mobileNumber}</span>
                             )}
-                          </>
+                          </div>
                         ) : (
                           <span className="text-gray-400 italic">Not specified</span>
                         )}
@@ -7522,12 +7684,12 @@ useEffect(() => {
                           selectedReport?.reportedBy ? (
                             <button
                               type="button"
-                              className="text-sm text-gray-900 hover:underline focus:outline-none flex items-center gap-1"
+                              className="text-sm text-gray-900 hover:underline focus:outline-none flex items-start gap-1.5 group text-left w-fit max-w-full"
                               onClick={() => navigate("/manage-users", { state: { tab: "residents", search: selectedReport?.reportedBy } })}
                               title="View Resident Account"
                             >
-                              {selectedReport?.reportedBy}
-                              <ArrowUpRight className="h-3 w-3" />
+                              <span className="break-words">{selectedReport?.reportedBy}</span>
+                              <ArrowUpRight className="h-3 w-3 flex-shrink-0 mt-0.5" />
                             </button>
                           ) : (
                             <span className="text-sm text-gray-400 italic">Not specified</span>
@@ -8376,7 +8538,7 @@ useEffect(() => {
                         <TableRow>
                           <TableCell className="font-medium text-gray-700 align-top w-1/3 min-w-[150px]">Time Call Received</TableCell>
                           <TableCell>
-                            <span className="text-sm">{dispatchData.timeCallReceived || getCurrentTime()}</span>
+                            <span className="text-sm">{formatTimeWithAMPM(dispatchData.timeCallReceived || getCurrentTime24Hour())}</span>
                           </TableCell>
                         </TableRow>
                         <TableRow>
@@ -8408,7 +8570,7 @@ useEffect(() => {
                                 </Tooltip>
                               </div>
                             ) : (
-                              <span className="text-sm">{dispatchData.timeOfDispatch || "Not specified"}</span>
+                              <span className="text-sm">{formatTimeWithAMPM(dispatchData.timeOfDispatch)}</span>
                             )}
                           </TableCell>
                         </TableRow>
@@ -8441,7 +8603,7 @@ useEffect(() => {
                                 </Tooltip>
                               </div>
                             ) : (
-                              <span className="text-sm">{dispatchData.timeOfArrival || "Not specified"}</span>
+                              <span className="text-sm">{formatTimeWithAMPM(dispatchData.timeOfArrival)}</span>
                             )}
                           </TableCell>
                         </TableRow>
@@ -8491,7 +8653,7 @@ useEffect(() => {
                                 </Tooltip>
                               </div>
                             ) : (
-                              <span className="text-sm">{dispatchData.hospitalArrival || "Not specified"}</span>
+                              <span className="text-sm">{formatTimeWithAMPM(dispatchData.hospitalArrival)}</span>
                             )}
                           </TableCell>
                         </TableRow>
@@ -8524,7 +8686,7 @@ useEffect(() => {
                                 </Tooltip>
                               </div>
                             ) : (
-                              <span className="text-sm">{dispatchData.returnedToOpcen || "Not specified"}</span>
+                              <span className="text-sm">{formatTimeWithAMPM(dispatchData.returnedToOpcen)}</span>
                             )}
                           </TableCell>
                         </TableRow>
@@ -9779,9 +9941,9 @@ useEffect(() => {
                             </Select>
                           ) : (
                             currentPatient.religion ? (
-                              <Badge className="text-sm bg-gray-100 text-gray-800 hover:bg-gray-50">
+                              <span className="text-sm text-gray-800">
                                 {currentPatient.religion}
-                              </Badge>
+                              </span>
                             ) : (
                               <span className="text-sm text-gray-400 italic">Not specified</span>
                             )
@@ -9895,9 +10057,9 @@ useEffect(() => {
                             </Select>
                           ) : (
                             currentPatient.civilStatus ? (
-                              <Badge className="text-sm bg-gray-100 text-gray-800 hover:bg-gray-50">
+                              <span className="text-sm text-gray-800">
                                 {currentPatient.civilStatus}
-                              </Badge>
+                              </span>
                             ) : (
                               <span className="text-sm text-gray-400 italic">Not specified</span>
                             )
@@ -9983,11 +10145,11 @@ useEffect(() => {
                             </Select>
                           ) : (
                             currentPatient.ageGroup ? (
-                              <Badge className="bg-gray-100 text-gray-800 hover:bg-gray-50">
+                              <span className="text-sm text-gray-800">
                                 {currentPatient.ageGroup}
-                              </Badge>
+                              </span>
                             ) : (
-                              <span className="text-gray-400 italic">Not specified</span>
+                              <span className="text-sm text-gray-400 italic">Not specified</span>
                             )
                           )}
                           </TableCell>
@@ -10009,11 +10171,11 @@ useEffect(() => {
                             </Select>
                           ) : (
                             currentPatient.gender ? (
-                              <Badge className="bg-gray-100 text-gray-800 hover:bg-gray-50">
+                              <span className="text-sm text-gray-800">
                                 {currentPatient.gender}
-                              </Badge>
+                              </span>
                             ) : (
-                              <span className="text-gray-400 italic">Not specified</span>
+                              <span className="text-sm text-gray-400 italic">Not specified</span>
                             )
                           )}
                           </TableCell>
