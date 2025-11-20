@@ -2399,13 +2399,13 @@ export function ManageUsersPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-[50px]">
+                        <TableHead className="w-[50px] text-left">
                           <Checkbox
                             checked={selectedAdmins.length === adminUsers.length && adminUsers.length > 0}
                             onCheckedChange={handleSelectAllAdmins}
                           />
                         </TableHead>
-                        <TableHead>
+                        <TableHead className="text-left">
                           <button
                             type="button"
                             className="flex items-center gap-2 hover:text-brand-orange transition-colors"
@@ -2421,7 +2421,7 @@ export function ManageUsersPage() {
                             )}
                           </button>
                         </TableHead>
-                        <TableHead>
+                        <TableHead className="text-left">
                           <button
                             type="button"
                             className="flex items-center gap-2 hover:text-brand-orange transition-colors"
@@ -2437,8 +2437,8 @@ export function ManageUsersPage() {
                             )}
                           </button>
                         </TableHead>
-                        <TableHead>Position</TableHead>
-                        <TableHead>
+                        <TableHead className="text-left">Position</TableHead>
+                        <TableHead className="text-left">
                           <button
                             type="button"
                             className="flex items-center gap-2 hover:text-brand-orange transition-colors"
@@ -2454,7 +2454,7 @@ export function ManageUsersPage() {
                             )}
                           </button>
                         </TableHead>
-                        <TableHead>
+                        <TableHead className="text-left">
                           <div className="flex items-center gap-1">
                             Password
                             <Button
@@ -2469,7 +2469,7 @@ export function ManageUsersPage() {
                             </Button>
                           </div>
                         </TableHead>
-                        <TableHead>
+                        <TableHead className="text-left">
                           <button
                             type="button"
                             className="flex items-center gap-2 hover:text-brand-orange transition-colors"
@@ -2485,7 +2485,7 @@ export function ManageUsersPage() {
                             )}
                           </button>
                         </TableHead>
-                        <TableHead>Actions</TableHead>
+                        <TableHead className="text-left">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -3657,13 +3657,13 @@ export function ManageUsersPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-[50px]">
+                        <TableHead className="w-[50px] text-left">
                           <Checkbox
                             checked={selectedResidents.length === residents.length && residents.length > 0}
                             onCheckedChange={handleSelectAllResidents}
                           />
                         </TableHead>
-                        <TableHead>
+                        <TableHead className="text-left">
                           <button
                             type="button"
                             className="flex items-center gap-2 hover:text-brand-orange transition-colors"
@@ -3679,7 +3679,7 @@ export function ManageUsersPage() {
                             )}
                           </button>
                         </TableHead>
-                        <TableHead>
+                        <TableHead className="text-left">
                           <button
                             type="button"
                             className="flex items-center gap-2 hover:text-brand-orange transition-colors"
@@ -3695,8 +3695,8 @@ export function ManageUsersPage() {
                             )}
                           </button>
                         </TableHead>
-                        <TableHead>Mobile Number</TableHead>
-                        <TableHead>
+                        <TableHead className="text-left">Mobile Number</TableHead>
+                        <TableHead className="text-left">
                           <button
                             type="button"
                             className="flex items-center gap-2 hover:text-brand-orange transition-colors"
@@ -3712,7 +3712,7 @@ export function ManageUsersPage() {
                             )}
                           </button>
                         </TableHead>
-                        <TableHead>
+                        <TableHead className="text-left">
                           <button
                             type="button"
                             className="flex items-center gap-2 hover:text-brand-orange transition-colors"
@@ -3728,7 +3728,7 @@ export function ManageUsersPage() {
                             )}
                           </button>
                         </TableHead>
-                        <TableHead>
+                        <TableHead className="text-left">
                           <button
                             type="button"
                             className="flex items-center gap-2 hover:text-brand-orange transition-colors"
@@ -3744,7 +3744,7 @@ export function ManageUsersPage() {
                             )}
                           </button>
                         </TableHead>
-                        <TableHead>Actions</TableHead>
+                        <TableHead className="text-left">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -4909,10 +4909,10 @@ export function ManageUsersPage() {
                       <Table>
                         <TableHeader>
                           <TableRow>
-                            <TableHead>RID</TableHead>
-                            <TableHead>Type</TableHead>
-                            <TableHead>Date Submitted</TableHead>
-                            <TableHead>Status</TableHead>
+                            <TableHead className="text-left">RID</TableHead>
+                            <TableHead className="text-left">Type</TableHead>
+                            <TableHead className="text-left">Date Submitted</TableHead>
+                            <TableHead className="text-left">Status</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>

@@ -938,7 +938,7 @@ export function AnnouncementsPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-12">
+                    <TableHead className="w-12 text-left">
                       <Checkbox
                         checked={isAllSelected}
                         onCheckedChange={handleSelectAll}
@@ -950,10 +950,10 @@ export function AnnouncementsPage() {
                         }}
                       />
                     </TableHead>
-                    <TableHead>Announcement Type</TableHead>
-                    <TableHead>Description</TableHead>
-                    <TableHead>Priority</TableHead>
-                    <TableHead className="cursor-pointer select-none" onClick={() => setSortOrder(o => o === 'desc' ? 'asc' : 'desc')}>
+                    <TableHead className="text-left">Announcement Type</TableHead>
+                    <TableHead className="text-left">Description</TableHead>
+                    <TableHead className="text-left">Priority</TableHead>
+                    <TableHead className="cursor-pointer select-none text-left" onClick={() => setSortOrder(o => o === 'desc' ? 'asc' : 'desc')}>
                       <div className="flex items-center gap-1">
                         Created Date
                         {sortOrder === 'desc' ? (
@@ -963,7 +963,7 @@ export function AnnouncementsPage() {
                         )}
                       </div>
                     </TableHead>
-                    <TableHead>Actions</TableHead>
+                    <TableHead className="text-left">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>

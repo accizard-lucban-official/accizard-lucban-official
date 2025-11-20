@@ -761,7 +761,7 @@ export function SystemLogsPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[50px]">
+                    <TableHead className="w-[50px] text-left">
                       {isSuperAdmin() && (
                         <Checkbox
                           checked={selectedLogs.length === pagedActivityLogs.length && pagedActivityLogs.length > 0}
@@ -769,17 +769,17 @@ export function SystemLogsPage() {
                         />
                       )}
                     </TableHead>
-                    <TableHead>Log ID</TableHead>
-                    <TableHead>User</TableHead>
-                    <TableHead>Role</TableHead>
-                    <TableHead className="cursor-pointer hover:bg-gray-50" onClick={handleActivitySort}>
+                    <TableHead className="text-left">Log ID</TableHead>
+                    <TableHead className="text-left">User</TableHead>
+                    <TableHead className="text-left">Role</TableHead>
+                    <TableHead className="cursor-pointer hover:bg-gray-50 text-left" onClick={handleActivitySort}>
                       <div className="flex items-center gap-1">
                         Created Date
                         {activitySortDirection === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                       </div>
                     </TableHead>
-                    <TableHead className="w-[200px] max-w-[200px]">Log Message</TableHead>
-                    {isSuperAdmin() && <TableHead>Actions</TableHead>}
+                    <TableHead className="w-[200px] max-w-[200px] text-left">Log Message</TableHead>
+                    {isSuperAdmin() && <TableHead className="text-left">Actions</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>

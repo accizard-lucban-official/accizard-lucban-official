@@ -1629,7 +1629,7 @@ useEffect(() => {
                   'Gender',
                   patient.gender || '',
                   hasVitalSigns ? 'Time Taken' : '',
-                  hasVitalSigns ? patient.vitalSigns?.timeTaken || '' : ''
+                  hasVitalSigns ? formatTimeForPDF(patient.vitalSigns?.timeTaken) : ''
                 ));
                 
                 // Row 8: A. Glasgow Coma Scale header (left, light orange, spans 2 columns) | Temperature (right)
@@ -1879,15 +1879,19 @@ useEffect(() => {
                   }
                   
                   .section-title-row {
-                    background: #f97316;
-                    color: white;
-                    font-weight: bold;
-                    font-size: 13px;
+                    background: #f97316 !important;
+                    color: white !important;
+                    font-weight: bold !important;
+                    font-size: 12px !important;
+                    line-height: 1.5 !important;
                   }
                   
                   .section-title-row td {
-                    padding: 0;
+                    padding: 6px 8px !important;
                     border: 1px solid #ddd;
+                    font-size: 12px !important;
+                    font-weight: bold !important;
+                    color: white !important;
                   }
                   
                   table {
@@ -1933,14 +1937,18 @@ useEffect(() => {
                     width: 30%;
                   }
                   
-                  /* Make left side columns narrower for dispatch form */
+                  /* Column 1 and Column 3 have the same width (smaller) */
                   table.four-column th:nth-child(1),
-                  table.four-column td:nth-child(2) {
+                  table.four-column td:nth-child(1),
+                  table.four-column th:nth-child(3),
+                  table.four-column td:nth-child(3) {
                     width: 18%;
                   }
                   
-                  /* Make right side columns wider for dispatch form */
-                  table.four-column th:nth-child(3),
+                  /* Column 2 and Column 4 have the same width (larger) */
+                  table.four-column th:nth-child(2),
+                  table.four-column td:nth-child(2),
+                  table.four-column th:nth-child(4),
                   table.four-column td:nth-child(4) {
                     width: 32%;
                   }
@@ -2290,18 +2298,14 @@ useEffect(() => {
                         <div class="footer-signature-label">ACCOMPLISHED BY:</div>
                         <div class="footer-signature-line-short"></div>
                       </div>
-                      <div class="footer-signature-name">
-                        <div class="footer-signature-name-text">${adminName}</div>
-                      </div>
-                      <div class="footer-signature-note">(Name and Signature)</div>
+                      <div class="footer-signature-note" style="margin-top: 8px;">(Name and Signature)</div>
               </div>
                     <div class="footer-signature-column">
                       <div style="display: flex; align-items: flex-end; width: 100%; margin-bottom: 0;">
                         <div class="footer-signature-label">ENDORSED TO:</div>
                         <div class="footer-signature-line-short"></div>
                       </div>
-                      <div class="footer-signature-line"></div>
-                      <div class="footer-signature-note">(Name and Signature)</div>
+                      <div class="footer-signature-note" style="margin-top: 8px;">(Name and Signature)</div>
                     </div>
                   </div>
                   
@@ -2327,7 +2331,7 @@ useEffect(() => {
                     </div>
                   </div>
                   
-                  <div class="footer-reviewed">
+                  <div class="footer-reviewed" style="margin-bottom: 30px;">
                     <div style="display: flex; align-items: flex-end; width: 100%;">
                       <span style="white-space: nowrap;">REVIEWED BY:</span>
                       <div class="footer-reviewed-line"></div>
@@ -2456,22 +2460,55 @@ useEffect(() => {
           const contentHeight = pageHeight - (margin * 2); // 271.6mm per page
           const imgWidth = contentWidth;
           const imgHeight = (canvas.height * imgWidth) / canvas.width;
-          let heightLeft = imgHeight;
           
-          // First page - show from top
-          pdf.addImage(imgData, 'PNG', margin, margin, imgWidth, imgHeight);
-          heightLeft -= contentHeight;
+          // Calculate pixels per mm for height
+          const pixelsPerMm = canvas.height / imgHeight;
+          const contentHeightPx = contentHeight * pixelsPerMm;
           
-          // Additional pages - shift image up to show next portion
-          let pageNumber = 1;
-          while (heightLeft >= 0) {
-            // Position the image so the next portion is visible
-            // Each page shows contentHeight worth of the image
-            const position = margin - (pageNumber * contentHeight);
-            pdf.addPage();
-            pdf.addImage(imgData, 'PNG', margin, position, imgWidth, imgHeight);
-            heightLeft -= contentHeight;
-            pageNumber++;
+          // Estimate header height (header + title + date-time) - approximately 140px at scale 2
+          // This includes: header (90px logo + margins) + title (15px) + date-time (20px) + spacing
+          const headerHeightPx = 140 * 2; // Scale 2, so multiply by 2
+          const headerHeightMm = headerHeightPx / pixelsPerMm;
+          const contentAreaHeightPx = contentHeightPx - headerHeightPx;
+          
+          // Extract header portion from canvas
+          const headerCanvas = document.createElement('canvas');
+          headerCanvas.width = canvas.width;
+          headerCanvas.height = Math.min(headerHeightPx, canvas.height);
+          const headerCtx = headerCanvas.getContext('2d');
+          if (headerCtx) {
+            headerCtx.drawImage(canvas, 0, 0, canvas.width, headerCanvas.height, 0, 0, canvas.width, headerCanvas.height);
+          }
+          
+          // First page - extract and add top portion (includes header)
+          const firstPageCanvas = document.createElement('canvas');
+          firstPageCanvas.width = canvas.width;
+          firstPageCanvas.height = Math.min(canvas.height, contentHeightPx);
+          const firstPageCtx = firstPageCanvas.getContext('2d');
+          if (firstPageCtx) {
+            firstPageCtx.drawImage(canvas, 0, 0, canvas.width, firstPageCanvas.height, 0, 0, canvas.width, firstPageCanvas.height);
+            const firstPageImgData = firstPageCanvas.toDataURL('image/png');
+            pdf.addImage(firstPageImgData, 'PNG', margin, margin, imgWidth, firstPageCanvas.height / pixelsPerMm);
+          }
+          
+          // Additional pages - combine header with content portions
+          let yOffset = firstPageCanvas.height;
+          while (yOffset < canvas.height) {
+            const pageCanvas = document.createElement('canvas');
+            const contentPortionHeight = Math.min(contentAreaHeightPx, canvas.height - yOffset);
+            pageCanvas.width = canvas.width;
+            pageCanvas.height = headerHeightPx + contentPortionHeight;
+            const pageCtx = pageCanvas.getContext('2d');
+            if (pageCtx) {
+              // Draw header at top
+              pageCtx.drawImage(headerCanvas, 0, 0, canvas.width, headerCanvas.height, 0, 0, canvas.width, headerCanvas.height);
+              // Draw content portion below header
+              pageCtx.drawImage(canvas, 0, yOffset, canvas.width, contentPortionHeight, 0, headerCanvas.height, canvas.width, contentPortionHeight);
+              const pageImgData = pageCanvas.toDataURL('image/png');
+              pdf.addPage();
+              pdf.addImage(pageImgData, 'PNG', margin, margin, imgWidth, (headerHeightPx + contentPortionHeight) / pixelsPerMm);
+            }
+            yOffset += contentPortionHeight;
           }
           
           pdf.save(`Report_${reportToDeleteData.id}_${new Date().getTime()}.pdf`);
@@ -3226,7 +3263,7 @@ useEffect(() => {
                 'Gender',
                 patient.gender || '',
                 hasVitalSigns ? 'Time Taken' : '',
-                hasVitalSigns ? patient.vitalSigns?.timeTaken || '' : ''
+                hasVitalSigns ? formatTimeForPDF(patient.vitalSigns?.timeTaken) : ''
               ));
               
               // Row 8: A. Glasgow Coma Scale header (left, light orange, spans 2 columns) | Temperature (right)
@@ -3487,15 +3524,19 @@ useEffect(() => {
                 }
                 
                 .section-title-row {
-                  background: #f97316;
-                  color: white;
-                  font-weight: bold;
-                  font-size: 13px;
+                  background: #f97316 !important;
+                  color: white !important;
+                  font-weight: bold !important;
+                  font-size: 12px !important;
+                  line-height: 1.5 !important;
                 }
                 
                 .section-title-row td {
-                  padding: 4px 6px;
+                  padding: 6px 8px !important;
                   border: 1px solid #ddd;
+                  font-size: 12px !important;
+                  font-weight: bold !important;
+                  color: white !important;
                 }
                 
                 table {
@@ -3541,14 +3582,18 @@ useEffect(() => {
                   width: 30%;
                 }
                 
-                /* Make left side columns narrower for dispatch form */
+                /* Column 1 and Column 3 have the same width (smaller) */
                 table.four-column th:nth-child(1),
-                table.four-column td:nth-child(2) {
+                table.four-column td:nth-child(1),
+                table.four-column th:nth-child(3),
+                table.four-column td:nth-child(3) {
                   width: 18%;
                 }
                 
-                /* Make right side columns wider for dispatch form */
-                table.four-column th:nth-child(3),
+                /* Column 2 and Column 4 have the same width (larger) */
+                table.four-column th:nth-child(2),
+                table.four-column td:nth-child(2),
+                table.four-column th:nth-child(4),
                 table.four-column td:nth-child(4) {
                   width: 32%;
                 }
@@ -3901,18 +3946,14 @@ useEffect(() => {
                         <div class="footer-signature-label">ACCOMPLISHED BY:</div>
                         <div class="footer-signature-line-short"></div>
                       </div>
-                      <div class="footer-signature-name">
-                        <div class="footer-signature-name-text">${adminName}</div>
-                      </div>
-                      <div class="footer-signature-note">(Name and Signature)</div>
+                      <div class="footer-signature-note" style="margin-top: 8px;">(Name and Signature)</div>
                     </div>
                     <div class="footer-signature-column">
                       <div style="display: flex; align-items: flex-end; width: 100%; margin-bottom: 0;">
                         <div class="footer-signature-label">ENDORSED TO:</div>
                         <div class="footer-signature-line-short"></div>
                       </div>
-                      <div class="footer-signature-line"></div>
-                      <div class="footer-signature-note">(Name and Signature)</div>
+                      <div class="footer-signature-note" style="margin-top: 8px;">(Name and Signature)</div>
                     </div>
                   </div>
                   
@@ -3938,7 +3979,7 @@ useEffect(() => {
                     </div>
                   </div>
                   
-                  <div class="footer-reviewed">
+                  <div class="footer-reviewed" style="margin-bottom: 30px;">
                     <div style="display: flex; align-items: flex-end; width: 100%;">
                       <span style="white-space: nowrap;">REVIEWED BY:</span>
                       <div class="footer-reviewed-line"></div>
@@ -4067,22 +4108,55 @@ useEffect(() => {
         const contentHeight = pageHeight - (margin * 2); // 271.6mm per page
         const imgWidth = contentWidth;
         const imgHeight = (canvas.height * imgWidth) / canvas.width;
-        let heightLeft = imgHeight;
         
-        // First page - show from top
-        pdf.addImage(imgData, 'PNG', margin, margin, imgWidth, imgHeight);
-        heightLeft -= contentHeight;
+        // Calculate pixels per mm for height
+        const pixelsPerMm = canvas.height / imgHeight;
+        const contentHeightPx = contentHeight * pixelsPerMm;
         
-        // Additional pages - shift image up to show next portion
-        let pageNumber = 1;
-        while (heightLeft >= 0) {
-          // Position the image so the next portion is visible
-          // Each page shows contentHeight worth of the image
-          const position = margin - (pageNumber * contentHeight);
-          pdf.addPage();
-          pdf.addImage(imgData, 'PNG', margin, position, imgWidth, imgHeight);
-          heightLeft -= contentHeight;
-          pageNumber++;
+        // Estimate header height (header + title + date-time) - approximately 140px at scale 2
+        // This includes: header (90px logo + margins) + title (15px) + date-time (20px) + spacing
+        const headerHeightPx = 140 * 2; // Scale 2, so multiply by 2
+        const headerHeightMm = headerHeightPx / pixelsPerMm;
+        const contentAreaHeightPx = contentHeightPx - headerHeightPx;
+        
+        // Extract header portion from canvas
+        const headerCanvas = document.createElement('canvas');
+        headerCanvas.width = canvas.width;
+        headerCanvas.height = Math.min(headerHeightPx, canvas.height);
+        const headerCtx = headerCanvas.getContext('2d');
+        if (headerCtx) {
+          headerCtx.drawImage(canvas, 0, 0, canvas.width, headerCanvas.height, 0, 0, canvas.width, headerCanvas.height);
+        }
+        
+        // First page - extract and add top portion (includes header)
+        const firstPageCanvas = document.createElement('canvas');
+        firstPageCanvas.width = canvas.width;
+        firstPageCanvas.height = Math.min(canvas.height, contentHeightPx);
+        const firstPageCtx = firstPageCanvas.getContext('2d');
+        if (firstPageCtx) {
+          firstPageCtx.drawImage(canvas, 0, 0, canvas.width, firstPageCanvas.height, 0, 0, canvas.width, firstPageCanvas.height);
+          const firstPageImgData = firstPageCanvas.toDataURL('image/png');
+          pdf.addImage(firstPageImgData, 'PNG', margin, margin, imgWidth, firstPageCanvas.height / pixelsPerMm);
+        }
+        
+        // Additional pages - combine header with content portions
+        let yOffset = firstPageCanvas.height;
+        while (yOffset < canvas.height) {
+          const pageCanvas = document.createElement('canvas');
+          const contentPortionHeight = Math.min(contentAreaHeightPx, canvas.height - yOffset);
+          pageCanvas.width = canvas.width;
+          pageCanvas.height = headerHeightPx + contentPortionHeight;
+          const pageCtx = pageCanvas.getContext('2d');
+          if (pageCtx) {
+            // Draw header at top
+            pageCtx.drawImage(headerCanvas, 0, 0, canvas.width, headerCanvas.height, 0, 0, canvas.width, headerCanvas.height);
+            // Draw content portion below header
+            pageCtx.drawImage(canvas, 0, yOffset, canvas.width, contentPortionHeight, 0, headerCanvas.height, canvas.width, contentPortionHeight);
+            const pageImgData = pageCanvas.toDataURL('image/png');
+            pdf.addPage();
+            pdf.addImage(pageImgData, 'PNG', margin, margin, imgWidth, (headerHeightPx + contentPortionHeight) / pixelsPerMm);
+          }
+          yOffset += contentPortionHeight;
         }
         
         // Get PDF as blob
@@ -4757,7 +4831,7 @@ useEffect(() => {
               'Gender',
               patient.gender || '',
               hasVitalSigns ? 'Time Taken' : '',
-              hasVitalSigns ? patient.vitalSigns?.timeTaken || '' : ''
+              hasVitalSigns ? formatTimeForPDF(patient.vitalSigns?.timeTaken) : ''
             ));
             
             // Row 8: A. Glasgow Coma Scale header (left, light orange, spans 2 columns) | Temperature (right)
@@ -5013,15 +5087,19 @@ useEffect(() => {
               }
               
               .section-title-row {
-                background: #f97316;
-                color: white;
-                font-weight: bold;
-                font-size: 13px;
+                background: #f97316 !important;
+                color: white !important;
+                font-weight: bold !important;
+                font-size: 12px !important;
+                line-height: 1.5 !important;
               }
               
               .section-title-row td {
-                padding: 0;
+                padding: 6px 8px !important;
                 border: 1px solid #ddd;
+                font-size: 12px !important;
+                font-weight: bold !important;
+                color: white !important;
               }
               
               table {
@@ -5053,14 +5131,18 @@ useEffect(() => {
                 width: 30%;
               }
               
-              /* Make left side columns narrower for dispatch form */
+              /* Column 1 and Column 3 have the same width (smaller) */
               table.four-column th:nth-child(1),
-              table.four-column td:nth-child(2) {
+              table.four-column td:nth-child(1),
+              table.four-column th:nth-child(3),
+              table.four-column td:nth-child(3) {
                 width: 18%;
               }
               
-              /* Make right side columns wider for dispatch form */
-              table.four-column th:nth-child(3),
+              /* Column 2 and Column 4 have the same width (larger) */
+              table.four-column th:nth-child(2),
+              table.four-column td:nth-child(2),
+              table.four-column th:nth-child(4),
               table.four-column td:nth-child(4) {
                 width: 32%;
               }
@@ -6717,13 +6799,13 @@ useEffect(() => {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-12">
+                    <TableHead className="w-12 text-left">
                       <Checkbox
                         checked={paginatedReports.length > 0 && paginatedReports.every(report => selectedReports.includes(report.firestoreId))}
                         onCheckedChange={(checked: boolean) => handleSelectAll(checked)}
                       />
                     </TableHead>
-                    <TableHead>
+                    <TableHead className="text-left">
                       <button
                         type="button"
                         className="flex items-center gap-2 hover:text-brand-orange transition-colors"
@@ -6749,9 +6831,9 @@ useEffect(() => {
                         )}
                       </button>
                     </TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Reported By</TableHead>
-                    <TableHead>
+                    <TableHead className="text-left">Type</TableHead>
+                    <TableHead className="text-left">Reported By</TableHead>
+                    <TableHead className="text-left">
                       <button
                         type="button"
                         className="flex items-center gap-2 hover:text-brand-orange transition-colors"
@@ -6777,8 +6859,8 @@ useEffect(() => {
                         )}
                       </button>
                     </TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Actions</TableHead>
+                    <TableHead className="text-left">Status</TableHead>
+                    <TableHead className="text-left">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
