@@ -148,6 +148,13 @@ export function SystemLogsPage() {
           const data = reportDoc.data();
           customId = data.reportId || entityId;
         }
+      } else if (entityType === 'announcement') {
+        const announcementDoc = await getDoc(doc(db, "announcements", entityId));
+        if (announcementDoc.exists()) {
+          const data = announcementDoc.data();
+          // Announcements use the document ID, but check if there's a custom ID field
+          customId = data.announcementId || data.id || entityId;
+        }
       } else if (entityType === 'admin') {
         const adminDoc = await getDoc(doc(db, "admins", entityId));
         if (adminDoc.exists()) {
@@ -883,12 +890,24 @@ export function SystemLogsPage() {
                                   // Replace Firestore ID with custom ID in the message
                                   // Escape special regex characters in the Firestore ID
                                   const escapedId = log.entityId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                                  
                                   // Pattern 1: Look for (entityId) - most common format
                                   const parenthesesPattern = new RegExp(`\\(${escapedId}\\)`, 'g');
                                   formattedMessage = formattedMessage.replace(parenthesesPattern, `(${customId})`);
+                                  
                                   // Pattern 2: Look for entityId at word boundaries (for cases without parentheses)
                                   const wordBoundaryPattern = new RegExp(`\\b${escapedId}\\b`, 'g');
                                   formattedMessage = formattedMessage.replace(wordBoundaryPattern, customId);
+                                  
+                                  // Pattern 3: Look for entityId in quotes "entityId" or 'entityId'
+                                  const quotedPattern = new RegExp(`["']${escapedId}["']`, 'g');
+                                  formattedMessage = formattedMessage.replace(quotedPattern, `"${customId}"`);
+                                  
+                                  // Pattern 4: Look for entityId after common prefixes like "ID:", "id:", etc.
+                                  const idPrefixPattern = new RegExp(`(ID|id|Id):\\s*${escapedId}\\b`, 'gi');
+                                  formattedMessage = formattedMessage.replace(idPrefixPattern, (match, prefix) => {
+                                    return `${prefix}: ${customId}`;
+                                  });
                                 }
                               }
                               

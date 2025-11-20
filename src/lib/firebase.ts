@@ -5,6 +5,7 @@ import { getAnalytics } from "firebase/analytics";
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { getMessaging, isSupported } from 'firebase/messaging';
 
 // Firebase configuration using environment variables
 const firebaseConfig = {
@@ -46,5 +47,19 @@ try {
   console.warn('Analytics initialization skipped:', error);
 }
 
+// Initialize Messaging (only if supported)
+let messaging = null;
+if (typeof window !== 'undefined') {
+  isSupported().then((supported) => {
+    if (supported) {
+      try {
+        messaging = getMessaging(app);
+      } catch (error) {
+        console.warn('Messaging initialization skipped:', error);
+      }
+    }
+  });
+}
+
 export default app;
-export { auth, db, storage, functions }; 
+export { auth, db, storage, functions, messaging }; 

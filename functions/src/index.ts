@@ -112,6 +112,7 @@ export const deleteResidentUser = onCall(async (request) => {
 // The primary deletion flow is through the app, which handles both Auth and Firestore automatically.
 
 // Cloud Function: Send push notification when new chat message is created
+// Only sends to web users when a mobile app user sends a chat
 export const sendChatNotification = onDocumentCreated(
   "chat_messages/{messageId}",
   async (event) => {
@@ -131,7 +132,23 @@ export const sendChatNotification = onDocumentCreated(
     }
 
     try {
-      // Get user's FCM token from Firestore
+      // Check if sender is a mobile user (has fcmToken but not webFcmToken)
+      const senderDoc = await admin.firestore().collection("users").doc(senderId).get();
+      if (!senderDoc.exists) {
+        logger.warn(`Sender document not found for senderId: ${senderId}`);
+        return;
+      }
+
+      const senderData = senderDoc.data();
+      const isMobileSender = senderData?.fcmToken && !senderData?.webFcmToken;
+
+      // Only send to web users if sender is a mobile user
+      if (!isMobileSender) {
+        logger.info("Sender is not a mobile user, skipping web notification");
+        return;
+      }
+
+      // Get recipient user's web FCM token
       const userDoc = await admin.firestore().collection("users").doc(userId).get();
       
       if (!userDoc.exists) {
@@ -140,10 +157,11 @@ export const sendChatNotification = onDocumentCreated(
       }
 
       const userData = userDoc.data();
-      const fcmToken = userData?.fcmToken;
+      // Only send to web users (webFcmToken)
+      const webFcmToken = userData?.webFcmToken;
 
-      if (!fcmToken) {
-        logger.warn(`No FCM token found for user: ${userId}`);
+      if (!webFcmToken) {
+        logger.info(`No web FCM token found for user: ${userId}, skipping web notification`);
         return;
       }
 
@@ -162,7 +180,7 @@ export const sendChatNotification = onDocumentCreated(
 
       // Prepare notification payload
       const notificationPayload = {
-        token: fcmToken,
+        token: webFcmToken,
         notification: {
           title: senderName || "AcciZard Lucban",
           body: notificationBody,
@@ -202,16 +220,169 @@ export const sendChatNotification = onDocumentCreated(
       // If token is invalid, remove it from Firestore
       if (error.code === "messaging/invalid-registration-token" || 
           error.code === "messaging/registration-token-not-registered") {
-        logger.info(`Removing invalid FCM token for user ${userId}`);
+        logger.info(`Removing invalid web FCM token for user ${userId}`);
         await admin.firestore().collection("users").doc(userId).update({
-          fcmToken: admin.firestore.FieldValue.delete()
+          webFcmToken: admin.firestore.FieldValue.delete()
         });
       }
     }
   }
 );
 
+// Cloud Function: Send push notification to web users when a mobile user creates a report
+export const sendReportCreatedNotification = onDocumentCreated(
+  "reports/{reportId}",
+  async (event) => {
+    const reportData = event.data?.data();
+    
+    if (!reportData) {
+      logger.warn("No report data found");
+      return;
+    }
+
+    const { userId, type, barangay, location, reportId: reportNumber } = reportData;
+
+    if (!userId) {
+      logger.warn("No userId found in report, cannot determine if mobile user");
+      return;
+    }
+
+    try {
+      // Check if report creator is a mobile user (has fcmToken but not webFcmToken)
+      const creatorDoc = await admin.firestore().collection("users").doc(userId).get();
+      if (!creatorDoc.exists) {
+        logger.warn(`Creator document not found for userId: ${userId}`);
+        return;
+      }
+
+      const creatorData = creatorDoc.data();
+      const isMobileCreator = creatorData?.fcmToken && !creatorData?.webFcmToken;
+
+      // Only send to web users if creator is a mobile user
+      if (!isMobileCreator) {
+        logger.info("Report creator is not a mobile user, skipping web notification");
+        return;
+      }
+
+      // Get all web users (users with webFcmToken)
+      const usersSnapshot = await admin.firestore().collection("users").get();
+      
+      const webUsers = usersSnapshot.docs
+        .map(doc => ({
+          userId: doc.id,
+          webFcmToken: doc.data().webFcmToken
+        }))
+        .filter(user => user.webFcmToken); // Only users with web FCM tokens
+
+      if (webUsers.length === 0) {
+        logger.info("No web users with FCM tokens found");
+        return;
+      }
+
+      logger.info(`Sending report created notification to ${webUsers.length} web users`);
+
+      // Prepare notification
+      const notificationTitle = "📋 New Report Submitted";
+      const notificationBody = `A new ${type || 'emergency'} report has been submitted${barangay ? ` in ${barangay}` : ''}`;
+
+      // Prepare notification payload
+      const basePayload = {
+        notification: {
+          title: notificationTitle,
+          body: notificationBody,
+        },
+        data: {
+          type: "report_created",
+          reportId: event.params.reportId,
+          reportNumber: reportNumber || "",
+          reportType: type || "emergency",
+          barangay: barangay || "",
+          location: location || "",
+          createdBy: userId,
+        },
+        android: {
+          priority: "high" as const,
+          notification: {
+            sound: "default",
+            channelId: "report_updates",
+            priority: "high" as const,
+          },
+        },
+        apns: {
+          payload: {
+            aps: {
+              sound: "default",
+              badge: 1,
+            },
+          },
+        },
+      };
+
+      // Send notifications in batches (FCM limit: 500 per batch)
+      const batchSize = 500;
+      const batches = [];
+      
+      for (let i = 0; i < webUsers.length; i += batchSize) {
+        const batch = webUsers.slice(i, i + batchSize);
+        batches.push(batch);
+      }
+
+      let successCount = 0;
+      let failureCount = 0;
+      const invalidTokens: string[] = [];
+
+      for (const batch of batches) {
+        const messages = batch.map(user => ({
+          ...basePayload,
+          token: user.webFcmToken,
+        }));
+
+        try {
+          const response = await admin.messaging().sendEach(messages);
+          
+          successCount += response.successCount;
+          failureCount += response.failureCount;
+
+          // Track invalid tokens
+          response.responses.forEach((result, index) => {
+            if (!result.success && result.error) {
+              const errorCode = result.error.code;
+              if (errorCode === "messaging/invalid-registration-token" ||
+                  errorCode === "messaging/registration-token-not-registered") {
+                invalidTokens.push(batch[index].userId);
+              }
+            }
+          });
+          
+        } catch (error: any) {
+          logger.error("Error sending batch notifications:", error);
+          failureCount += batch.length;
+        }
+      }
+
+      // Remove invalid tokens from Firestore
+      if (invalidTokens.length > 0) {
+        logger.info(`Removing ${invalidTokens.length} invalid web FCM tokens`);
+        
+        const deletePromises = invalidTokens.map(userId =>
+          admin.firestore().collection("users").doc(userId).update({
+            webFcmToken: admin.firestore.FieldValue.delete()
+          })
+        );
+        
+        await Promise.all(deletePromises);
+      }
+
+      logger.info(`Report created notification sent. Success: ${successCount}, Failed: ${failureCount}, Invalid tokens removed: ${invalidTokens.length}`);
+      
+    } catch (error: any) {
+      logger.error("Error sending report created notifications:", error);
+    }
+  }
+);
+
 // Cloud Function: Send push notifications when new announcement is created
+// Only sends to mobile users (not web users)
 export const sendAnnouncementNotification = onDocumentCreated(
   "announcements/{announcementId}",
   async (event) => {
@@ -225,15 +396,19 @@ export const sendAnnouncementNotification = onDocumentCreated(
     const { type, description, priority, date } = announcementData;
 
     try {
-      // Get all users with FCM tokens
+      // Get all mobile users with FCM tokens (not web users)
       const usersSnapshot = await admin.firestore().collection("users").get();
       
       const usersWithTokens = usersSnapshot.docs
-        .map(doc => ({
-          userId: doc.id,
-          fcmToken: doc.data().fcmToken
-        }))
-        .filter(user => user.fcmToken); // Only users with FCM tokens
+        .map(doc => {
+          const data = doc.data();
+          // Only mobile users (fcmToken, not webFcmToken)
+          return {
+            userId: doc.id,
+            fcmToken: data.fcmToken && !data.webFcmToken ? data.fcmToken : null
+          };
+        })
+        .filter(user => user.fcmToken); // Only mobile users with FCM tokens
 
       if (usersWithTokens.length === 0) {
         logger.info("No users with FCM tokens found");
@@ -334,9 +509,22 @@ export const sendAnnouncementNotification = onDocumentCreated(
       if (invalidTokens.length > 0) {
         logger.info(`Removing ${invalidTokens.length} invalid FCM tokens`);
         
-        const deletePromises = invalidTokens.map(userId =>
-          admin.firestore().collection("users").doc(userId).update({
-            fcmToken: admin.firestore.FieldValue.delete()
+        // Get user data to determine which token field to delete
+        const deletePromises = await Promise.all(
+          invalidTokens.map(async (userId) => {
+            const userDoc = await admin.firestore().collection("users").doc(userId).get();
+            const userData = userDoc.data();
+            const updateData: any = {};
+            if (userData?.fcmToken) {
+              updateData.fcmToken = admin.firestore.FieldValue.delete();
+            }
+            if (userData?.webFcmToken) {
+              updateData.webFcmToken = admin.firestore.FieldValue.delete();
+            }
+            if (Object.keys(updateData).length > 0) {
+              return admin.firestore().collection("users").doc(userId).update(updateData);
+            }
+            return Promise.resolve();
           })
         );
         
@@ -351,8 +539,143 @@ export const sendAnnouncementNotification = onDocumentCreated(
   }
 );
 
+// Cloud Function: Send push notification to web users when a new mobile user registers
+export const sendNewUserRegistrationNotification = onDocumentCreated(
+  "users/{userId}",
+  async (event) => {
+    const userData = event.data?.data();
+    
+    if (!userData) {
+      logger.warn("No user data found");
+      return;
+    }
+
+    // Check if this is a mobile user registration (has fcmToken but not webFcmToken)
+    const isMobileUser = userData?.fcmToken && !userData?.webFcmToken;
+
+    // Only send to web users if this is a mobile user registration
+    if (!isMobileUser) {
+      logger.info("New user is not a mobile user, skipping web notification");
+      return;
+    }
+
+    try {
+      // Get all web users (users with webFcmToken)
+      const usersSnapshot = await admin.firestore().collection("users").get();
+      
+      const webUsers = usersSnapshot.docs
+        .map(doc => ({
+          userId: doc.id,
+          webFcmToken: doc.data().webFcmToken
+        }))
+        .filter(user => user.webFcmToken && user.userId !== event.params.userId); // Exclude the new user and only web users
+
+      if (webUsers.length === 0) {
+        logger.info("No web users with FCM tokens found");
+        return;
+      }
+
+      logger.info(`Sending new user registration notification to ${webUsers.length} web users`);
+
+      // Prepare notification
+      const userName = userData?.name || userData?.email || "A new user";
+      const notificationTitle = "👤 New User Registered";
+      const notificationBody = `${userName} has registered on the mobile app`;
+
+      // Prepare notification payload
+      const basePayload = {
+        notification: {
+          title: notificationTitle,
+          body: notificationBody,
+        },
+        data: {
+          type: "user_registered",
+          newUserId: event.params.userId,
+          userName: userName,
+        },
+        android: {
+          priority: "normal" as const,
+          notification: {
+            sound: "default",
+            channelId: "user_updates",
+            priority: "default" as const,
+          },
+        },
+        apns: {
+          payload: {
+            aps: {
+              sound: "default",
+              badge: 1,
+            },
+          },
+        },
+      };
+
+      // Send notifications in batches (FCM limit: 500 per batch)
+      const batchSize = 500;
+      const batches = [];
+      
+      for (let i = 0; i < webUsers.length; i += batchSize) {
+        const batch = webUsers.slice(i, i + batchSize);
+        batches.push(batch);
+      }
+
+      let successCount = 0;
+      let failureCount = 0;
+      const invalidTokens: string[] = [];
+
+      for (const batch of batches) {
+        const messages = batch.map(user => ({
+          ...basePayload,
+          token: user.webFcmToken,
+        }));
+
+        try {
+          const response = await admin.messaging().sendEach(messages);
+          
+          successCount += response.successCount;
+          failureCount += response.failureCount;
+
+          // Track invalid tokens
+          response.responses.forEach((result, index) => {
+            if (!result.success && result.error) {
+              const errorCode = result.error.code;
+              if (errorCode === "messaging/invalid-registration-token" ||
+                  errorCode === "messaging/registration-token-not-registered") {
+                invalidTokens.push(batch[index].userId);
+              }
+            }
+          });
+          
+        } catch (error: any) {
+          logger.error("Error sending batch notifications:", error);
+          failureCount += batch.length;
+        }
+      }
+
+      // Remove invalid tokens from Firestore
+      if (invalidTokens.length > 0) {
+        logger.info(`Removing ${invalidTokens.length} invalid web FCM tokens`);
+        
+        const deletePromises = invalidTokens.map(userId =>
+          admin.firestore().collection("users").doc(userId).update({
+            webFcmToken: admin.firestore.FieldValue.delete()
+          })
+        );
+        
+        await Promise.all(deletePromises);
+      }
+
+      logger.info(`New user registration notification sent. Success: ${successCount}, Failed: ${failureCount}, Invalid tokens removed: ${invalidTokens.length}`);
+      
+    } catch (error: any) {
+      logger.error("Error sending new user registration notifications:", error);
+    }
+  }
+);
+
 // Cloud Function: Send push notification when report status is updated
-// Notifies the user who submitted the report about status changes
+// Notifies the user who submitted the report about status changes (mobile users only)
 export const sendReportStatusNotification = onDocumentUpdated(
   "reports/{reportId}",
   async (event) => {
@@ -391,10 +714,11 @@ export const sendReportStatusNotification = onDocumentUpdated(
       }
 
       const userData = userDoc.data();
+      // Only send to mobile users (fcmToken) for status updates
       const fcmToken = userData?.fcmToken;
 
       if (!fcmToken) {
-        logger.warn(`No FCM token found for user: ${userId}`);
+        logger.info(`No mobile FCM token found for user: ${userId}, skipping status notification`);
         return;
       }
 
@@ -479,7 +803,7 @@ export const sendReportStatusNotification = onDocumentUpdated(
       // If token is invalid, remove it from Firestore
       if (error.code === "messaging/invalid-registration-token" || 
           error.code === "messaging/registration-token-not-registered") {
-        logger.info(`Removing invalid FCM token for user ${userId}`);
+        logger.info(`Removing invalid mobile FCM token for user ${userId}`);
         await admin.firestore().collection("users").doc(userId).update({
           fcmToken: admin.firestore.FieldValue.delete()
         });
@@ -488,108 +812,3 @@ export const sendReportStatusNotification = onDocumentUpdated(
   }
 );
 
-// Callable Function: Fetch and parse PAGASA bulletins
-export const fetchPagasaBulletins = onCall(async (request) => {
-  // Check if user is authenticated and has admin privileges
-  if (!request.auth) {
-    throw new HttpsError("unauthenticated", "User must be authenticated");
-  }
-
-  try {
-    logger.info("Fetching PAGASA bulletins...");
-
-    const xml2js = require('xml2js');
-    const parser = new xml2js.Parser();
-    const bulletinPromises: Promise<admin.firestore.DocumentReference>[] = [];
-
-    // Fetch Tropical Cyclone Bulletins
-    try {
-      const tcResponse = await fetch('https://pubfiles.pagasa.dost.gov.ph/tamss/weather/tcb.xml');
-      if (tcResponse.ok) {
-        const tcXml = await tcResponse.text();
-        const tcData = await parser.parseStringPromise(tcXml);
-        
-        if (tcData && tcData.product && tcData.product.title && tcData.product.info) {
-          const bulletinData = {
-            type: 'tropical_cyclone',
-            title: tcData.product.title[0],
-            content: tcData.product.info[0],
-            issueDate: admin.firestore.FieldValue.serverTimestamp(),
-            parsedAt: admin.firestore.FieldValue.serverTimestamp(),
-            source: 'PAGASA',
-            priority: 'high'
-          };
-          
-          bulletinPromises.push(
-            admin.firestore().collection('pagasa_bulletins').add(bulletinData)
-          );
-        }
-      }
-    } catch (tcError) {
-      logger.warn("Error fetching TC bulletins:", tcError);
-    }
-
-    // Fetch Weather Forecast
-    try {
-      const fcstResponse = await fetch('https://pubfiles.pagasa.dost.gov.ph/tamss/weather/fcst.xml');
-      if (fcstResponse.ok) {
-        const fcstXml = await fcstResponse.text();
-        const fcstData = await parser.parseStringPromise(fcstXml);
-        
-        if (fcstData && fcstData.product && fcstData.product.title && fcstData.product.info) {
-          const forecastData = {
-            type: 'weather_forecast',
-            title: fcstData.product.title[0],
-            content: fcstData.product.info[0],
-            issueDate: admin.firestore.FieldValue.serverTimestamp(),
-            parsedAt: admin.firestore.FieldValue.serverTimestamp(),
-            source: 'PAGASA',
-            priority: 'medium'
-          };
-          
-          bulletinPromises.push(
-            admin.firestore().collection('pagasa_bulletins').add(forecastData)
-          );
-        }
-      }
-    } catch (fcstError) {
-      logger.warn("Error fetching forecast:", fcstError);
-    }
-
-    // Store all bulletins (only if any were fetched)
-    if (bulletinPromises.length > 0) {
-      await Promise.all(bulletinPromises);
-      logger.info(`Successfully fetched and stored ${bulletinPromises.length} PAGASA bulletins`);
-    } else {
-      logger.warn("No bulletins fetched from PAGASA feeds");
-    }
-
-    return { 
-      success: true, 
-      count: bulletinPromises.length,
-      message: bulletinPromises.length > 0 
-        ? `Successfully fetched ${bulletinPromises.length} bulletins` 
-        : 'No bulletins available from PAGASA at this time'
-    };
-  } catch (error: any) {
-    logger.error("Error fetching PAGASA bulletins:", error);
-    throw new HttpsError("internal", error.message);
-  }
-});
-
-// Scheduled Function: Automatically fetch PAGASA bulletins every 6 hours
-// Note: Requires Firebase Blaze plan
-// To deploy: firebase deploy --only functions:fetchPagasaBulletinsScheduled
-export const fetchPagasaBulletinsScheduled = onDocumentCreated(
-  "pagasa_bulletins/{bulletinId}",
-  async (event) => {
-    // This is a placeholder - actual scheduled functions require pubsub triggers
-    // For now, we'll use a callable function that can be called from the frontend
-    logger.info("PAGASA bulletin scheduled function triggered");
-  }
-);
-
-// export const helloWorld = onRequest((request, response) => {
-//   logger.info("Hello logs!", {structuredData: true});
-//   response.send("Hello from Firebase!");
-// });

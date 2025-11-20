@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { User, Camera, Check, X, Briefcase, Building, MapPin, Hash, AtSign, Plus, Trash2, Edit3, StickyNote } from "lucide-react";
+import { User, Camera, Check, X, Briefcase, Building, MapPin, Hash, AtSign, Plus, Trash2, Edit3, StickyNote, Bell } from "lucide-react";
 import { Layout } from "./Layout";
 import { useNavigate } from "react-router-dom";
 import { db, auth, storage } from "@/lib/firebase";
@@ -24,10 +24,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
+import { usePushNotifications } from "@/hooks/usePushNotifications";
 
 export function ProfilePage() {
   const navigate = useNavigate();
   const { canViewEmail, userRole, loading: roleLoading, refreshUserRole } = useUserRole();
+  const { isSupported, permission, isSubscribed, isLoading: notificationsLoading, toggleSubscription, requestPermission } = usePushNotifications();
   const [profile, setProfile] = useState({
     name: "",
     position: "",
@@ -974,6 +977,45 @@ export function ProfilePage() {
                     type="email"
                   />
                 )}
+                
+                {/* Push Notifications Toggle */}
+                <div className="space-y-1">
+                  <div className="flex items-center space-x-2">
+                    <Bell className="h-3 w-3 text-gray-400 flex-shrink-0" />
+                    <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Push Notifications</span>
+                  </div>
+                  <div className="flex items-center space-x-3 py-1">
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between px-2 py-1">
+                        <span className="text-sm text-gray-700">
+                          {!isSupported 
+                            ? 'Not supported in this browser'
+                            : notificationsLoading
+                            ? 'Updating...'
+                            : permission === 'denied'
+                            ? 'Permission denied'
+                            : isSubscribed
+                            ? 'Enabled'
+                            : 'Disabled'}
+                        </span>
+                        {isSupported && (
+                          <Switch
+                            checked={isSubscribed}
+                            onCheckedChange={async () => {
+                              await toggleSubscription();
+                            }}
+                            disabled={notificationsLoading || (permission === 'denied' && !isSubscribed)}
+                          />
+                        )}
+                      </div>
+                      {permission === 'denied' && !isSubscribed && (
+                        <p className="text-xs text-gray-500 px-2 mt-1">
+                          Enable notifications in your browser settings
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           </div>

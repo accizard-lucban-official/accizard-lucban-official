@@ -1569,10 +1569,117 @@ export function DashboardStats() {
         link.href = canvas.toDataURL('image/png');
         link.click();
       } else if (format === 'pdf') {
-        import('jspdf').then(({ default: jsPDF }) => {
+        import('jspdf').then(async ({ default: jsPDF }) => {
           const pdf = new jsPDF('landscape');
+          
+          // Format current date/time for PDF header (MM/dd/yy at h:mm AM/PM)
+          const now = new Date();
+          const mm = String(now.getMonth() + 1).padStart(2, "0");
+          const dd = String(now.getDate()).padStart(2, "0");
+          const yy = String(now.getFullYear()).slice(-2);
+          const hours12 = now.getHours() % 12 || 12;
+          const minutes = String(now.getMinutes()).padStart(2, "0");
+          const ampm = now.getHours() >= 12 ? "PM" : "AM";
+          const formattedDateTime = `${mm}/${dd}/${yy} at ${hours12}:${minutes} ${ampm}`;
+          
+          // Load logo images
+          const loadImage = (src: string): Promise<string> => {
+            return new Promise((resolve, reject) => {
+              const img = new Image();
+              img.crossOrigin = 'anonymous';
+              img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext('2d');
+                ctx?.drawImage(img, 0, 0);
+                resolve(canvas.toDataURL('image/png'));
+              };
+              img.onerror = () => resolve(''); // Return empty string if image fails to load
+              img.src = src;
+            });
+          };
+          
+          const leftLogoData = await loadImage('/accizard-uploads/lucban-logo.png');
+          const rightLogoData = await loadImage('/accizard-uploads/logo-ldrrmo-png.png');
+          
+          // Add header logos (90px = ~24mm at 96dpi)
+          const logoSize = 24; // mm
+          const logoY = 5; // mm from top
+          
+          if (leftLogoData) {
+            pdf.addImage(leftLogoData, 'PNG', 5, logoY, logoSize, logoSize);
+          }
+          
+          if (rightLogoData) {
+            // Right logo: page width (297mm) - logo size - margin
+            pdf.addImage(rightLogoData, 'PNG', 297 - logoSize - 5, logoY, logoSize, logoSize);
+          }
+          
+          // Add header text (centered)
+          pdf.setFontSize(9);
+          pdf.setTextColor(0, 0, 0);
+          
+          // Republic of the PHILIPPINES
+          pdf.setFont(undefined, 'normal');
+          pdf.text('Republic of the', 148.5, logoY + 5, { align: 'center' });
+          pdf.setFont(undefined, 'bold');
+          pdf.setTextColor(0, 102, 204);
+          pdf.text('PHILIPPINES', 148.5, logoY + 7, { align: 'center' });
+          
+          // Province of QUEZON
+          pdf.setFont(undefined, 'normal');
+          pdf.setTextColor(0, 0, 0);
+          pdf.text('Province of', 148.5, logoY + 9, { align: 'center' });
+          pdf.setFont(undefined, 'bold');
+          pdf.setTextColor(0, 102, 204);
+          pdf.text('QUEZON', 148.5, logoY + 11, { align: 'center' });
+          
+          // MUNICIPALITY OF LUCBAN
+          pdf.setFontSize(15);
+          pdf.setFont(undefined, 'bold');
+          pdf.setTextColor(0, 102, 204);
+          pdf.text('MUNICIPALITY OF LUCBAN', 148.5, logoY + 15, { align: 'center' });
+          
+          // MUNICIPAL DISASTER RISK REDUCTION AND MANAGEMENT OFFICE
+          pdf.setFontSize(12);
+          pdf.setFont(undefined, 'bold');
+          pdf.setTextColor(0, 0, 0);
+          pdf.text('MUNICIPAL DISASTER RISK REDUCTION AND MANAGEMENT OFFICE', 148.5, logoY + 20, { align: 'center' });
+          
+          // Chart title (based on fileName)
+          const chartTitles: Record<string, string> = {
+            'reports-per-barangay': 'REPORTS PER BARANGAY',
+            'calendar-activity': 'CALENDAR ACTIVITY',
+            'users-per-barangay': 'ACTIVE USERS PER BARANGAY',
+            'report-type-distribution': 'REPORT TYPE DISTRIBUTION',
+            'peak-reporting-hours': 'PEAK REPORTING HOURS',
+            'reports-over-time': 'REPORTS OVER TIME'
+          };
+          
+          const chartTitle = chartTitles[fileName] || 'CHART';
+          pdf.setFontSize(13);
+          pdf.setFont(undefined, 'bold');
+          pdf.setTextColor(0, 102, 204);
+          pdf.text(chartTitle, 148.5, logoY + 28, { align: 'center' });
+          
+          // Date/Time
+          pdf.setFontSize(10);
+          pdf.setFont(undefined, 'bold');
+          pdf.setTextColor(0, 0, 0);
+          pdf.text(`DATE/TIME: ${formattedDateTime}`, 5, logoY + 33);
+          
+          // Add chart image below header (starting at ~40mm from top)
+          const chartStartY = logoY + 35;
+          const chartWidth = 287; // 297mm - 10mm margins
+          const chartHeight = (canvas.height / canvas.width) * chartWidth; // Maintain aspect ratio
+          const maxChartHeight = 150; // Maximum height to fit on page
+          const finalChartHeight = Math.min(chartHeight, maxChartHeight);
+          const finalChartWidth = (canvas.width / canvas.height) * finalChartHeight;
+          
           const imgData = canvas.toDataURL('image/png');
-          pdf.addImage(imgData, 'PNG', 10, 10, 280, 150);
+          pdf.addImage(imgData, 'PNG', (297 - finalChartWidth) / 2, chartStartY, finalChartWidth, finalChartHeight);
+          
           pdf.save(`${fileName}.pdf`);
         });
       }

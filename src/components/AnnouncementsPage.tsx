@@ -29,7 +29,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
-import { Search, Plus, Edit, Trash2, Calendar, AlertTriangle, Info, X, Eye, ChevronUp, ChevronDown, Check, Megaphone, Download, CloudLightning, Waves, Mountain, Activity, TrafficCone, UserSearch, ListFilter, Upload, FileIcon, Image } from "lucide-react";
+import { Search, Plus, Edit, Trash2, Calendar, AlertTriangle, Info, X, Eye, ChevronUp, ChevronDown, Check, Megaphone, Download, CloudLightning, Waves, Mountain, Activity, TrafficCone, UserSearch, ListFilter, Upload, FileIcon, Image, CheckSquare } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Layout } from "./Layout";
 import { DateRange } from "react-day-picker";
@@ -192,6 +192,8 @@ export function AnnouncementsPage() {
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>("desc");
   const [editDialogOpenId, setEditDialogOpenId] = useState<string | null>(null);
   const [selectedAnnouncements, setSelectedAnnouncements] = useState<Set<string>>(new Set());
+  const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   
   // Loading states
   const [isAddingAnnouncement, setIsAddingAnnouncement] = useState(false);
@@ -519,47 +521,83 @@ export function AnnouncementsPage() {
   const handleBatchDelete = async () => {
     if (selectedAnnouncements.size === 0) return;
     
+    setBulkDeleting(true);
+    const announcementsToDelete = [...selectedAnnouncements];
+    let successCount = 0;
+    let failCount = 0;
+
     try {
       // Get announcement data before deletion for logging
       const deletedAnnouncements = announcements.filter(a => selectedAnnouncements.has(a.id));
       const count = selectedAnnouncements.size;
       
-      // Delete all selected announcements from Firestore
-      const deletePromises = Array.from(selectedAnnouncements).map(id => 
-        deleteDoc(doc(db, "announcements", id))
+      // Delete all selected announcements from Firestore using Promise.allSettled
+      const results = await Promise.allSettled(
+        announcementsToDelete.map(id => deleteDoc(doc(db, "announcements", id)))
       );
-      await Promise.all(deletePromises);
-      
-      // Update local state
-      setAnnouncements(announcements.filter(a => !selectedAnnouncements.has(a.id)));
-      setSelectedAnnouncements(new Set());
-      
-      // Log bulk delete activity
-      await logActivity({
-        actionType: ActionType.BULK_OPERATION,
-        action: `Bulk deleted ${count} announcement(s)`,
-        entityType: 'announcement',
-        metadata: {
-          count,
-          deletedAnnouncements: deletedAnnouncements.map(a => ({ 
-            id: a.id, 
-            type: a.type || 'Unknown',
-            priority: a.priority || 'Unknown'
-          }))
+
+      // Count successes and failures, track which announcements were successfully deleted
+      const successfullyDeleted: string[] = [];
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          successCount++;
+          successfullyDeleted.push(announcementsToDelete[index]);
+        } else {
+          failCount++;
+          console.error(`Error deleting announcement ${announcementsToDelete[index]}:`, result.reason);
         }
       });
       
-      toast({
-        title: "Announcements Deleted",
-        description: `${count} announcement(s) have been deleted successfully.`,
+      // Update local state - remove only successfully deleted announcements
+      setAnnouncements(announcements.filter(a => !successfullyDeleted.includes(a.id)));
+      setSelectedAnnouncements(prev => {
+        const newSet = new Set(prev);
+        successfullyDeleted.forEach(id => newSet.delete(id));
+        return newSet;
       });
+      setShowBulkDeleteDialog(false);
+      
+      // Log bulk delete activity
+      if (successCount > 0) {
+        await logActivity({
+          actionType: ActionType.BULK_OPERATION,
+          action: `Bulk deleted ${successCount} announcement(s)`,
+          entityType: 'announcement',
+          metadata: {
+            count: successCount,
+            deletedAnnouncements: deletedAnnouncements
+              .filter(a => successfullyDeleted.includes(a.id))
+              .map(a => ({ 
+                id: a.id, 
+                type: a.type || 'Unknown',
+                priority: a.priority || 'Unknown'
+              }))
+          }
+        });
+      }
+      
+      // Show toast
+      if (failCount === 0) {
+        toast({
+          title: "Announcements Deleted",
+          description: `Successfully deleted ${successCount} announcement(s).`,
+        });
+      } else {
+        toast({
+          title: "Partial Success",
+          description: `Deleted ${successCount} announcement(s). Failed to delete ${failCount} announcement(s).`,
+          variant: "destructive",
+        });
+      }
     } catch (error) {
       console.error("Error deleting announcements:", error);
       toast({
         title: "Error",
-        description: "Failed to delete some announcements. Please try again.",
+        description: "Failed to delete announcements. Please try again.",
         variant: "destructive",
       });
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -903,18 +941,6 @@ export function AnnouncementsPage() {
                 </SelectContent>
               </Select>
 
-              {/* Delete Selected Button */}
-              {selectedAnnouncements.size > 0 && (
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={handleBatchDelete}
-                >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Delete ({selectedAnnouncements.size})
-                </Button>
-              )}
-
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -932,6 +958,83 @@ export function AnnouncementsPage() {
               </Tooltip>
             </div>
           </div>
+
+          {/* Bulk Actions Bar */}
+          {selectedAnnouncements.size > 0 && (
+            <div className="border-t border-b border-gray-200 bg-white px-6 py-4 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <div className="h-8 w-8 rounded-full bg-brand-orange/10 flex items-center justify-center">
+                      <CheckSquare className="h-4 w-4 text-brand-orange" />
+                    </div>
+                    <div>
+                      <span className="text-sm font-semibold text-gray-900">
+                        {selectedAnnouncements.size} announcement{selectedAnnouncements.size !== 1 ? 's' : ''} selected
+                      </span>
+                      <p className="text-xs text-gray-500">Batch actions available</p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelectedAnnouncements(new Set())}
+                    className="text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+                  >
+                    Clear selection
+                  </Button>
+                </div>
+                <AlertDialog open={showBulkDeleteDialog} onOpenChange={setShowBulkDeleteDialog}>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="flex items-center gap-2"
+                      disabled={bulkDeleting}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Delete Selected ({selectedAnnouncements.size})
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 bg-red-100 rounded-full flex items-center justify-center">
+                          <Trash2 className="h-5 w-5 text-red-600" />
+                        </div>
+                        <div>
+                          <AlertDialogTitle className="text-red-800">Delete Selected Announcements</AlertDialogTitle>
+                          <AlertDialogDescription className="text-red-600">
+                            Are you sure you want to delete {selectedAnnouncements.size} announcement{selectedAnnouncements.size !== 1 ? 's' : ''}? This action cannot be undone.
+                          </AlertDialogDescription>
+                        </div>
+                      </div>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel disabled={bulkDeleting}>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={handleBatchDelete}
+                        disabled={bulkDeleting}
+                        className="bg-red-600 hover:bg-red-700 disabled:opacity-50"
+                      >
+                        {bulkDeleting ? (
+                          <div className="flex items-center">
+                            <svg className="animate-spin -ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Deleting...
+                          </div>
+                        ) : (
+                          `Delete ${selectedAnnouncements.size} Announcement${selectedAnnouncements.size !== 1 ? 's' : ''}`
+                        )}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
+            </div>
+          )}
           
           <CardContent className="p-0">
             <div className="overflow-x-auto">

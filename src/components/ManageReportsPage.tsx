@@ -2059,7 +2059,7 @@ useEffect(() => {
                   }
                   
                   .consent-content {
-                    margin-bottom: 15px;
+                    margin-bottom: 25px;
                     font-size: 8px;
                     padding: 0 5px;
                   }
@@ -3703,7 +3703,7 @@ useEffect(() => {
                 }
                 
                 .consent-content {
-                  margin-bottom: 15px;
+                  margin-bottom: 25px;
                   font-size: 8px;
                   padding: 0 5px;
                 }
