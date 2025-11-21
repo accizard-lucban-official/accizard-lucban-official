@@ -112,7 +112,7 @@ export const deleteResidentUser = onCall(async (request) => {
 // The primary deletion flow is through the app, which handles both Auth and Firestore automatically.
 
 // Cloud Function: Send push notification when new chat message is created
-// Only sends to web users when a mobile app user sends a chat
+// Bidirectional: Sends to mobile users when web app user sends, and to web users when mobile app user sends
 export const sendChatNotification = onDocumentCreated(
   "chat_messages/{messageId}",
   async (event) => {
@@ -123,7 +123,13 @@ export const sendChatNotification = onDocumentCreated(
       return;
     }
 
-    const { userId, senderId, senderName, message, imageUrl, videoUrl, audioUrl, fileUrl, fileName } = messageData;
+    const { userId, senderId, senderName, message, imageUrl, videoUrl, audioUrl, fileUrl, fileName, isSystemMessage } = messageData;
+
+    // Don't send notification for system messages
+    if (isSystemMessage) {
+      logger.info("System message detected, skipping notification");
+      return;
+    }
 
     // Don't send notification if sender is the user themselves
     if (userId === senderId) {
@@ -132,37 +138,25 @@ export const sendChatNotification = onDocumentCreated(
     }
 
     try {
-      // Check if sender is a mobile user (has fcmToken but not webFcmToken)
-      const senderDoc = await admin.firestore().collection("users").doc(senderId).get();
-      if (!senderDoc.exists) {
-        logger.warn(`Sender document not found for senderId: ${senderId}`);
-        return;
-      }
-
-      const senderData = senderDoc.data();
-      const isMobileSender = senderData?.fcmToken && !senderData?.webFcmToken;
-
-      // Only send to web users if sender is a mobile user
-      if (!isMobileSender) {
-        logger.info("Sender is not a mobile user, skipping web notification");
-        return;
-      }
-
-      // Get recipient user's web FCM token
-      const userDoc = await admin.firestore().collection("users").doc(userId).get();
+      // Check if sender is a web user or mobile user
+      // Web user: has webFcmToken OR doesn't have fcmToken (admin)
+      // Mobile user: has fcmToken but not webFcmToken
+      let isWebSender = false;
       
-      if (!userDoc.exists) {
-        logger.warn(`User document not found for userId: ${userId}`);
-        return;
-      }
-
-      const userData = userDoc.data();
-      // Only send to web users (webFcmToken)
-      const webFcmToken = userData?.webFcmToken;
-
-      if (!webFcmToken) {
-        logger.info(`No web FCM token found for user: ${userId}, skipping web notification`);
-        return;
+      // Try to get sender document (may not exist for admin users)
+      const senderDoc = await admin.firestore().collection("users").doc(senderId).get();
+      
+      if (senderDoc.exists) {
+        const senderData = senderDoc.data();
+        // If has webFcmToken → web user
+        // If doesn't have fcmToken → web user (admin)
+        // If has fcmToken but not webFcmToken → mobile user
+        isWebSender = !!senderData?.webFcmToken || !senderData?.fcmToken;
+      } else {
+        // If sender document doesn't exist, assume it's a web admin user
+        // (admins might not have user documents, or senderId might be in admin-{userId} format)
+        isWebSender = true;
+        logger.info(`Sender document not found for senderId: ${senderId}, assuming web user`);
       }
 
       // Determine notification body based on message type
@@ -178,50 +172,232 @@ export const sendChatNotification = onDocumentCreated(
         notificationBody = `📎 Sent ${fileName || "a file"}`;
       }
 
-      // Prepare notification payload
-      const notificationPayload = {
-        token: webFcmToken,
-        notification: {
-          title: senderName || "AcciZard Lucban",
-          body: notificationBody,
-        },
-        data: {
-          type: "chat_message",
-          userId: userId,
-          messageId: event.params.messageId,
-          senderId: senderId,
-          senderName: senderName || "AcciZard Lucban",
-        },
-        android: {
-          priority: "high" as const,
+      if (isWebSender) {
+        // Web user sent message → notify mobile user
+        logger.info("Web user sent message, sending notification to mobile user");
+        
+        // Get recipient user's mobile FCM token
+        const userDoc = await admin.firestore().collection("users").doc(userId).get();
+        
+        if (!userDoc.exists) {
+          logger.warn(`User document not found for userId: ${userId}`);
+          return;
+        }
+
+        const userData = userDoc.data();
+        // Only send to mobile users (fcmToken, not webFcmToken)
+        const fcmToken = userData?.fcmToken;
+
+        if (!fcmToken) {
+          logger.info(`No mobile FCM token found for user: ${userId}, skipping mobile notification`);
+          return;
+        }
+
+        // Prepare notification payload for mobile user
+        const notificationPayload = {
+          token: fcmToken,
           notification: {
-            sound: "default",
-            channelId: "chat_messages",
-            priority: "high" as const,
+            title: senderName || "AcciZard Lucban",
+            body: notificationBody,
           },
-        },
-        apns: {
-          payload: {
-            aps: {
+          data: {
+            type: "chat_message",
+            userId: userId,
+            messageId: event.params.messageId,
+            senderId: senderId,
+            senderName: senderName || "AcciZard Lucban",
+          },
+          android: {
+            priority: "high" as const,
+            notification: {
               sound: "default",
-              badge: 1,
+              channelId: "chat_messages",
+              priority: "high" as const,
             },
           },
-        },
-      };
+          apns: {
+            payload: {
+              aps: {
+                sound: "default",
+                badge: 1,
+              },
+            },
+          },
+        };
 
-      // Send notification
-      const response = await admin.messaging().send(notificationPayload);
-      logger.info(`Successfully sent notification to user ${userId}. Response: ${response}`);
+        // Send notification to mobile user
+        const response = await admin.messaging().send(notificationPayload);
+        logger.info(`Successfully sent chat notification to mobile user ${userId}. Response: ${response}`);
+        
+      } else {
+        // Mobile user sent message → notify all web users
+        logger.info("Mobile user sent message, sending notification to web users");
+        
+        // Check if this is the mobile user's first message
+        // Query for all messages from this user (where userId === senderId means mobile user sent it)
+        const allUserMessages = await admin.firestore()
+          .collection("chat_messages")
+          .where("userId", "==", userId)
+          .where("senderId", "==", senderId)
+          .get();
+        
+        // If there's only 1 message (the current one), it's the first message
+        const isFirstMessage = allUserMessages.size === 1;
+        
+        if (isFirstMessage) {
+          logger.info(`First message from mobile user ${senderId}, sending automatic welcome message`);
+          
+          // Create automatic welcome message
+          const welcomeMessage = `Thank you for reaching out! Our admins will get back to you as soon as they're available.\n\nFor urgent matters, please contact us:\n📞 Emergency: 540-1709 or 0917 520 4211\n📘 Facebook: https://www.facebook.com/LucbanDRRMO`;
+          
+          const welcomeMessageData = {
+            userId: userId,
+            userID: userId, // Also set userID for mobile app compatibility
+            senderId: "system",
+            senderName: "AcciZard Lucban",
+            message: welcomeMessage,
+            timestamp: admin.firestore.FieldValue.serverTimestamp(),
+            isRead: false,
+            isSystemMessage: true
+          };
+          
+          // Add the welcome message to chat_messages collection
+          await admin.firestore().collection("chat_messages").add(welcomeMessageData);
+          
+          // Update chat metadata
+          const chatRef = admin.firestore().collection("chats").doc(userId);
+          const userDoc = await admin.firestore().collection("users").doc(userId).get();
+          const userData = userDoc.data();
+          
+          await chatRef.set({
+            userId: userId,
+            userName: userData?.name || userData?.fullName || senderName || "Unknown User",
+            userEmail: userData?.email || "",
+            lastMessage: welcomeMessage.substring(0, 100), // Truncate for preview
+            lastMessageTime: admin.firestore.FieldValue.serverTimestamp(),
+            lastMessageSenderName: "AcciZard Lucban",
+            lastAccessTime: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+          
+          logger.info(`Automatic welcome message sent to user ${userId}`);
+        }
+        
+        // Get all web users (users with webFcmToken)
+        const usersSnapshot = await admin.firestore().collection("users").get();
+        
+        const webUsers = usersSnapshot.docs
+          .map(doc => ({
+            userId: doc.id,
+            webFcmToken: doc.data().webFcmToken
+          }))
+          .filter(user => user.webFcmToken); // Only users with web FCM tokens
+
+        if (webUsers.length === 0) {
+          logger.info("No web users with FCM tokens found");
+          return;
+        }
+
+        logger.info(`Sending chat notification to ${webUsers.length} web users`);
+
+        // Prepare base notification payload
+        const basePayload = {
+          notification: {
+            title: senderName || "New Message",
+            body: notificationBody,
+          },
+          data: {
+            type: "chat_message",
+            userId: userId,
+            messageId: event.params.messageId,
+            senderId: senderId,
+            senderName: senderName || "New Message",
+          },
+          android: {
+            priority: "high" as const,
+            notification: {
+              sound: "default",
+              channelId: "chat_messages",
+              priority: "high" as const,
+            },
+          },
+          apns: {
+            payload: {
+              aps: {
+                sound: "default",
+                badge: 1,
+              },
+            },
+          },
+        };
+
+        // Send notifications in batches (FCM limit: 500 per batch)
+        const batchSize = 500;
+        const batches = [];
+        
+        for (let i = 0; i < webUsers.length; i += batchSize) {
+          const batch = webUsers.slice(i, i + batchSize);
+          batches.push(batch);
+        }
+
+        let successCount = 0;
+        let failureCount = 0;
+        const invalidTokens: string[] = [];
+
+        for (const batch of batches) {
+          const messages = batch.map(user => ({
+            ...basePayload,
+            token: user.webFcmToken,
+          }));
+
+          try {
+            const response = await admin.messaging().sendEach(messages);
+            
+            successCount += response.successCount;
+            failureCount += response.failureCount;
+
+            // Track invalid tokens
+            response.responses.forEach((result, index) => {
+              if (!result.success && result.error) {
+                const errorCode = result.error.code;
+                if (errorCode === "messaging/invalid-registration-token" ||
+                    errorCode === "messaging/registration-token-not-registered") {
+                  invalidTokens.push(batch[index].userId);
+                }
+              }
+            });
+            
+          } catch (error: any) {
+            logger.error("Error sending batch notifications:", error);
+            failureCount += batch.length;
+          }
+        }
+
+        // Remove invalid tokens from Firestore
+        if (invalidTokens.length > 0) {
+          logger.info(`Removing ${invalidTokens.length} invalid web FCM tokens`);
+          
+          const deletePromises = invalidTokens.map(userId =>
+            admin.firestore().collection("users").doc(userId).update({
+              webFcmToken: admin.firestore.FieldValue.delete()
+            })
+          );
+          
+          await Promise.all(deletePromises);
+        }
+
+        logger.info(`Chat notification sent to web users. Success: ${successCount}, Failed: ${failureCount}, Invalid tokens removed: ${invalidTokens.length}`);
+      }
       
     } catch (error: any) {
-      logger.error(`Error sending notification to user ${userId}:`, error);
+      logger.error(`Error sending chat notification:`, error);
       
       // If token is invalid, remove it from Firestore
       if (error.code === "messaging/invalid-registration-token" || 
           error.code === "messaging/registration-token-not-registered") {
-        logger.info(`Removing invalid web FCM token for user ${userId}`);
+        logger.info(`Removing invalid FCM token for user ${userId}`);
         await admin.firestore().collection("users").doc(userId).update({
+          fcmToken: admin.firestore.FieldValue.delete(),
           webFcmToken: admin.firestore.FieldValue.delete()
         });
       }

@@ -452,6 +452,111 @@ export function PinModal({
           }}
         >
           <div className="space-y-3">
+          {/* Location Section - Moved to top */}
+          <div className="space-y-2">
+            {/* Location Name */}
+            <div className="space-y-1">
+              <Label htmlFor="location-name" className="text-sm font-medium text-gray-700">
+                Location Name
+              </Label>
+              <Input
+                id="location-name"
+                placeholder="Location will be set automatically"
+                value={formData.locationName}
+                readOnly={mode === "edit" || isUnpinningFromReport}
+                disabled={mode === "edit" || isUnpinningFromReport}
+                className="h-10 bg-gray-50 cursor-not-allowed border-gray-200"
+              />
+            </div>
+
+            {/* Coordinates */}
+            <div className="space-y-1">
+              <Label htmlFor="coordinates" className="text-sm font-medium text-gray-700">
+                Coordinates
+              </Label>
+              <Input
+                id="coordinates"
+                type="text"
+                placeholder="Latitude, Longitude (e.g., 14.1139, 121.5556)"
+                value={coordinatesInput}
+                readOnly={isUnpinningFromReport}
+                disabled={isUnpinningFromReport}
+                onChange={(e) => {
+                  if (isUnpinningFromReport) return;
+                  const val = e.target.value;
+                  
+                  // Update input value immediately for free typing
+                  setCoordinatesInput(val);
+                  
+                  const trimmedVal = val.trim();
+                  if (trimmedVal === '') {
+                    setFormData(prev => ({ ...prev, latitude: null, longitude: null }));
+                    setCoordinatesError(false);
+                    if (onCoordinatesChange) {
+                      onCoordinatesChange({ lat: 0, lng: 0 }); // Clear marker
+                    }
+                    return;
+                  }
+                  
+                  // Parse "Latitude, Longitude" format
+                  const parts = trimmedVal.split(',').map(p => p.trim());
+                  
+                  // Check for error: text entered but no comma, or comma but invalid values
+                  if (parts.length === 1) {
+                    // Has text but no comma - show error
+                    setCoordinatesError(true);
+                    setFormData(prev => ({ ...prev, latitude: null, longitude: null }));
+                  } else if (parts.length === 2) {
+                    const lat = parseFloat(parts[0]);
+                    const lng = parseFloat(parts[1]);
+                    if (!isNaN(lat) && !isNaN(lng)) {
+                      // Valid coordinates - clear error
+                      setCoordinatesError(false);
+                      
+                      // Validate latitude range (-90 to 90)
+                      const validLat = Math.max(-90, Math.min(90, lat));
+                      // Validate longitude range (-180 to 180)
+                      const validLng = Math.max(-180, Math.min(180, lng));
+                      
+                      setFormData(prev => ({ ...prev, latitude: validLat, longitude: validLng }));
+                      
+                      // Notify parent to update marker position
+                      if (onCoordinatesChange) {
+                        onCoordinatesChange({ lat: validLat, lng: validLng });
+                      }
+                    } else {
+                      // Has comma but invalid numbers - show error
+                      setCoordinatesError(true);
+                      setFormData(prev => ({ ...prev, latitude: null, longitude: null }));
+                    }
+                  } else {
+                    // More than 2 parts (multiple commas) - show error
+                    setCoordinatesError(true);
+                    setFormData(prev => ({ ...prev, latitude: null, longitude: null }));
+                  }
+                }}
+                className={cn(
+                  "h-10",
+                  isUnpinningFromReport 
+                    ? "bg-gray-50 cursor-not-allowed border-gray-200" 
+                    : coordinatesError
+                      ? "border-red-500 focus:border-red-500 focus:ring-red-500/20"
+                      : "border-gray-300 focus:border-black focus:ring-black/20"
+                )}
+              />
+              {coordinatesError && (
+                <p className="text-xs text-red-500 mt-1">
+                  Please enter coordinates in the format: Latitude, Longitude (e.g., 14.1139, 121.5556)
+                </p>
+              )}
+              {!coordinatesError && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Enter coordinates manually or click on the map. Marker will update automatically when both values are entered.
+                </p>
+              )}
+            </div>
+          </div>
+
           {/* Pin Type */}
           <div className="space-y-1.5">
             <Label htmlFor="pin-type" className="text-sm font-medium text-gray-700">
@@ -625,111 +730,6 @@ export function PinModal({
               </div>
             </div>
           )}
-
-          {/* Location Section */}
-          <div className="space-y-2">
-            {/* Location Name */}
-            <div className="space-y-1">
-              <Label htmlFor="location-name" className="text-sm font-medium text-gray-700">
-                Location Name
-              </Label>
-              <Input
-                id="location-name"
-                placeholder="Location will be set automatically"
-                value={formData.locationName}
-                readOnly={mode === "edit" || isUnpinningFromReport}
-                disabled={mode === "edit" || isUnpinningFromReport}
-                className="h-10 bg-gray-50 cursor-not-allowed border-gray-200"
-              />
-            </div>
-
-            {/* Coordinates */}
-            <div className="space-y-1 mb-4">
-              <Label htmlFor="coordinates" className="text-sm font-medium text-gray-700">
-                Coordinates
-              </Label>
-              <Input
-                id="coordinates"
-                type="text"
-                placeholder="Latitude, Longitude (e.g., 14.1139, 121.5556)"
-                value={coordinatesInput}
-                readOnly={isUnpinningFromReport}
-                disabled={isUnpinningFromReport}
-                onChange={(e) => {
-                  if (isUnpinningFromReport) return;
-                  const val = e.target.value;
-                  
-                  // Update input value immediately for free typing
-                  setCoordinatesInput(val);
-                  
-                  const trimmedVal = val.trim();
-                  if (trimmedVal === '') {
-                    setFormData(prev => ({ ...prev, latitude: null, longitude: null }));
-                    setCoordinatesError(false);
-                    if (onCoordinatesChange) {
-                      onCoordinatesChange({ lat: 0, lng: 0 }); // Clear marker
-                    }
-                    return;
-                  }
-                  
-                  // Parse "Latitude, Longitude" format
-                  const parts = trimmedVal.split(',').map(p => p.trim());
-                  
-                  // Check for error: text entered but no comma, or comma but invalid values
-                  if (parts.length === 1) {
-                    // Has text but no comma - show error
-                    setCoordinatesError(true);
-                    setFormData(prev => ({ ...prev, latitude: null, longitude: null }));
-                  } else if (parts.length === 2) {
-                    const lat = parseFloat(parts[0]);
-                    const lng = parseFloat(parts[1]);
-                    if (!isNaN(lat) && !isNaN(lng)) {
-                      // Valid coordinates - clear error
-                      setCoordinatesError(false);
-                      
-                      // Validate latitude range (-90 to 90)
-                      const validLat = Math.max(-90, Math.min(90, lat));
-                      // Validate longitude range (-180 to 180)
-                      const validLng = Math.max(-180, Math.min(180, lng));
-                      
-                      setFormData(prev => ({ ...prev, latitude: validLat, longitude: validLng }));
-                      
-                      // Notify parent to update marker position
-                      if (onCoordinatesChange) {
-                        onCoordinatesChange({ lat: validLat, lng: validLng });
-                      }
-                    } else {
-                      // Has comma but invalid numbers - show error
-                      setCoordinatesError(true);
-                      setFormData(prev => ({ ...prev, latitude: null, longitude: null }));
-                    }
-                  } else {
-                    // More than 2 parts (multiple commas) - show error
-                    setCoordinatesError(true);
-                    setFormData(prev => ({ ...prev, latitude: null, longitude: null }));
-                  }
-                }}
-                className={cn(
-                  "h-10",
-                  isUnpinningFromReport 
-                    ? "bg-gray-50 cursor-not-allowed border-gray-200" 
-                    : coordinatesError
-                      ? "border-red-500 focus:border-red-500 focus:ring-red-500/20"
-                      : "border-gray-300 focus:border-black focus:ring-black/20"
-                )}
-              />
-              {coordinatesError && (
-                <p className="text-xs text-red-500 mt-1">
-                  Please enter coordinates in the format: Latitude, Longitude (e.g., 14.1139, 121.5556)
-                </p>
-              )}
-              {!coordinatesError && (
-                <p className="text-xs text-gray-500 mt-1">
-                  Enter coordinates manually or click on the map. Marker will update automatically when both values are entered.
-                </p>
-              )}
-            </div>
-          </div>
 
           {/* Map Click Helper */}
           {isWaitingForMapClick && (

@@ -1200,6 +1200,12 @@ ${placemarks}
                   state: { searchTerm: reportId } 
                 });
               }}
+              onZoomChange={(newZoom) => {
+                setMapZoom(newZoom);
+              }}
+              onCenterChange={(newCenter) => {
+                setMapCenter(newCenter);
+              }}
               onMapClick={async (lngLat) => {
                 // If in add placemark mode, place the marker and open the form
                 if (isAddPlacemarkMode) {

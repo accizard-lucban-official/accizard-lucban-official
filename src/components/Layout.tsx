@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Sidebar } from "./Sidebar";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Home, ClipboardList, BarChart3, MessageSquare, Bell, Users, User, LucideIcon, Menu, Activity, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
@@ -12,9 +12,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { db } from "@/lib/firebase";
+import { db, auth } from "@/lib/firebase";
 import { collection, onSnapshot, query, orderBy, where } from "firebase/firestore";
+import { signOut } from "firebase/auth";
 import { useUserRole } from "@/hooks/useUserRole";
+import { SessionManager } from "@/lib/sessionManager";
+import { toast } from "@/components/ui/sonner";
+import { logActivity, ActionType } from "@/lib/activityLogger";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -92,6 +96,7 @@ export function Layout({ children }: LayoutProps) {
     avatarUrl: ""
   });
   const location = useLocation();
+  const navigate = useNavigate();
   const currentPage = pageConfig[location.pathname] || {
     title: "404",
     subtitle: "Page not found"
@@ -320,6 +325,39 @@ export function Layout({ children }: LayoutProps) {
     }
   }, []);
 
+  const handleProfileClick = () => {
+    navigate("/profile");
+  };
+
+  const handleSignOut = async () => {
+    try {
+      // Log activity before clearing session
+      const currentUser = SessionManager.getCurrentUser();
+      if (currentUser) {
+        await logActivity({
+          userId: currentUser.userId || currentUser.username || "unknown",
+          username: currentUser.username || currentUser.name || "Unknown User",
+          actionType: ActionType.USER_LOGGED_OUT,
+          details: {
+            logoutMethod: "manual"
+          }
+        });
+      }
+      
+      // Clear session using SessionManager
+      SessionManager.clearSession();
+      
+      // Sign out from Firebase Auth (for super admins)
+      await signOut(auth);
+      
+      toast.success("You have been logged out successfully");
+      navigate("/login");
+    } catch (error) {
+      console.error("Sign out error:", error);
+      toast.error("Error during logout. Please try again.");
+    }
+  };
+
   return (
     <div className="flex w-full h-screen bg-brand-orange overflow-hidden">
       <Sidebar 
@@ -368,10 +406,9 @@ export function Layout({ children }: LayoutProps) {
                   <DropdownMenuContent align="end" className="w-56">
                     <DropdownMenuLabel>My Account</DropdownMenuLabel>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem>Profile</DropdownMenuItem>
-                    <DropdownMenuItem>Switch Account</DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleProfileClick}>My Profile</DropdownMenuItem>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem className="text-red-600">Sign out</DropdownMenuItem>
+                    <DropdownMenuItem className="text-red-600" onClick={handleSignOut}>Sign Out</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>

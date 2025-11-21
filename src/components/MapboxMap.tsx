@@ -248,6 +248,8 @@ interface MapboxMapProps {
   onLegendClick?: () => void; // Callback when legend button is clicked
   isAddPlacemarkMode?: boolean; // When true, shows marker cursor and allows placing placemarks
   onReportIdClick?: (reportId: string) => void; // Callback when RID is clicked in info window
+  onZoomChange?: (zoom: number) => void; // Callback when zoom changes
+  onCenterChange?: (center: [number, number]) => void; // Callback when center changes
 }
 
 // Sample data for markers - currently empty, will be populated from database
@@ -299,7 +301,9 @@ export function MapboxMap({
   disableSingleMarkerPulse = false,
   onLegendClick, // Optional callback for legend button
   isAddPlacemarkMode = false, // Optional add placemark mode
-  onReportIdClick // Optional callback when RID is clicked
+  onReportIdClick, // Optional callback when RID is clicked
+  onZoomChange, // Optional callback when zoom changes
+  onCenterChange // Optional callback when center changes
 }: MapboxMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
@@ -321,6 +325,7 @@ export function MapboxMap({
   const onMapClickRef = useRef(onMapClick);
   const mapClickHandlerRef = useRef<((e: mapboxgl.MapMouseEvent) => void) | null>(null);
   const travelTimeRequestRef = useRef<{ key: string; controller: AbortController | null } | null>(null);
+  const isProgrammaticChangeRef = useRef(false); // Track if we're programmatically changing zoom/center
   const lastRouteKeyRef = useRef<string | null>(null);
   const lastTravelTimeDataRef = useRef<{ key: string; duration: string; distance: number } | null>(null);
   const lastRouteDataRef = useRef<any>(null);
@@ -450,45 +455,28 @@ export function MapboxMap({
     const el = document.createElement('div');
     el.className = 'custom-marker';
     
-    // Optimal sizes: 48px for featured markers, 38px for regular markers
-    const size = isSingleMarker ? 48 : 38;
+    // Optimal sizes: 48px for featured markers, 40px for regular markers (matching DashboardStats)
+    const size = isSingleMarker ? 48 : 40;
+    const iconPath = getMarkerImageUrl(type);
     
-    // CRITICAL: Set dimensions with min-width/min-height to prevent collapse during zoom
-    el.style.width = `${size}px`;
-    el.style.height = `${size}px`;
-    el.style.minWidth = `${size}px`;
-    el.style.minHeight = `${size}px`;
-    el.style.position = 'relative';
-    el.style.willChange = 'transform'; // Optimize for transform operations during zoom
-    el.style.flexShrink = '0'; // Prevent marker from shrinking
-    el.style.flexGrow = '0'; // Prevent marker from growing
-    el.style.boxSizing = 'border-box'; // Ensure padding/border don't affect size
-    
-    // Create image element for the marker icon
-    const img = document.createElement('img');
-    img.src = getMarkerImageUrl(type);
-    img.alt = type;
-    img.style.width = '100%';
-    img.style.height = '100%';
-    img.style.display = 'block';
-    img.style.objectFit = 'contain';
-    img.style.position = 'absolute';
-    img.style.top = '0';
-    img.style.left = '0';
+    // Use exact same approach as DashboardStats for zoom stability
+    // Simple CSS with background-image - no extra properties that could interfere
+    el.style.cssText = `
+      width: ${size}px;
+      height: ${size}px;
+      cursor: pointer;
+      background-image: url('${iconPath}');
+      background-size: contain;
+      background-repeat: no-repeat;
+      background-position: center;
+    `;
     
     // Fallback: if image fails to load, use default.svg
-    img.onerror = () => {
-      console.warn(`Failed to load marker image for ${type}, using default.svg fallback`);
-      img.src = '/markers/default.svg';
-      img.onerror = null; // Prevent infinite loop if default.svg also fails
+    const testImg = new Image();
+    testImg.onerror = () => {
+      el.style.backgroundImage = "url('/markers/default.svg')";
     };
-    
-    el.style.cursor = 'pointer';
-    
-    // Add the image to the container
-    el.appendChild(img);
-    
-    // No hover effects to prevent positioning issues
+    testImg.src = iconPath;
     
     // Add a pulsing animation for single markers
     if (isSingleMarker && enablePulse) {
@@ -1047,11 +1035,15 @@ export function MapboxMap({
             
             // Center the map on the selected location
             if (map.current) {
+              isProgrammaticChangeRef.current = true;
               map.current.flyTo({
                 center: coordinates,
                 zoom: 16, // Zoom in closer to the selected location
                 essential: true
               });
+              setTimeout(() => {
+                isProgrammaticChangeRef.current = false;
+              }, 1000);
             }
 
             // Display route if user location is available and directions are enabled
@@ -1090,6 +1082,26 @@ export function MapboxMap({
           // Track the initial style (use externalStyle if provided, otherwise mapStyle)
           const initialStyle = externalStyle || mapStyle;
           lastAppliedStyleRef.current = initialStyle;
+
+          // Add zoom change listener
+          if (onZoomChange) {
+            map.current.on('zoomend', () => {
+              if (!isProgrammaticChangeRef.current && map.current) {
+                const currentZoom = map.current.getZoom();
+                onZoomChange(currentZoom);
+              }
+            });
+          }
+
+          // Add center change listener
+          if (onCenterChange) {
+            map.current.on('moveend', () => {
+              if (!isProgrammaticChangeRef.current && map.current) {
+                const currentCenter = map.current.getCenter();
+                onCenterChange([currentCenter.lng, currentCenter.lat]);
+              }
+            });
+          }
 
           // Hide all layers except lucban-boundary on initial load
           const allLayers = map.current.getStyle().layers;
@@ -1153,12 +1165,16 @@ export function MapboxMap({
           // Only center and zoom if directions are enabled
           if (showDirections) {
             // Center the map on the clicked location
+            isProgrammaticChangeRef.current = true;
             map.current.easeTo({
               center: [e.lngLat.lng, e.lngLat.lat],
               zoom: 12,
               essential: true,
               duration: 600
             });
+            setTimeout(() => {
+              isProgrammaticChangeRef.current = false;
+            }, 650);
 
             // Display route if user location is available
             if (userLocation) {
@@ -1265,12 +1281,20 @@ export function MapboxMap({
       return;
     }
 
+    // Mark as programmatic change to prevent triggering callbacks
+    isProgrammaticChangeRef.current = true;
+    
     mapInstance.easeTo({
       center: center,
       zoom: zoom,
       essential: true,
       duration: 800
     });
+
+    // Reset flag after animation completes
+    setTimeout(() => {
+      isProgrammaticChangeRef.current = false;
+    }, 850);
   }, [center, zoom, mapLoaded, showOnlyCurrentLocation]);
 
   // Handle markers and popups
@@ -1593,11 +1617,8 @@ export function MapboxMap({
         // Create marker element
         const el = createMarkerElement(pin.type, false, false);
         
-        // Create marker instance
-        const markerInstance = new mapboxgl.Marker({
-          element: el,
-          anchor: 'center'
-        })
+        // Create marker instance - match DashboardStats approach (no anchor specified, uses default 'bottom')
+        const markerInstance = new mapboxgl.Marker(el)
         .setLngLat([pin.longitude, pin.latitude])
         .addTo(map.current!);
 

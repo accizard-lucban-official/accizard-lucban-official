@@ -1359,10 +1359,11 @@ useEffect(() => {
           return true;
         };
 
-        // Helper function to render a table row only if value exists
+        // Helper function to render a table row (always shows, even if value is empty)
         const renderRow = (label: string, value: any, formatter?: (val: any) => string): string => {
-          if (!hasValue(value)) return '';
-          const formattedValue = formatter ? formatter(value) : value;
+          const formattedValue = hasValue(value) 
+            ? (formatter ? formatter(value) : value)
+            : '';
           return `
             <tr>
               <th>${label}</th>
@@ -1371,17 +1372,19 @@ useEffect(() => {
           `;
         };
 
-        // Helper function to render a 4-column row (two key-value pairs side-by-side)
+        // Helper function to render a 4-column row (two key-value pairs side-by-side, always shows)
         const renderFourColumnRow = (
           leftLabel: string, leftValue: any, 
           rightLabel: string, rightValue: any,
           leftFormatter?: (val: any) => string,
           rightFormatter?: (val: any) => string
         ): string => {
-          const leftFormatted = leftValue && hasValue(leftValue) ? (leftFormatter ? leftFormatter(leftValue) : leftValue) : '';
-          const rightFormatted = rightValue && hasValue(rightValue) ? (rightFormatter ? rightFormatter(rightValue) : rightValue) : '';
-          
-          if (!leftFormatted && !rightFormatted) return '';
+          const leftFormatted = leftValue && hasValue(leftValue) 
+            ? (leftFormatter ? leftFormatter(leftValue) : leftValue) 
+            : '';
+          const rightFormatted = rightValue && hasValue(rightValue) 
+            ? (rightFormatter ? rightFormatter(rightValue) : rightValue) 
+            : '';
           
           return `
             <tr>
@@ -1452,12 +1455,12 @@ useEffect(() => {
           // Get admin name who generated the PDF
           const adminName = currentUser?.name || "Admin";
           
-          // Build Report Details rows
+          // Build Report Details rows (always show all rows)
           const reportDetailsRows = [
             renderRow('Report Type', report?.type),
             renderRow('Status', report?.status),
             renderRow('Reported By', report?.reportedBy),
-            renderRow('Date and Time Submitted', 
+            renderRow('Date and Time', 
               report?.dateSubmitted 
                 ? `${report.dateSubmitted}${report?.timeSubmitted ? ` at ${report.timeSubmitted}` : ''}`
                 : null
@@ -1472,9 +1475,9 @@ useEffect(() => {
                     : ''}`
                 : null
             ),
-          ].filter(row => row !== '').join('');
+          ].join('');
 
-          // Build Dispatch Form rows (4-column layout: two key-value pairs side-by-side)
+          // Build Dispatch Form rows (4-column layout: two key-value pairs side-by-side, always show all rows)
           const dispatchRows = [
             renderFourColumnRow(
               'Received By', dispatch?.receivedBy,
@@ -1517,7 +1520,7 @@ useEffect(() => {
                 ? dispatch.majorInjuryTypes.join(', ')
                 : null
             ),
-          ].filter(row => row !== '').join('');
+          ].join('');
 
           // Build Actions Taken section (separate section with single large cell)
           const actionsTakenContent = dispatch?.actionsTaken && dispatch.actionsTaken.length > 0
@@ -1527,6 +1530,141 @@ useEffect(() => {
           // Build Patient Information - Matching the exact layout from the image
           // The table is a 4-column structure: Label | Value | Label | Value
           // Exact row-by-row layout as specified in the image
+          
+          // Helper function to generate an empty patient section
+          const generateEmptyPatientSection = (): string => {
+            const renderFourColumnRow = (
+              leftLabel: string, leftValue: any,
+              rightLabel: string, rightValue: any
+            ): string => {
+              const leftFormatted = leftValue && hasValue(leftValue) ? leftValue : '';
+              const rightFormatted = rightValue && hasValue(rightValue) ? rightValue : '';
+              
+              return `
+                <tr>
+                  <th>${leftLabel}</th>
+                  <td class="value-cell">${leftFormatted}</td>
+                  <th>${rightLabel}</th>
+                  <td class="value-cell">${rightFormatted}</td>
+                </tr>
+              `;
+            };
+
+            const patientRows = [];
+            
+            // Row 2: Patient identifier (light orange, spans 4 columns)
+            patientRows.push(`
+              <tr>
+                <td colspan="4" class="sub-section-title-cell">Patient 1</td>
+              </tr>
+            `);
+            
+            // Row 3: Name (left) | D. Perfusion Assessment header (right, light orange, spans 2 columns)
+            patientRows.push(renderFourColumnRow(
+              'Name',
+              '',
+              '',
+              ''
+            ));
+            
+            // Row 4: Contact Number (left) | Skin (right)
+            patientRows.push(renderFourColumnRow(
+              'Contact Number',
+              '',
+              'Skin',
+              ''
+            ));
+            
+            // Row 5: Address (left) | Pulse (right)
+            patientRows.push(renderFourColumnRow(
+              'Address',
+              '',
+              'Pulse',
+              ''
+            ));
+            
+            // Row 6: Age (left) | E. Vital Signs header (right, light orange, spans 2 columns)
+            patientRows.push(renderFourColumnRow(
+              'Age',
+              '',
+              '',
+              ''
+            ));
+            
+            // Row 7: Gender (left) | Time Taken (right)
+            patientRows.push(renderFourColumnRow(
+              'Gender',
+              '',
+              'Time Taken',
+              ''
+            ));
+            
+            // Row 8: A. Glasgow Coma Scale header (left, light orange, spans 2 columns) | Temperature (right)
+            patientRows.push(renderFourColumnRow(
+              '',
+              '',
+              'Temperature',
+              ''
+            ));
+            
+            // Row 9: Eyes Response (left) | Pulse Rate (right)
+            patientRows.push(renderFourColumnRow(
+              'Eyes Response',
+              '',
+              'Pulse Rate',
+              ''
+            ));
+            
+            // Row 10: Verbal Response (left) | Respiratory Rate (right)
+            patientRows.push(renderFourColumnRow(
+              'Verbal Response',
+              '',
+              'Respiratory Rate',
+              ''
+            ));
+            
+            // Row 11: Motor Response (left) | Blood Pressure (right)
+            patientRows.push(renderFourColumnRow(
+              'Motor Response',
+              '',
+              'Blood Pressure',
+              ''
+            ));
+            
+            // Row 12: GCS Total Score (left) | SPO2 (right)
+            patientRows.push(renderFourColumnRow(
+              'GCS Total Score',
+              '',
+              'SPO2',
+              ''
+            ));
+            
+            // Row 13: B. Pupil Assessment (left, split into label and value cells) | Random Blood Sugar (right)
+            patientRows.push(renderFourColumnRow(
+              '',
+              '',
+              'Random Blood Sugar',
+              ''
+            ));
+            
+            // Row 14: C. Lung Sounds (left, split into label and value cells) | Pain Scale (right)
+            patientRows.push(renderFourColumnRow(
+              '',
+              '',
+              'Pain Scale',
+              ''
+            ));
+
+            return `
+              <table class="patient-information-table">
+                <tr class="section-title-row">
+                  <td colspan="4">IV. Patient Information</td>
+                </tr>
+                ${patientRows.join('')}
+              </table>
+            `;
+          };
+
           const patientSections = patientData && patientData.length > 0
             ? patientData.map((patient: any, index: number) => {
                 const gcsTotal = calculateGCSTotal(patient);
@@ -1720,14 +1858,7 @@ useEffect(() => {
                   ));
                 }
 
-                // Only show patient section if there's at least basic info
-                const hasBasicInfo = hasValue(patient.name) || hasValue(patient.contactNumber) || 
-                                     hasValue(patient.address) || hasValue(patient.age) || 
-                                     hasValue(patient.gender);
-                if (!hasBasicInfo) {
-                  return '';
-                }
-
+                // Always show patient section (maintain table structure)
                 return `
                   <table class="patient-information-table">
                     <tr class="section-title-row">
@@ -1736,15 +1867,10 @@ useEffect(() => {
                     ${patientRows.join('')}
                   </table>
                 `;
-              }).filter(section => section !== '').join('')
-            : '';
+              }).join('')
+            : generateEmptyPatientSection();
 
-          // Only show sections if they have data
-          const hasReportDetails = reportDetailsRows !== '';
-          const hasDispatchInfo = dispatchRows !== '';
-          const hasActionsTaken = actionsTakenContent !== '';
-          const hasPatientInfo = patientSections !== '';
-          
+          // Always show all sections (maintain table structure)
           return `
             <!DOCTYPE html>
             <html>
@@ -2224,37 +2350,31 @@ useEffect(() => {
                 <div class="header-date-time">DATE/TIME: ${formattedDateTime}</div>
                 
                 <div class="sections-container">
-                  ${hasReportDetails ? `
                   <table>
                     <tr class="section-title-row">
                       <td colspan="2">I. Report Details</td>
                     </tr>
-                      ${reportDetailsRows}
-                    </table>
-                  ` : '<div></div>'}
+                    ${reportDetailsRows}
+                  </table>
                   
-                  ${hasDispatchInfo ? `
-                    <table class="four-column">
+                  <table class="four-column">
                     <tr class="section-title-row">
                       <td colspan="4">II. Dispatch Form</td>
                     </tr>
-                      ${dispatchRows}
-                    </table>
-                  ` : '<div></div>'}
+                    ${dispatchRows}
+                  </table>
                 </div>
                 
-                ${hasActionsTaken ? `
-                  <table class="actions-taken">
-                    <tr class="section-title-row">
-                      <td colspan="2">III. Actions Taken</td>
-                    </tr>
-                    <tr>
-                      <td colspan="2" class="value-cell">${actionsTakenContent}</td>
-                    </tr>
-                  </table>
-                ` : ''}
+                <table class="actions-taken">
+                  <tr class="section-title-row">
+                    <td colspan="2">III. Actions Taken</td>
+                  </tr>
+                  <tr>
+                    <td colspan="2" class="value-cell">${actionsTakenContent || ''}</td>
+                  </tr>
+                </table>
                 
-                ${hasPatientInfo ? patientSections : ''}
+                ${patientSections}
                             
                 <div class="consent-section">
                   <div class="consent-column">
@@ -2994,10 +3114,11 @@ useEffect(() => {
         return true;
       };
 
-      // Helper function to render a table row only if value exists
+      // Helper function to render a table row (always shows, even if value is empty)
       const renderRow = (label: string, value: any, formatter?: (val: any) => string): string => {
-        if (!hasValue(value)) return '';
-        const formattedValue = formatter ? formatter(value) : value;
+        const formattedValue = hasValue(value) 
+          ? (formatter ? formatter(value) : value)
+          : '';
         return `
           <tr>
             <th>${label}</th>
@@ -3006,17 +3127,19 @@ useEffect(() => {
         `;
       };
 
-      // Helper function to render a 4-column row (two key-value pairs side-by-side)
+      // Helper function to render a 4-column row (two key-value pairs side-by-side, always shows)
       const renderFourColumnRow = (
         leftLabel: string, leftValue: any, 
         rightLabel: string, rightValue: any,
         leftFormatter?: (val: any) => string,
         rightFormatter?: (val: any) => string
       ): string => {
-        const leftFormatted = leftValue && hasValue(leftValue) ? (leftFormatter ? leftFormatter(leftValue) : leftValue) : '';
-        const rightFormatted = rightValue && hasValue(rightValue) ? (rightFormatter ? rightFormatter(rightValue) : rightValue) : '';
-        
-        if (!leftFormatted && !rightFormatted) return '';
+        const leftFormatted = leftValue && hasValue(leftValue) 
+          ? (leftFormatter ? leftFormatter(leftValue) : leftValue) 
+          : '';
+        const rightFormatted = rightValue && hasValue(rightValue) 
+          ? (rightFormatter ? rightFormatter(rightValue) : rightValue) 
+          : '';
         
         return `
           <tr>
@@ -3087,12 +3210,12 @@ useEffect(() => {
         // Get admin name who generated the PDF
         const adminName = currentUser?.name || "Admin";
         
-        // Build Report Details rows
+        // Build Report Details rows (always show all rows)
         const reportDetailsRows = [
           renderRow('Report Type', report?.type),
           renderRow('Status', report?.status),
           renderRow('Reported By', report?.reportedBy),
-          renderRow('Date and Time Submitted', 
+          renderRow('Date and Time', 
             report?.dateSubmitted 
               ? `${report.dateSubmitted}${report?.timeSubmitted ? ` at ${report.timeSubmitted}` : ''}`
               : null
@@ -3106,9 +3229,9 @@ useEffect(() => {
                   : ''}`
               : null
           ),
-        ].filter(row => row !== '').join('');
+        ].join('');
 
-        // Build Dispatch Form rows (4-column layout: two key-value pairs side-by-side)
+        // Build Dispatch Form rows (4-column layout: two key-value pairs side-by-side, always show all rows)
         const dispatchRows = [
           renderFourColumnRow(
             'Received By', dispatch?.receivedBy,
@@ -3151,7 +3274,7 @@ useEffect(() => {
               ? dispatch.majorInjuryTypes.join(', ')
               : null
           ),
-        ].filter(row => row !== '').join('');
+        ].join('');
 
         // Build Actions Taken section (separate section with single large cell)
         const actionsTakenContent = dispatch?.actionsTaken && dispatch.actionsTaken.length > 0
@@ -3161,6 +3284,141 @@ useEffect(() => {
         // Build Patient Information - Matching the exact layout from the image
         // The table is a 4-column structure: Label | Value | Label | Value
         // Exact row-by-row layout as specified in the image
+        
+        // Helper function to generate an empty patient section
+        const generateEmptyPatientSection = (): string => {
+          const renderFourColumnRow = (
+            leftLabel: string, leftValue: any,
+            rightLabel: string, rightValue: any
+          ): string => {
+            const leftFormatted = leftValue && hasValue(leftValue) ? leftValue : '';
+            const rightFormatted = rightValue && hasValue(rightValue) ? rightValue : '';
+            
+            return `
+              <tr>
+                <th>${leftLabel}</th>
+                <td class="value-cell">${leftFormatted}</td>
+                <th>${rightLabel}</th>
+                <td class="value-cell">${rightFormatted}</td>
+              </tr>
+            `;
+          };
+
+          const patientRows = [];
+          
+          // Row 2: Patient identifier (light orange, spans 4 columns)
+          patientRows.push(`
+            <tr>
+              <td colspan="4" class="sub-section-title-cell">Patient 1</td>
+            </tr>
+          `);
+          
+          // Row 3: Name (left) | D. Perfusion Assessment header (right, light orange, spans 2 columns)
+          patientRows.push(renderFourColumnRow(
+            'Name',
+            '',
+            '',
+            ''
+          ));
+          
+          // Row 4: Contact Number (left) | Skin (right)
+          patientRows.push(renderFourColumnRow(
+            'Contact Number',
+            '',
+            'Skin',
+            ''
+          ));
+          
+          // Row 5: Address (left) | Pulse (right)
+          patientRows.push(renderFourColumnRow(
+            'Address',
+            '',
+            'Pulse',
+            ''
+          ));
+          
+          // Row 6: Age (left) | E. Vital Signs header (right, light orange, spans 2 columns)
+          patientRows.push(renderFourColumnRow(
+            'Age',
+            '',
+            '',
+            ''
+          ));
+          
+          // Row 7: Gender (left) | Time Taken (right)
+          patientRows.push(renderFourColumnRow(
+            'Gender',
+            '',
+            'Time Taken',
+            ''
+          ));
+          
+          // Row 8: A. Glasgow Coma Scale header (left, light orange, spans 2 columns) | Temperature (right)
+          patientRows.push(renderFourColumnRow(
+            '',
+            '',
+            'Temperature',
+            ''
+          ));
+          
+          // Row 9: Eyes Response (left) | Pulse Rate (right)
+          patientRows.push(renderFourColumnRow(
+            'Eyes Response',
+            '',
+            'Pulse Rate',
+            ''
+          ));
+          
+          // Row 10: Verbal Response (left) | Respiratory Rate (right)
+          patientRows.push(renderFourColumnRow(
+            'Verbal Response',
+            '',
+            'Respiratory Rate',
+            ''
+          ));
+          
+          // Row 11: Motor Response (left) | Blood Pressure (right)
+          patientRows.push(renderFourColumnRow(
+            'Motor Response',
+            '',
+            'Blood Pressure',
+            ''
+          ));
+          
+          // Row 12: GCS Total Score (left) | SPO2 (right)
+          patientRows.push(renderFourColumnRow(
+            'GCS Total Score',
+            '',
+            'SPO2',
+            ''
+          ));
+          
+          // Row 13: B. Pupil Assessment (left, split into label and value cells) | Random Blood Sugar (right)
+          patientRows.push(renderFourColumnRow(
+            '',
+            '',
+            'Random Blood Sugar',
+            ''
+          ));
+          
+          // Row 14: C. Lung Sounds (left, split into label and value cells) | Pain Scale (right)
+          patientRows.push(renderFourColumnRow(
+            '',
+            '',
+            'Pain Scale',
+            ''
+          ));
+
+          return `
+            <table class="patient-information-table">
+              <tr class="section-title-row">
+                <td colspan="4">IV. Patient Information</td>
+              </tr>
+              ${patientRows.join('')}
+            </table>
+          `;
+        };
+
         const patientSections = patientData && patientData.length > 0
           ? patientData.map((patient: any, index: number) => {
               const gcsTotal = calculateGCSTotal(patient);
@@ -3354,14 +3612,7 @@ useEffect(() => {
                 ));
               }
 
-              // Only show patient section if there's at least basic info
-              const hasBasicInfo = hasValue(patient.name) || hasValue(patient.contactNumber) || 
-                                   hasValue(patient.address) || hasValue(patient.age) || 
-                                   hasValue(patient.gender);
-              if (!hasBasicInfo) {
-                return '';
-              }
-
+              // Always show patient section (maintain table structure)
               return `
                 <table class="patient-information-table">
                   <tr class="section-title-row">
@@ -3370,14 +3621,11 @@ useEffect(() => {
                   ${patientRows.join('')}
                 </table>
               `;
-            }).filter(section => section !== '').join('')
-          : '';
+            }).join('')
+          : generateEmptyPatientSection();
 
         // Only show sections if they have data
-        const hasReportDetails = reportDetailsRows !== '';
-        const hasDispatchInfo = dispatchRows !== '';
-        const hasActionsTaken = actionsTakenContent !== '';
-        const hasPatientInfo = patientSections !== '';
+        // Always show all sections (maintain table structure)
         
         return `
           <!DOCTYPE html>
@@ -3872,37 +4120,31 @@ useEffect(() => {
               <div class="header-date-time">DATE/TIME: ${formattedDateTime}</div>
               
               <div class="sections-container">
-                ${hasReportDetails ? `
                 <table>
                   <tr class="section-title-row">
                     <td colspan="2">I. Report Details</td>
                   </tr>
-                    ${reportDetailsRows}
-                  </table>
-                ` : '<div></div>'}
+                  ${reportDetailsRows}
+                </table>
                 
-                ${hasDispatchInfo ? `
-                  <table class="four-column">
+                <table class="four-column">
                   <tr class="section-title-row">
                     <td colspan="4">II. Dispatch Form</td>
                   </tr>
-                    ${dispatchRows}
-                  </table>
-                ` : '<div></div>'}
+                  ${dispatchRows}
+                </table>
               </div>
               
-              ${hasActionsTaken ? `
-                <table class="actions-taken">
-                  <tr class="section-title-row">
-                    <td colspan="2">III. Actions Taken</td>
-                  </tr>
-                  <tr>
-                    <td colspan="2" class="value-cell">${actionsTakenContent}</td>
-                  </tr>
-                </table>
-              ` : ''}
+              <table class="actions-taken">
+                <tr class="section-title-row">
+                  <td colspan="2">III. Actions Taken</td>
+                </tr>
+                <tr>
+                  <td colspan="2" class="value-cell">${actionsTakenContent || ''}</td>
+                </tr>
+              </table>
               
-              ${hasPatientInfo ? patientSections : ''}
+              ${patientSections}
               
               <div class="consent-section">
                 <div class="consent-column">
@@ -4564,10 +4806,11 @@ useEffect(() => {
       return true;
     };
 
-    // Helper function to render a table row only if value exists
+    // Helper function to render a table row (always shows, even if value is empty)
     const renderRow = (label: string, value: any, formatter?: (val: any) => string): string => {
-      if (!hasValue(value)) return '';
-      const formattedValue = formatter ? formatter(value) : value;
+      const formattedValue = hasValue(value) 
+        ? (formatter ? formatter(value) : value)
+        : '';
       return `
         <tr>
           <th>${label}</th>
@@ -4576,17 +4819,19 @@ useEffect(() => {
       `;
     };
 
-    // Helper function to render a 4-column row (two key-value pairs side-by-side)
+    // Helper function to render a 4-column row (two key-value pairs side-by-side, always shows)
     const renderFourColumnRow = (
       leftLabel: string, leftValue: any, 
       rightLabel: string, rightValue: any,
       leftFormatter?: (val: any) => string,
       rightFormatter?: (val: any) => string
     ): string => {
-      const leftFormatted = leftValue && hasValue(leftValue) ? (leftFormatter ? leftFormatter(leftValue) : leftValue) : '';
-      const rightFormatted = rightValue && hasValue(rightValue) ? (rightFormatter ? rightFormatter(rightValue) : rightValue) : '';
-      
-      if (!leftFormatted && !rightFormatted) return '';
+      const leftFormatted = leftValue && hasValue(leftValue) 
+        ? (leftFormatter ? leftFormatter(leftValue) : leftValue) 
+        : '';
+      const rightFormatted = rightValue && hasValue(rightValue) 
+        ? (rightFormatter ? rightFormatter(rightValue) : rightValue) 
+        : '';
       
       return `
         <tr>
@@ -4654,12 +4899,12 @@ useEffect(() => {
       const ampm = now.getHours() >= 12 ? "PM" : "AM";
       const formattedDateTime = `${mm}/${dd}/${yy} at ${hours12}:${minutes} ${ampm}`;
       
-      // Build Report Details rows
+      // Build Report Details rows (always show all rows)
       const reportDetailsRows = [
         renderRow('Report Type', report?.type),
         renderRow('Status', report?.status),
         renderRow('Reported By', report?.reportedBy),
-        renderRow('Date and Time Submitted', 
+        renderRow('Date and Time', 
           report?.dateSubmitted 
             ? `${report.dateSubmitted}${report?.timeSubmitted ? ` at ${report.timeSubmitted}` : ''}`
             : null
@@ -4674,9 +4919,9 @@ useEffect(() => {
                 : ''}`
             : null
         ),
-      ].filter(row => row !== '').join('');
+      ].join('');
 
-      // Build Dispatch Form rows (4-column layout: two key-value pairs side-by-side)
+      // Build Dispatch Form rows (4-column layout: two key-value pairs side-by-side, always show all rows)
       const dispatchRows = [
         renderFourColumnRow(
           'Received By', dispatch?.receivedBy,
@@ -4719,7 +4964,7 @@ useEffect(() => {
             ? dispatch.majorInjuryTypes.join(', ')
             : null
         ),
-      ].filter(row => row !== '').join('');
+      ].join('');
 
       // Build Actions Taken section (separate section with single large cell)
       const actionsTakenContent = dispatch?.actionsTaken && dispatch.actionsTaken.length > 0
@@ -4729,6 +4974,141 @@ useEffect(() => {
       // Build Patient Information - Matching the exact layout from the image
       // The table is a 4-column structure: Label | Value | Label | Value
       // Exact row-by-row layout as specified in the image
+      
+      // Helper function to generate an empty patient section
+      const generateEmptyPatientSection = (): string => {
+        const renderFourColumnRow = (
+          leftLabel: string, leftValue: any,
+          rightLabel: string, rightValue: any
+        ): string => {
+          const leftFormatted = leftValue && hasValue(leftValue) ? leftValue : '';
+          const rightFormatted = rightValue && hasValue(rightValue) ? rightValue : '';
+          
+          return `
+            <tr>
+              <th>${leftLabel}</th>
+              <td class="value-cell">${leftFormatted}</td>
+              <th>${rightLabel}</th>
+              <td class="value-cell">${rightFormatted}</td>
+            </tr>
+          `;
+        };
+
+        const patientRows = [];
+        
+        // Row 2: Patient identifier (light orange, spans 4 columns)
+        patientRows.push(`
+          <tr>
+            <td colspan="4" class="sub-section-title-cell">Patient 1</td>
+          </tr>
+        `);
+        
+        // Row 3: Name (left) | D. Perfusion Assessment header (right, light orange, spans 2 columns)
+        patientRows.push(renderFourColumnRow(
+          'Name',
+          '',
+          '',
+          ''
+        ));
+        
+        // Row 4: Contact Number (left) | Skin (right)
+        patientRows.push(renderFourColumnRow(
+          'Contact Number',
+          '',
+          'Skin',
+          ''
+        ));
+        
+        // Row 5: Address (left) | Pulse (right)
+        patientRows.push(renderFourColumnRow(
+          'Address',
+          '',
+          'Pulse',
+          ''
+        ));
+        
+        // Row 6: Age (left) | E. Vital Signs header (right, light orange, spans 2 columns)
+        patientRows.push(renderFourColumnRow(
+          'Age',
+          '',
+          '',
+          ''
+        ));
+        
+        // Row 7: Gender (left) | Time Taken (right)
+        patientRows.push(renderFourColumnRow(
+          'Gender',
+          '',
+          'Time Taken',
+          ''
+        ));
+        
+        // Row 8: A. Glasgow Coma Scale header (left, light orange, spans 2 columns) | Temperature (right)
+        patientRows.push(renderFourColumnRow(
+          '',
+          '',
+          'Temperature',
+          ''
+        ));
+        
+        // Row 9: Eyes Response (left) | Pulse Rate (right)
+        patientRows.push(renderFourColumnRow(
+          'Eyes Response',
+          '',
+          'Pulse Rate',
+          ''
+        ));
+        
+        // Row 10: Verbal Response (left) | Respiratory Rate (right)
+        patientRows.push(renderFourColumnRow(
+          'Verbal Response',
+          '',
+          'Respiratory Rate',
+          ''
+        ));
+        
+        // Row 11: Motor Response (left) | Blood Pressure (right)
+        patientRows.push(renderFourColumnRow(
+          'Motor Response',
+          '',
+          'Blood Pressure',
+          ''
+        ));
+        
+        // Row 12: GCS Total Score (left) | SPO2 (right)
+        patientRows.push(renderFourColumnRow(
+          'GCS Total Score',
+          '',
+          'SPO2',
+          ''
+        ));
+        
+        // Row 13: B. Pupil Assessment (left, split into label and value cells) | Random Blood Sugar (right)
+        patientRows.push(renderFourColumnRow(
+          '',
+          '',
+          'Random Blood Sugar',
+          ''
+        ));
+        
+        // Row 14: C. Lung Sounds (left, split into label and value cells) | Pain Scale (right)
+        patientRows.push(renderFourColumnRow(
+          '',
+          '',
+          'Pain Scale',
+          ''
+        ));
+
+        return `
+          <table class="patient-information-table">
+            <tr class="section-title-row">
+              <td colspan="4">IV. Patient Information</td>
+            </tr>
+            ${patientRows.join('')}
+          </table>
+        `;
+      };
+
       const patientSections = patientData && patientData.length > 0
         ? patientData.map((patient: any, index: number) => {
             const gcsTotal = calculateGCSTotal(patient);
@@ -4922,14 +5302,7 @@ useEffect(() => {
               ));
             }
 
-            // Only show patient section if there's at least basic info
-            const hasBasicInfo = hasValue(patient.name) || hasValue(patient.contactNumber) || 
-                                 hasValue(patient.address) || hasValue(patient.age) || 
-                                 hasValue(patient.gender);
-            if (!hasBasicInfo) {
-              return '';
-            }
-
+            // Always show patient section (maintain table structure)
             return `
               <table class="patient-information-table">
                 <tr class="section-title-row">
@@ -4938,14 +5311,11 @@ useEffect(() => {
                 ${patientRows.join('')}
               </table>
             `;
-          }).filter(section => section !== '').join('')
-        : '';
+          }).join('')
+        : generateEmptyPatientSection();
 
       // Only show sections if they have data
-      const hasReportDetails = reportDetailsRows !== '';
-      const hasDispatchInfo = dispatchRows !== '';
-      const hasActionsTaken = actionsTakenContent !== '';
-      const hasPatientInfo = patientSections !== '';
+      // Always show all sections (maintain table structure)
       
       return `
         <!DOCTYPE html>
@@ -5242,37 +5612,31 @@ useEffect(() => {
             <div class="header-date-time">DATE/TIME: ${formattedDateTime}</div>
             
             <div class="sections-container">
-              ${hasReportDetails ? `
               <table>
                 <tr class="section-title-row">
                   <td colspan="2">I. Report Details</td>
                 </tr>
-                  ${reportDetailsRows}
+                ${reportDetailsRows}
               </table>
-              ` : '<div></div>'}
               
-              ${hasDispatchInfo ? `
-                <table class="four-column">
-                  <tr class="section-title-row">
-                    <td colspan="4">II. Dispatch Form</td>
-                  </tr>
-                  ${dispatchRows}
-                </table>
-              ` : '<div></div>'}
+              <table class="four-column">
+                <tr class="section-title-row">
+                  <td colspan="4">II. Dispatch Form</td>
+                </tr>
+                ${dispatchRows}
+              </table>
             </div>
             
-            ${hasActionsTaken ? `
-              <table class="actions-taken">
-                <tr class="section-title-row">
-                  <td colspan="2">III. Actions Taken</td>
-                </tr>
-                <tr>
-                  <td colspan="2" class="value-cell">${actionsTakenContent}</td>
-                </tr>
-              </table>
-            ` : ''}
+            <table class="actions-taken">
+              <tr class="section-title-row">
+                <td colspan="2">III. Actions Taken</td>
+              </tr>
+              <tr>
+                <td colspan="2" class="value-cell">${actionsTakenContent || ''}</td>
+              </tr>
+            </table>
             
-            ${hasPatientInfo ? patientSections : ''}
+            ${patientSections}
                         
           </body>
         </html>
@@ -6459,6 +6823,152 @@ useEffect(() => {
       setShowPatientLocationMap(false);
       setPatientLocationData(null);
       toast.success('Patient location pinned successfully!');
+    }
+  };
+
+  // Function to save report details
+  const handleSaveReportDetails = async () => {
+    if (!previewEditData || !selectedReport) {
+      toast.error('No changes to save');
+      return;
+    }
+
+    try {
+      // Prepare update data with only changed fields
+      const updateData: any = {
+        updatedAt: serverTimestamp(),
+        lastModifiedBy: currentUser?.id || auth.currentUser?.uid || "admin"
+      };
+
+      // Track changes for activity log
+      const changes: any = {};
+
+      // Update status if changed
+      if (previewEditData.status !== selectedReport.status) {
+        updateData.status = previewEditData.status;
+        changes.status = { from: selectedReport.status || '', to: previewEditData.status || '' };
+      }
+
+      // Update type if changed
+      if (previewEditData.type !== selectedReport.type) {
+        updateData.type = previewEditData.type;
+        changes.type = { from: selectedReport.type || '', to: previewEditData.type || '' };
+      }
+
+      // Update reportedBy if changed
+      if (previewEditData.reportedBy !== selectedReport.reportedBy) {
+        updateData.reportedBy = previewEditData.reportedBy;
+        changes.reportedBy = { from: selectedReport.reportedBy || '', to: previewEditData.reportedBy || '' };
+      }
+
+      // Update mobileNumber if changed
+      if (previewEditData.mobileNumber !== selectedReport.mobileNumber) {
+        updateData.mobileNumber = previewEditData.mobileNumber;
+        changes.mobileNumber = { from: selectedReport.mobileNumber || '', to: previewEditData.mobileNumber || '' };
+      }
+
+      // Update barangay if changed
+      if (previewEditData.barangay !== selectedReport.barangay) {
+        updateData.barangay = previewEditData.barangay;
+        changes.barangay = { from: selectedReport.barangay || '', to: previewEditData.barangay || '' };
+      }
+
+      // Update description if changed
+      if (previewEditData.description !== selectedReport.description) {
+        updateData.description = previewEditData.description;
+        changes.description = { from: selectedReport.description || '', to: previewEditData.description || '' };
+      }
+
+      // Update location if changed (from location map)
+      if (previewEditData.location !== selectedReport.location || 
+          Number(previewEditData.latitude) !== Number(selectedReport.latitude) ||
+          Number(previewEditData.longitude) !== Number(selectedReport.longitude)) {
+        updateData.location = previewEditData.location;
+        if (previewEditData.latitude && previewEditData.longitude) {
+          const lat = Number(previewEditData.latitude);
+          const lng = Number(previewEditData.longitude);
+          if (!isNaN(lat) && !isNaN(lng)) {
+            updateData.latitude = lat;
+            updateData.longitude = lng;
+            updateData.coordinates = `${lat}, ${lng}`;
+          }
+        }
+        changes.location = { 
+          from: selectedReport.location || '', 
+          to: previewEditData.location || '' 
+        };
+      }
+
+      // Only update if there are actual changes
+      if (Object.keys(updateData).length <= 2) { // Only has updatedAt and lastModifiedBy
+        toast.info('No changes detected');
+        setIsPreviewEditMode(false);
+        return;
+      }
+
+      // Update the database using the Firestore document ID
+      await updateDoc(doc(db, "reports", selectedReport.firestoreId), updateData);
+
+      // Update associated pin if type or location changed
+      if (selectedReport.reportId && (changes.type || changes.location)) {
+        try {
+          const pins = await fetchPins({ reportId: selectedReport.reportId });
+          if (pins && pins.length > 0) {
+            const pinUpdates: any = {};
+            if (changes.type) {
+              pinUpdates.type = previewEditData.type;
+            }
+            if (changes.location && previewEditData.latitude && previewEditData.longitude) {
+              pinUpdates.latitude = previewEditData.latitude;
+              pinUpdates.longitude = previewEditData.longitude;
+              pinUpdates.locationName = previewEditData.location;
+            }
+            
+            if (Object.keys(pinUpdates).length > 0) {
+              await Promise.all(
+                pins.map(pin => {
+                  const pinUpdateData: any = { ...pinUpdates };
+                  // Ensure latitude and longitude are numbers
+                  if (pinUpdateData.latitude) pinUpdateData.latitude = Number(pinUpdateData.latitude);
+                  if (pinUpdateData.longitude) pinUpdateData.longitude = Number(pinUpdateData.longitude);
+                  return updatePin(pin.id, pinUpdateData);
+                })
+              );
+              console.log(`Updated ${pins.length} pin(s) associated with report ${selectedReport.reportId}`);
+            }
+          }
+        } catch (pinError) {
+          console.error('Error updating associated pin(s):', pinError);
+          // Don't fail the entire operation if pin update fails
+        }
+      }
+
+      // Log activity
+      await logActivity({
+        actionType: ActionType.REPORT_UPDATED,
+        action: `Updated report "${previewEditData.type || selectedReport.type || 'Unknown'} Incident" (${selectedReport.firestoreId}) - Changed report details`,
+        entityType: 'report',
+        entityId: selectedReport.firestoreId,
+        entityName: `${previewEditData.type || selectedReport.type || 'Unknown'} Incident`,
+        changes: changes,
+        metadata: {
+          updatedFields: Object.keys(changes)
+        }
+      });
+
+      // Update the selectedReport state to reflect the changes
+      setSelectedReport((prev: any) => ({
+        ...prev,
+        ...previewEditData
+      }));
+
+      // Exit edit mode
+      setIsPreviewEditMode(false);
+      setSelectedFiles([]); // Clear selected files when saving
+      toast.success('Report details saved successfully!');
+    } catch (error: any) {
+      console.error('Error saving report details:', error);
+      toast.error(`Failed to save report details: ${error.message || 'Unknown error'}`);
     }
   };
 
@@ -7705,12 +8215,7 @@ useEffect(() => {
                     {isPreviewEditMode ? (
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <Button size="sm" className="bg-brand-orange hover:bg-brand-orange-400 text-white" onClick={() => {
-                            console.log('Saving changes:', previewEditData);
-                            setSelectedReport(previewEditData);
-                            setIsPreviewEditMode(false);
-                            setSelectedFiles([]); // Clear selected files when saving
-                          }}>
+                          <Button size="sm" className="bg-brand-orange hover:bg-brand-orange-400 text-white" onClick={handleSaveReportDetails}>
                             Save
                           </Button>
                         </TooltipTrigger>
@@ -8014,6 +8519,22 @@ useEffect(() => {
                                           {barangay}
                                         </CommandItem>
                                       ))}
+                                    <CommandItem
+                                      value="Others"
+                                      onSelect={() => {
+                                        setPreviewEditData((d: any) => ({ ...d, barangay: "Others" }));
+                                        setBarangaySearchValue("");
+                                        setBarangayComboboxOpen(false);
+                                      }}
+                                    >
+                                      <Check
+                                        className={cn(
+                                          "mr-2 h-4 w-4",
+                                          previewEditData?.barangay === "Others" ? "opacity-100" : "opacity-0"
+                                        )}
+                                      />
+                                      Others
+                                    </CommandItem>
                                   </CommandGroup>
                                 </CommandList>
                               </Command>

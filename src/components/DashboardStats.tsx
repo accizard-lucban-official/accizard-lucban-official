@@ -19,7 +19,7 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import { usePins } from "@/hooks/usePins";
 import { Pin } from "@/types/pin";
 import { db } from "@/lib/firebase";
-import { collection, query, orderBy, getDocs, where, Timestamp, limit } from "firebase/firestore";
+import { collection, query, orderBy, getDocs, where, Timestamp, limit, onSnapshot } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import html2canvas from 'html2canvas';
 
@@ -92,6 +92,47 @@ export function DashboardStats() {
   const markersRef = useRef<mapboxgl.Marker[]>([]);
   const currentMapStyleRef = useRef<string>('');
 
+  // List of 32 official barangays in Lucban (case-insensitive matching)
+  const officialBarangays = useMemo(() => [
+    "Abang", "Aliliw", "Atulinao", "Ayuti", 
+    "Barangay 1", "Barangay 2", "Barangay 3", "Barangay 4", "Barangay 5", 
+    "Barangay 6", "Barangay 7", "Barangay 8", "Barangay 9", "Barangay 10", 
+    "Igang", "Kabatete", "Kakawit", "Kalangay", "Kalyaat", "Kilib", 
+    "Kulapi", "Mahabang Parang", "Malupak", "Manasa", "May-it", 
+    "Nagsinamo", "Nalunao", "Palola", "Piis", "Samil", "Tiawe", "Tinamnan"
+  ], []);
+
+  // Helper function to normalize barangay name (case-insensitive matching)
+  // Handles variations like "Brgy. 1", "Barangay 1", "1", etc.
+  const normalizeBarangay = (barangay: string): string => {
+    if (!barangay || barangay.trim() === '') return 'Others';
+    
+    // Remove common prefixes and trim whitespace
+    let normalized = barangay.trim();
+    
+    // Remove prefixes (case-insensitive): "Brgy.", "Brgy", "Barangay", "Barangay."
+    normalized = normalized.replace(/^(brgy\.?|barangay\.?)\s*/i, '').trim();
+    
+    // Check if normalized barangay matches any official barangay (case-insensitive)
+    const matches = officialBarangays.find(
+      official => {
+        // Direct match
+        if (official.toLowerCase() === normalized.toLowerCase()) return true;
+        
+        // For numbered barangays, also check if just the number matches
+        // e.g., "1" should match "Barangay 1", "Brgy. 1", etc.
+        if (official.startsWith('Barangay ')) {
+          const officialNumber = official.replace('Barangay ', '').trim();
+          if (officialNumber === normalized) return true;
+        }
+        
+        return false;
+      }
+    );
+    
+    return matches || 'Others';
+  };
+
   // Hazard colors using brand-orange to brand-red spectrum
   const hazardColors = useMemo(() => ({
     'Road Crash': '#ff4e3a',          // bright red-orange
@@ -108,137 +149,162 @@ export function DashboardStats() {
     'Obstructions': '#facc15',        // warm yellow
     'Electrical Hazard': '#f87171',   // coral red
     'Environmental Hazard': '#34d399',// fresh green
+    'Animal Concerns': '#a855f7',      // purple
     'Others': '#fcd34d'               // golden yellow
   }), []);
 
-  // Sample data for visualizations with all 32 barangays
-  const reportsPerBarangay = [
-    { name: "Abang", reports: 12 },
-    { name: "Aliliw", reports: 8 },
-    { name: "Atulinao", reports: 15 },
-    { name: "Ayuti", reports: 6 },
-    { name: "Barangay 1", reports: 10 },
-    { name: "Barangay 2", reports: 7 },
-    { name: "Barangay 3", reports: 9 },
-    { name: "Barangay 4", reports: 11 },
-    { name: "Barangay 5", reports: 13 },
-    { name: "Barangay 6", reports: 8 },
-    { name: "Barangay 7", reports: 14 },
-    { name: "Barangay 8", reports: 6 },
-    { name: "Barangay 9", reports: 12 },
-    { name: "Barangay 10", reports: 9 },
-    { name: "Igang", reports: 7 },
-    { name: "Kabatete", reports: 11 },
-    { name: "Kakawit", reports: 8 },
-    { name: "Kalangay", reports: 13 },
-    { name: "Kalyaat", reports: 10 },
-    { name: "Kilib", reports: 15 },
-    { name: "Kulapi", reports: 7 },
-    { name: "Mahabang Parang", reports: 12 },
-    { name: "Malupak", reports: 9 },
-    { name: "Manasa", reports: 11 },
-    { name: "May-it", reports: 8 },
-    { name: "Nagsinamo", reports: 14 },
-    { name: "Nalunao", reports: 10 },
-    { name: "Palola", reports: 13 },
-    { name: "Piis", reports: 7 },
-    { name: "Samil", reports: 12 },
-    { name: "Tiawe", reports: 9 },
-    { name: "Tinamnan", reports: 11 }
-  ];
+  // Helper function to filter reports by time period
+  const filterReportsByPeriod = (reports: any[], period: string) => {
+    const now = new Date();
+    let startDate: Date;
+    
+    switch (period) {
+      case "this-week":
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        break;
+      case "this-month":
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        break;
+      case "this-year":
+        startDate = new Date(now.getFullYear(), 0, 1);
+        break;
+      default:
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    }
+    
+    return reports.filter(report => {
+      // Handle different timestamp formats from Firestore
+      let reportDate: Date;
+      if (report.timestamp instanceof Date) {
+        reportDate = report.timestamp;
+      } else if (report.timestamp?.toDate && typeof report.timestamp.toDate === 'function') {
+        reportDate = report.timestamp.toDate();
+      } else if (report.timestamp) {
+        reportDate = new Date(report.timestamp);
+      } else {
+        // If no timestamp, skip this report
+        return false;
+      }
+      return reportDate >= startDate && reportDate <= now;
+    });
+  };
 
-  // Stacked data for Nivo chart - reports by type per barangay - memoized and sorted by total reports descending
+  // Reports per barangay - calculated from real Firestore data (used for summary stats)
+  const reportsPerBarangay = useMemo(() => {
+    const filteredReports = filterReportsByPeriod(reports, barangayReportsFilter);
+    
+    // Group reports by barangay (normalize to official barangays or "Others")
+    const barangayCounts: Record<string, number> = {};
+    
+    filteredReports.forEach(report => {
+      const rawBarangay = report.barangay || report.locationName || 'Unknown';
+      const normalizedBarangay = normalizeBarangay(rawBarangay);
+      barangayCounts[normalizedBarangay] = (barangayCounts[normalizedBarangay] || 0) + 1;
+    });
+    
+    // Convert to array format
+    return Object.keys(barangayCounts)
+      .map(barangay => ({
+        name: barangay,
+        reports: barangayCounts[barangay]
+      }))
+      .sort((a, b) => {
+        // Sort "Others" to the end, then by count descending
+        if (a.name === 'Others' && b.name !== 'Others') return 1;
+        if (b.name === 'Others' && a.name !== 'Others') return -1;
+        return b.reports - a.reports;
+      });
+  }, [reports, barangayReportsFilter, officialBarangays]);
+
+  // Stacked data for Nivo chart - reports by type per barangay - calculated from real Firestore data
   const stackedReportsData = useMemo(() => {
-    const data = [
-      { barangay: "Abang", "Road Crash": 3, "Fire": 2, "Medical Emergency": 1, "Flooding": 2, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 1, "Civil Disturbance": 1 },
-      { barangay: "Aliliw", "Road Crash": 2, "Fire": 1, "Medical Emergency": 1, "Flooding": 1, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Atulinao", "Road Crash": 4, "Fire": 3, "Medical Emergency": 2, "Flooding": 2, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 1, "Civil Disturbance": 1 },
-      { barangay: "Ayuti", "Road Crash": 1, "Fire": 1, "Medical Emergency": 1, "Flooding": 1, "Volcanic Activity": 1, "Landslide": 0, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Barangay 1", "Road Crash": 3, "Fire": 2, "Medical Emergency": 1, "Flooding": 2, "Volcanic Activity": 1, "Landslide": 0, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Barangay 2", "Road Crash": 2, "Fire": 1, "Medical Emergency": 1, "Flooding": 1, "Volcanic Activity": 1, "Landslide": 0, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Barangay 3", "Road Crash": 2, "Fire": 2, "Medical Emergency": 1, "Flooding": 1, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Barangay 4", "Road Crash": 3, "Fire": 2, "Medical Emergency": 1, "Flooding": 2, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Barangay 5", "Road Crash": 3, "Fire": 3, "Medical Emergency": 2, "Flooding": 2, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Barangay 6", "Road Crash": 2, "Fire": 1, "Medical Emergency": 1, "Flooding": 1, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Barangay 7", "Road Crash": 4, "Fire": 3, "Medical Emergency": 2, "Flooding": 2, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Barangay 8", "Road Crash": 1, "Fire": 1, "Medical Emergency": 1, "Flooding": 1, "Volcanic Activity": 1, "Landslide": 0, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Barangay 9", "Road Crash": 3, "Fire": 2, "Medical Emergency": 2, "Flooding": 2, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Barangay 10", "Road Crash": 2, "Fire": 2, "Medical Emergency": 1, "Flooding": 1, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Igang", "Road Crash": 2, "Fire": 1, "Medical Emergency": 1, "Flooding": 1, "Volcanic Activity": 1, "Landslide": 0, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Kabatete", "Road Crash": 3, "Fire": 2, "Medical Emergency": 2, "Flooding": 1, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Kakawit", "Road Crash": 2, "Fire": 1, "Medical Emergency": 1, "Flooding": 1, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Kalangay", "Road Crash": 3, "Fire": 3, "Medical Emergency": 2, "Flooding": 2, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Kalyaat", "Road Crash": 3, "Fire": 2, "Medical Emergency": 1, "Flooding": 2, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Kilib", "Road Crash": 4, "Fire": 3, "Medical Emergency": 2, "Flooding": 2, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 1, "Civil Disturbance": 1 },
-      { barangay: "Kulapi", "Road Crash": 2, "Fire": 1, "Medical Emergency": 1, "Flooding": 1, "Volcanic Activity": 1, "Landslide": 0, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Mahabang Parang", "Road Crash": 3, "Fire": 2, "Medical Emergency": 2, "Flooding": 2, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Malupak", "Road Crash": 2, "Fire": 2, "Medical Emergency": 1, "Flooding": 1, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Manasa", "Road Crash": 3, "Fire": 2, "Medical Emergency": 2, "Flooding": 1, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "May-it", "Road Crash": 2, "Fire": 1, "Medical Emergency": 1, "Flooding": 1, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Nagsinamo", "Road Crash": 4, "Fire": 3, "Medical Emergency": 2, "Flooding": 2, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Nalunao", "Road Crash": 3, "Fire": 2, "Medical Emergency": 1, "Flooding": 2, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Palola", "Road Crash": 3, "Fire": 3, "Medical Emergency": 2, "Flooding": 2, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Piis", "Road Crash": 2, "Fire": 1, "Medical Emergency": 1, "Flooding": 1, "Volcanic Activity": 1, "Landslide": 0, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Samil", "Road Crash": 3, "Fire": 2, "Medical Emergency": 2, "Flooding": 2, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Tiawe", "Road Crash": 2, "Fire": 2, "Medical Emergency": 1, "Flooding": 1, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 0, "Civil Disturbance": 1 },
-      { barangay: "Tinamnan", "Road Crash": 3, "Fire": 2, "Medical Emergency": 2, "Flooding": 1, "Volcanic Activity": 1, "Landslide": 1, "Earthquake": 0, "Civil Disturbance": 1 }
+    const filteredReports = filterReportsByPeriod(reports, barangayReportsFilter);
+    
+    // All possible report types
+    const allTypes = [
+      'Road Crash', 'Fire', 'Medical Emergency', 'Flooding', 
+      'Volcanic Activity', 'Landslide', 'Earthquake', 'Civil Disturbance',
+      'Armed Conflict', 'Infectious Disease', 'Poor Infrastructure',
+      'Obstructions', 'Electrical Hazard', 'Environmental Hazard', 'Others'
     ];
     
-    const dataWithExpandedTypes = data.map((item, index) => ({
-      ...item,
-      'Poor Infrastructure': item['Poor Infrastructure'] ?? ((index % 3) + 1),
-      'Obstructions': item['Obstructions'] ?? (((index + 1) % 3) + 1),
-      'Electrical Hazard': item['Electrical Hazard'] ?? ((index % 2) + 1),
-      'Environmental Hazard': item['Environmental Hazard'] ?? (((index + 2) % 4) + 1),
-      'Others': item['Others'] ?? (((index + 1) % 2) + 1)
-    }));
+    // Group reports by barangay and type (normalize to official barangays or "Others")
+    const barangayData: Record<string, Record<string, number>> = {};
     
-    // Sort by total reports in descending order
-    return dataWithExpandedTypes.sort((a, b) => {
-      const totalA = Object.values(a).slice(1).reduce((sum: number, val: any) => sum + val, 0);
-      const totalB = Object.values(b).slice(1).reduce((sum: number, val: any) => sum + val, 0);
+    filteredReports.forEach(report => {
+      const rawBarangay = report.barangay || report.locationName || 'Unknown';
+      const normalizedBarangay = normalizeBarangay(rawBarangay);
+      const reportType = report.type || 'Others';
+      
+      if (!barangayData[normalizedBarangay]) {
+        barangayData[normalizedBarangay] = {};
+        allTypes.forEach(type => {
+          barangayData[normalizedBarangay][type] = 0;
+        });
+      }
+      
+      if (!barangayData[normalizedBarangay][reportType]) {
+        barangayData[normalizedBarangay][reportType] = 0;
+      }
+      
+      barangayData[normalizedBarangay][reportType]++;
+    });
+    
+    // Convert to array format
+    const data = Object.keys(barangayData).map(barangay => {
+      const entry: Record<string, any> = { barangay };
+      allTypes.forEach(type => {
+        entry[type] = barangayData[barangay][type] || 0;
+      });
+      return entry;
+    });
+    
+    // Sort by total reports in descending order, with "Others" at the end
+    return data.sort((a, b) => {
+      // Put "Others" at the end
+      if (a.barangay === 'Others' && b.barangay !== 'Others') return 1;
+      if (b.barangay === 'Others' && a.barangay !== 'Others') return -1;
+      
+      const totalA = allTypes.reduce((sum, type) => sum + (a[type] || 0), 0);
+      const totalB = allTypes.reduce((sum, type) => sum + (b[type] || 0), 0);
       return totalB - totalA;
     });
-  }, []);
+  }, [reports, barangayReportsFilter, officialBarangays]);
 
-  // Memoized users per barangay data to prevent unnecessary re-renders
-  const usersPerBarangay = useMemo(() => [
-    { name: "Abang", users: 120 },
-    { name: "Aliliw", users: 85 },
-    { name: "Atulinao", users: 150 },
-    { name: "Ayuti", users: 98 },
-    { name: "Barangay 1", users: 110 },
-    { name: "Barangay 2", users: 95 },
-    { name: "Barangay 3", users: 130 },
-    { name: "Barangay 4", users: 105 },
-    { name: "Barangay 5", users: 125 },
-    { name: "Barangay 6", users: 88 },
-    { name: "Barangay 7", users: 145 },
-    { name: "Barangay 8", users: 92 },
-    { name: "Barangay 9", users: 115 },
-    { name: "Barangay 10", users: 108 },
-    { name: "Igang", users: 78 },
-    { name: "Kabatete", users: 135 },
-    { name: "Kakawit", users: 95 },
-    { name: "Kalangay", users: 140 },
-    { name: "Kalyaat", users: 112 },
-    { name: "Kilib", users: 155 },
-    { name: "Kulapi", users: 82 },
-    { name: "Mahabang Parang", users: 128 },
-    { name: "Malupak", users: 102 },
-    { name: "Manasa", users: 118 },
-    { name: "May-it", users: 90 },
-    { name: "Nagsinamo", users: 142 },
-    { name: "Nalunao", users: 105 },
-    { name: "Palola", users: 132 },
-    { name: "Piis", users: 88 },
-    { name: "Samil", users: 125 },
-    { name: "Tiawe", users: 98 },
-    { name: "Tinamnan", users: 115 }
-  ], []);
+  // Users per barangay data - calculated from real Firestore data
+  const usersPerBarangay = useMemo(() => {
+    // Filter users by time period if needed (for now, show all users)
+    // You might want to filter by registration date or last activity
+    const filteredUsers = users; // Could add time-based filtering here if needed
+    
+    // Group users by barangay (normalize to official barangays or "Others")
+    // Query barangay field directly from users collection
+    const barangayCounts: Record<string, number> = {};
+    
+    filteredUsers.forEach(user => {
+      // Use barangay field from users collection (case-insensitive matching)
+      const rawBarangay = user.barangay || 'Unknown';
+      const normalizedBarangay = normalizeBarangay(rawBarangay);
+      barangayCounts[normalizedBarangay] = (barangayCounts[normalizedBarangay] || 0) + 1;
+    });
+    
+    // Convert to array format
+    return Object.keys(barangayCounts)
+      .map(barangay => ({
+        name: barangay,
+        users: barangayCounts[barangay]
+      }))
+      .sort((a, b) => {
+        // Sort "Others" to the end, then by count descending
+        if (a.name === 'Others' && b.name !== 'Others') return 1;
+        if (b.name === 'Others' && a.name !== 'Others') return -1;
+        return b.users - a.users;
+      });
+  }, [users, officialBarangays]);
 
-  // Reports over time data - memoized to prevent randomization
+  // Reports over time data - calculated from real Firestore data
   const reportsOverTimeData = useMemo(() => {
+    const filteredReports = filterReportsByPeriod(reports, reportTypeFilter);
     const reportTypes = [
       'Road Crash', 'Fire', 'Medical Emergency', 'Flooding', 
       'Volcanic Activity', 'Landslide', 'Earthquake', 'Civil Disturbance',
@@ -251,152 +317,253 @@ export function DashboardStats() {
       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
     ];
     
+    // Group reports by type and month
+    const dataByTypeAndMonth: Record<string, Record<string, number>> = {};
+    
+    reportTypes.forEach(type => {
+      dataByTypeAndMonth[type] = {};
+      months.forEach(() => {
+        dataByTypeAndMonth[type] = { ...dataByTypeAndMonth[type] };
+      });
+    });
+    
+    filteredReports.forEach(report => {
+      const reportType = report.type || 'Others';
+      // Handle different timestamp formats from Firestore
+      let reportDate: Date;
+      if (report.timestamp instanceof Date) {
+        reportDate = report.timestamp;
+      } else if (report.timestamp?.toDate && typeof report.timestamp.toDate === 'function') {
+        reportDate = report.timestamp.toDate();
+      } else if (report.timestamp) {
+        reportDate = new Date(report.timestamp);
+      } else {
+        // Skip reports without valid timestamps
+        return;
+      }
+      const monthIndex = reportDate.getMonth();
+      const monthName = months[monthIndex];
+      
+      if (!dataByTypeAndMonth[reportType]) {
+        dataByTypeAndMonth[reportType] = {};
+      }
+      
+      if (!dataByTypeAndMonth[reportType][monthName]) {
+        dataByTypeAndMonth[reportType][monthName] = 0;
+      }
+      
+      dataByTypeAndMonth[reportType][monthName]++;
+    });
+    
     return reportTypes.map(reportType => ({
       id: reportType,
-      data: months.map((month, index) => {
-        // Create realistic patterns for each report type - static data
-        let baseValue = 0;
-        switch (reportType) {
-          case 'Road Crash':
-            baseValue = 15 + Math.floor(Math.sin(index * 0.5) * 8) + (index % 3);
-            break;
-          case 'Fire':
-            baseValue = 8 + Math.floor(Math.sin(index * 0.3) * 4) + (index % 2);
-            break;
-          case 'Medical Emergency':
-            baseValue = 12 + Math.floor(Math.sin(index * 0.4) * 6) + (index % 4);
-            break;
-          case 'Flooding':
-            baseValue = 6 + Math.floor(Math.sin(index * 0.6) * 5) + (index % 3);
-            break;
-          case 'Volcanic Activity':
-            baseValue = 3 + Math.floor(Math.sin(index * 0.2) * 2) + (index % 2);
-            break;
-          case 'Landslide':
-            baseValue = 4 + Math.floor(Math.sin(index * 0.4) * 3) + (index % 2);
-            break;
-          case 'Earthquake':
-            baseValue = 2 + Math.floor(Math.sin(index * 0.1) * 2) + (index % 2);
-            break;
-          case 'Civil Disturbance':
-            baseValue = 5 + Math.floor(Math.sin(index * 0.3) * 3) + (index % 2);
-            break;
-          case 'Armed Conflict':
-            baseValue = 1 + Math.floor(Math.sin(index * 0.1) * 1) + (index % 1);
-            break;
-          case 'Infectious Disease':
-            baseValue = 7 + Math.floor(Math.sin(index * 0.5) * 4) + (index % 3);
-            break;
-          case 'Poor Infrastructure':
-            baseValue = 5 + Math.floor(Math.sin(index * 0.35) * 3) + (index % 2);
-            break;
-          case 'Obstructions':
-            baseValue = 4 + Math.floor(Math.sin(index * 0.45) * 2) + (index % 3);
-            break;
-          case 'Electrical Hazard':
-            baseValue = 3 + Math.floor(Math.sin(index * 0.25) * 2) + (index % 2);
-            break;
-          case 'Environmental Hazard':
-            baseValue = 6 + Math.floor(Math.sin(index * 0.4) * 3) + (index % 2);
-            break;
-          case 'Others':
-            baseValue = 2 + Math.floor(Math.sin(index * 0.3) * 2) + (index % 3);
-            break;
-          default:
-            baseValue = 5;
-        }
-        
-        return {
-          x: month,
-          y: Math.max(0, baseValue)
-        };
-      })
+      data: months.map(month => ({
+        x: month,
+        y: dataByTypeAndMonth[reportType]?.[month] || 0
+      }))
     }));
-  }, []);
+  }, [reports, reportTypeFilter]);
 
-  const reportTypeData = useMemo(() => [{
-    name: "Road Crash",
-    value: 22,
-    color: hazardColors['Road Crash']
-  }, {
-    name: "Fire",
-    value: 16,
-    color: hazardColors['Fire']
-  }, {
-    name: "Medical Emergency",
-    value: 14,
-    color: hazardColors['Medical Emergency']
-  }, {
-    name: "Flooding",
-    value: 11,
-    color: hazardColors['Flooding']
-  }, {
-    name: "Earthquake",
-    value: 9,
-    color: hazardColors['Earthquake']
-  }, {
-    name: "Landslide",
-    value: 7,
-    color: hazardColors['Landslide']
-  }, {
-    name: "Volcanic Activity",
-    value: 5,
-    color: hazardColors['Volcanic Activity']
-  }, {
-    name: "Civil Disturbance",
-    value: 4,
-    color: hazardColors['Civil Disturbance']
-  }, {
-    name: "Armed Conflict",
-    value: 3,
-    color: hazardColors['Armed Conflict']
-  }, {
-    name: "Infectious Disease",
-    value: 3,
-    color: hazardColors['Infectious Disease']
-  }, {
-    name: "Poor Infrastructure",
-    value: 6,
-    color: hazardColors['Poor Infrastructure']
-  }, {
-    name: "Obstructions",
-    value: 5,
-    color: hazardColors['Obstructions']
-  }, {
-    name: "Electrical Hazard",
-    value: 4,
-    color: hazardColors['Electrical Hazard']
-  }, {
-    name: "Environmental Hazard",
-    value: 6,
-    color: hazardColors['Environmental Hazard']
-  }, {
-    name: "Others",
-    value: 3,
-    color: hazardColors['Others']
-  }], [hazardColors]);
-  const peakHoursData = [{
-    hour: "6AM",
-    reports: 2
-  }, {
-    hour: "9AM",
-    reports: 8
-  }, {
-    hour: "12PM",
-    reports: 15
-  }, {
-    hour: "3PM",
-    reports: 12
-  }, {
-    hour: "6PM",
-    reports: 18
-  }, {
-    hour: "9PM",
-    reports: 10
-  }, {
-    hour: "12AM",
-    reports: 5
-  }];
+  // Helper function to normalize category values to match expected type names
+  // Maps kebab-case values (like 'road-crash') to Title Case (like 'Road Crash')
+  const normalizeCategoryToType = (category: string | undefined | null): string => {
+    if (!category) return 'Others';
+    
+    const normalized = category.trim();
+    
+    // Map matching REPORT_TYPE_LABELS from ManageReportsPage
+    // This converts kebab-case values to Title Case labels
+    const REPORT_TYPE_LABELS_MAP: Record<string, string> = {
+      'road-crash': 'Road Crash',
+      'medical-emergency': 'Medical Emergency',
+      'flooding': 'Flooding',
+      'volcanic-activity': 'Volcanic Activity',
+      'landslide': 'Landslide',
+      'earthquake': 'Earthquake',
+      'civil-disturbance': 'Civil Disturbance',
+      'armed-conflict': 'Armed Conflict',
+      'infectious-disease': 'Infectious Disease',
+      'poor-infrastructure': 'Poor Infrastructure',
+      'obstructions': 'Obstructions',
+      'electrical-hazard': 'Electrical Hazard',
+      'environmental-hazard': 'Environmental Hazard',
+      'animal-concern': 'Animal Concerns',
+      'animal-concerns': 'Animal Concerns',
+      'others': 'Others',
+      // Also handle Title Case (in case it's already converted)
+      'Road Crash': 'Road Crash',
+      'Medical Emergency': 'Medical Emergency',
+      'Flooding': 'Flooding',
+      'Volcanic Activity': 'Volcanic Activity',
+      'Landslide': 'Landslide',
+      'Earthquake': 'Earthquake',
+      'Civil Disturbance': 'Civil Disturbance',
+      'Armed Conflict': 'Armed Conflict',
+      'Infectious Disease': 'Infectious Disease',
+      'Poor Infrastructure': 'Poor Infrastructure',
+      'Obstructions': 'Obstructions',
+      'Electrical Hazard': 'Electrical Hazard',
+      'Environmental Hazard': 'Environmental Hazard',
+      'Animal Concerns': 'Animal Concerns',
+      'Others': 'Others',
+      'Fire': 'Fire', // Fire might be stored directly
+    };
+    
+    // Check if it's already a standard type name (case-insensitive match)
+    const standardTypes = [
+      'Road Crash', 'Fire', 'Medical Emergency', 'Flooding', 
+      'Volcanic Activity', 'Landslide', 'Earthquake', 'Civil Disturbance',
+      'Armed Conflict', 'Infectious Disease', 'Poor Infrastructure',
+      'Obstructions', 'Electrical Hazard', 'Environmental Hazard', 'Animal Concerns', 'Others'
+    ];
+    
+    // First check for exact case-insensitive match with standard types
+    const exactMatch = standardTypes.find(type => 
+      type.toLowerCase() === normalized.toLowerCase()
+    );
+    if (exactMatch) return exactMatch;
+    
+    // Check REPORT_TYPE_LABELS map (handles kebab-case to Title Case conversion)
+    if (REPORT_TYPE_LABELS_MAP[normalized]) {
+      return REPORT_TYPE_LABELS_MAP[normalized];
+    }
+    
+    // Check case-insensitive match in map
+    const caseInsensitiveMatch = Object.keys(REPORT_TYPE_LABELS_MAP).find(key => 
+      key.toLowerCase() === normalized.toLowerCase()
+    );
+    if (caseInsensitiveMatch) {
+      return REPORT_TYPE_LABELS_MAP[caseInsensitiveMatch];
+    }
+    
+    // Return as-is if it doesn't match (will be shown in chart with default color)
+    return normalized;
+  };
+
+  // Report type distribution data - calculated from real Firestore data
+  const reportTypeData = useMemo(() => {
+    console.log('=== Report Type Distribution Calculation ===');
+    console.log('Reports state length:', reports.length);
+    console.log('Report type filter:', reportTypeFilter);
+    
+    const filteredReports = filterReportsByPeriod(reports, reportTypeFilter);
+    
+    console.log('Filtered reports count:', filteredReports.length);
+    
+    // Debug: Log what we're getting from reports
+    if (filteredReports.length > 0) {
+      console.log('Sample filtered reports:', filteredReports.slice(0, 5).map(r => ({
+        id: r.id,
+        category: r.category,
+        reportType: r.reportType,
+        type: r.type,
+        timestamp: r.timestamp
+      })));
+    } else {
+      console.warn('No filtered reports found! Check if reports array is populated and filter is correct.');
+      console.log('All reports:', reports);
+    }
+    
+    // Count reports by type - use category field directly from Firestore
+    const typeCounts: Record<string, number> = {};
+    filteredReports.forEach(report => {
+      // Use category field directly (as specified by user)
+      const categoryValue = report.category || report.reportType || report.type || 'Others';
+      console.log(`Processing report ${report.id}: category="${report.category}", reportType="${report.reportType}", type="${report.type}", using="${categoryValue}"`);
+      // Normalize to match expected type names
+      const normalizedType = normalizeCategoryToType(categoryValue);
+      typeCounts[normalizedType] = (typeCounts[normalizedType] || 0) + 1;
+    });
+    
+    // Debug: Log the counts
+    console.log('Type counts from category field:', typeCounts);
+    
+    // Calculate total for percentage
+    const total = filteredReports.length || 1;
+    
+    // Get all unique types from the data (to show actual types present)
+    const typesInData = Object.keys(typeCounts);
+    console.log('Unique types found in data:', typesInData);
+    
+    // All possible report types (matching REPORT_TYPE_LABELS from ManageReportsPage + Fire)
+    const allTypes = [
+      'Road Crash', 'Fire', 'Medical Emergency', 'Flooding', 
+      'Volcanic Activity', 'Landslide', 'Earthquake', 'Civil Disturbance',
+      'Armed Conflict', 'Infectious Disease', 'Poor Infrastructure',
+      'Obstructions', 'Electrical Hazard', 'Environmental Hazard', 'Animal Concerns', 'Others'
+    ];
+    
+    // Combine predefined types with any types found in data that aren't in the list
+    const allUniqueTypes = [...new Set([...allTypes, ...typesInData])];
+    
+    // Create data array with percentages
+    const result = allUniqueTypes
+      .map(type => ({
+        name: type,
+        value: total > 0 ? Math.round(((typeCounts[type] || 0) / total) * 100) : 0,
+        count: typeCounts[type] || 0,
+        color: hazardColors[type as keyof typeof hazardColors] || hazardColors['Others']
+      }))
+      .filter(item => item.count > 0) // Only show types that have reports
+      .sort((a, b) => b.count - a.count); // Sort by count descending
+    
+    console.log('Final report type distribution result:', result);
+    console.log('Total reports used:', total);
+    console.log('=== End Report Type Distribution Calculation ===');
+    
+    return result;
+  }, [reports, reportTypeFilter, hazardColors]);
+  // Peak hours data - calculated from real Firestore data
+  const peakHoursData = useMemo(() => {
+    const filteredReports = filterReportsByPeriod(reports, peakHoursFilter);
+    
+    // Initialize hour buckets
+    const hourBuckets: Record<string, number> = {};
+    const hourLabels = [
+      "12AM", "1AM", "2AM", "3AM", "4AM", "5AM",
+      "6AM", "7AM", "8AM", "9AM", "10AM", "11AM",
+      "12PM", "1PM", "2PM", "3PM", "4PM", "5PM",
+      "6PM", "7PM", "8PM", "9PM", "10PM", "11PM"
+    ];
+    
+    hourLabels.forEach(label => {
+      hourBuckets[label] = 0;
+    });
+    
+    // Count reports by hour
+    filteredReports.forEach(report => {
+      // Handle different timestamp formats from Firestore
+      let reportDate: Date;
+      if (report.timestamp instanceof Date) {
+        reportDate = report.timestamp;
+      } else if (report.timestamp?.toDate && typeof report.timestamp.toDate === 'function') {
+        reportDate = report.timestamp.toDate();
+      } else if (report.timestamp) {
+        reportDate = new Date(report.timestamp);
+      } else {
+        // Skip reports without valid timestamps
+        return;
+      }
+      const hour = reportDate.getHours();
+      
+      // Convert 24-hour to 12-hour format with AM/PM
+      let hourLabel: string;
+      if (hour === 0) hourLabel = "12AM";
+      else if (hour < 12) hourLabel = `${hour}AM`;
+      else if (hour === 12) hourLabel = "12PM";
+      else hourLabel = `${hour - 12}PM`;
+      
+      if (hourBuckets[hourLabel] !== undefined) {
+        hourBuckets[hourLabel]++;
+      }
+    });
+    
+    // Convert to array format, only include hours with data or show all hours
+    return hourLabels.map(hour => ({
+      hour,
+      reports: hourBuckets[hour] || 0
+    }));
+  }, [reports, peakHoursFilter]);
 
   // Calendar heatmap data for 2025 only - static data to prevent randomization
   const calendarData2025 = useMemo(() => {
@@ -815,33 +982,70 @@ export function DashboardStats() {
     fetchWeatherData();
   }, []);
 
-  // Fetch reports from Firestore (polling every 60 seconds)
+  // Fetch reports from Firestore with real-time updates
   useEffect(() => {
-    const fetchReports = async () => {
-      try {
-        const reportsQuery = query(collection(db, "reports"), orderBy("timestamp", "desc"));
-        const snapshot = await getDocs(reportsQuery);
+    console.log('=== Setting up reports subscription ===');
+    
+    const reportsQuery = query(collection(db, "reports"), orderBy("timestamp", "desc"));
+    
+    // Use onSnapshot for real-time updates (like ManageReportsPage does)
+    const unsubscribe = onSnapshot(
+      reportsQuery,
+      (snapshot) => {
+        console.log('=== Reports snapshot received ===');
+        console.log('Total documents:', snapshot.docs.length);
+        
         const fetched = snapshot.docs.map(doc => {
           const data = doc.data();
+          // Use category field as the primary source for report type (as specified)
+          const reportType = data.category || data.reportType || data.type || 'Others';
+          
+          // Debug: Log first few reports to see what we're getting
+          if (snapshot.docs.indexOf(doc) < 3) {
+            console.log(`Report ${doc.id}:`, {
+              category: data.category,
+              reportType: data.reportType,
+              type: data.type,
+              mappedType: reportType,
+              hasCategory: !!data.category,
+              hasReportType: !!data.reportType,
+              hasType: !!data.type
+            });
+          }
+          
           return {
             id: doc.id,
             ...data,
-            timestamp: data.timestamp?.toDate() || new Date()
+            // Map Firestore field names to expected field names
+            // Use category field first (as specified by user)
+            type: reportType,
+            // Keep original fields for reference
+            category: data.category,
+            reportType: data.reportType,
+            barangay: data.barangay || data.locationName || 'Unknown', // Use barangay or locationName
+            locationName: data.locationName || data.location || data.barangay || 'Unknown',
+            timestamp: data.timestamp?.toDate ? data.timestamp.toDate() : (data.timestamp instanceof Date ? data.timestamp : new Date())
           };
         });
+        
+        console.log('Fetched reports count:', fetched.length);
+        console.log('Sample fetched reports (first 3):', fetched.slice(0, 3).map(r => ({
+          id: r.id,
+          category: r.category,
+          type: r.type,
+          timestamp: r.timestamp
+        })));
         setReports(fetched);
-      } catch (error) {
-        console.error("Error fetching reports:", error);
+      },
+      (error) => {
+        console.error("Error in reports snapshot:", error);
       }
+    );
+
+    return () => {
+      console.log('Unsubscribing from reports');
+      unsubscribe();
     };
-
-    // Initial fetch
-    fetchReports();
-
-    // Poll every 60 seconds
-    const interval = setInterval(fetchReports, 60000);
-
-    return () => clearInterval(interval);
   }, []);
 
   // Fetch users from Firestore (polling every 60 seconds)
@@ -2802,7 +3006,7 @@ ${calendarChart ? `
               y: item.reports
             }))
           }]}
-          margin={{ top: 20, right: 40, bottom: 40, left: 50 }}
+          margin={{ top: 20, right: 40, bottom: 60, left: 50 }}
           xScale={{ type: 'point' }}
           yScale={{ type: 'linear', min: 'auto', max: 'auto' }}
           theme={nivoTheme}
@@ -2811,10 +3015,10 @@ ${calendarChart ? `
           axisBottom={{
             tickSize: 5,
             tickPadding: 5,
-            tickRotation: 0,
+            tickRotation: -45,
             legend: 'Hour',
             legendPosition: 'middle',
-            legendOffset: 30
+            legendOffset: 50
           }}
           axisLeft={{
             tickSize: 5,
@@ -2901,7 +3105,7 @@ ${calendarChart ? `
               y: item.reports
             }))
           }]}
-          margin={{ top: 50, right: 130, bottom: 80, left: 60 }}
+          margin={{ top: 50, right: 130, bottom: 100, left: 60 }}
           xScale={{ type: 'point' }}
           yScale={{ type: 'linear', min: 'auto', max: 'auto' }}
           theme={nivoTheme}
@@ -2910,10 +3114,10 @@ ${calendarChart ? `
           axisBottom={{
             tickSize: 5,
             tickPadding: 5,
-            tickRotation: 0,
+            tickRotation: -45,
             legend: 'Hour',
             legendPosition: 'middle',
-            legendOffset: 60
+            legendOffset: 80
           }}
           axisLeft={{
             tickSize: 5,
@@ -3784,7 +3988,7 @@ ${calendarChart ? `
                 size="lg"
               >
                 <Download className="h-5 w-5 mr-2" />
-                Export as HTML
+                Export
               </Button>
             </div>
           </div>

@@ -4906,72 +4906,143 @@ export function ManageUsersPage() {
 
                     {/* Reports Table */}
                     <div className="border border-gray-200 rounded-lg overflow-hidden">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="text-left">RID</TableHead>
-                            <TableHead className="text-left">Type</TableHead>
-                            <TableHead className="text-left">Date Submitted</TableHead>
-                            <TableHead className="text-left">Status</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {residentReports.map((report) => {
-                            const reportDate = report.timestamp?.toDate 
-                              ? report.timestamp.toDate() 
-                              : report.timestamp 
-                                ? new Date(report.timestamp) 
-                                : null;
-                            const formattedDate = reportDate 
-                              ? reportDate.toLocaleDateString('en-US', { 
-                                  year: 'numeric', 
-                                  month: 'short', 
-                                  day: 'numeric' 
-                                })
-                              : 'Unknown Date';
-                            
-                            return (
-                              <TableRow key={report.id}>
-                                <TableCell>
-                                  <button
-                                    onClick={() => {
-                                      navigate('/manage-reports', { 
-                                        state: { highlightReportId: report.id } 
-                                      });
-                                    }}
-                                    className="text-brand-orange hover:text-brand-orange-400 hover:underline font-medium transition-colors"
-                                  >
-                                    {report.reportId || report.id}
-                                  </button>
-                                </TableCell>
-                                <TableCell>
-                                  <Badge className={
-                                    report.hazardType === 'Fire' ? 'bg-red-100 text-red-800 hover:bg-red-50' :
-                                    report.hazardType === 'Flood' ? 'bg-blue-100 text-blue-800 hover:bg-blue-50' :
-                                    report.hazardType === 'Earthquake' ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-50' :
-                                    report.hazardType === 'Landslide' ? 'bg-orange-100 text-orange-800 hover:bg-orange-50' :
-                                    report.hazardType === 'Typhoon' ? 'bg-purple-100 text-purple-800 hover:bg-purple-50' :
-                                    'bg-gray-100 text-gray-800 hover:bg-gray-50'
-                                  }>
-                                    {report.hazardType || report.type || 'Unknown'}
-                                  </Badge>
-                                </TableCell>
-                                <TableCell>{formattedDate}</TableCell>
-                                <TableCell>
-                                  <Badge className={
-                                    report.status === 'Resolved' ? 'bg-green-100 text-green-800 hover:bg-green-50' :
-                                    report.status === 'In Progress' ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-50' :
-                                    report.status === 'Pending' ? 'bg-gray-100 text-gray-800 hover:bg-gray-50' :
-                                    'bg-gray-100 text-gray-800 hover:bg-gray-50'
-                                  }>
-                                    {report.status || 'Pending'}
-                                  </Badge>
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })}
-                        </TableBody>
-                      </Table>
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="text-left">Report ID</TableHead>
+                              <TableHead className="text-left">Type</TableHead>
+                              <TableHead className="text-left">Location</TableHead>
+                              <TableHead className="text-left">Description</TableHead>
+                              <TableHead className="text-left">Date & Time</TableHead>
+                              <TableHead className="text-left">Status</TableHead>
+                              <TableHead className="text-left">Actions</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {residentReports.map((report) => {
+                              const reportDate = report.timestamp?.toDate 
+                                ? report.timestamp.toDate() 
+                                : report.timestamp 
+                                  ? new Date(report.timestamp) 
+                                  : null;
+                              const formattedDate = reportDate 
+                                ? reportDate.toLocaleDateString('en-US', { 
+                                    year: 'numeric', 
+                                    month: 'short', 
+                                    day: 'numeric' 
+                                  })
+                                : 'Unknown Date';
+                              const formattedTime = reportDate 
+                                ? reportDate.toLocaleTimeString('en-US', { 
+                                    hour: '2-digit', 
+                                    minute: '2-digit',
+                                    hour12: true
+                                  })
+                                : '';
+                              
+                              // Truncate description for display
+                              const description = report.description || '';
+                              const truncatedDescription = description.length > 50 
+                                ? `${description.substring(0, 50)}...` 
+                                : description || 'No description';
+                              
+                              // Get location
+                              const location = report.location || report.locationName || report.barangay || 'Location not specified';
+                              
+                              return (
+                                <TableRow key={report.id} className="hover:bg-gray-50">
+                                  <TableCell className="font-medium">
+                                    <button
+                                      onClick={() => {
+                                        navigate('/manage-reports', { 
+                                          state: { highlightReportId: report.id } 
+                                        });
+                                      }}
+                                      className="text-brand-orange hover:text-brand-orange-400 hover:underline font-medium transition-colors"
+                                    >
+                                      {report.reportId || report.id?.slice(-8) || 'N/A'}
+                                    </button>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge className={
+                                      report.hazardType === 'Fire' ? 'bg-red-100 text-red-800 hover:bg-red-50' :
+                                      report.hazardType === 'Flood' ? 'bg-blue-100 text-blue-800 hover:bg-blue-50' :
+                                      report.hazardType === 'Earthquake' ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-50' :
+                                      report.hazardType === 'Landslide' ? 'bg-orange-100 text-orange-800 hover:bg-orange-50' :
+                                      report.hazardType === 'Typhoon' ? 'bg-purple-100 text-purple-800 hover:bg-purple-50' :
+                                      report.type === 'Emergency' ? 'bg-red-100 text-red-800 hover:bg-red-50' :
+                                      report.type === 'Hazard' ? 'bg-orange-100 text-orange-800 hover:bg-orange-50' :
+                                      'bg-gray-100 text-gray-800 hover:bg-gray-50'
+                                    }>
+                                      {report.hazardType || report.type || 'Unknown'}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell>
+                                    <div className="max-w-[200px]">
+                                      <p className="text-sm text-gray-900 truncate" title={location}>
+                                        {location}
+                                      </p>
+                                      {(report.latitude && report.longitude) && (
+                                        <p className="text-xs text-gray-500 mt-1">
+                                          {parseFloat(report.latitude).toFixed(6)}, {parseFloat(report.longitude).toFixed(6)}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    <div className="max-w-[250px]">
+                                      <p className="text-sm text-gray-700 truncate" title={description}>
+                                        {truncatedDescription}
+                                      </p>
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    <div className="text-sm">
+                                      <p className="text-gray-900">{formattedDate}</p>
+                                      {formattedTime && (
+                                        <p className="text-xs text-gray-500 mt-0.5">{formattedTime}</p>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge className={
+                                      report.status === 'Resolved' ? 'bg-green-100 text-green-800 hover:bg-green-50' :
+                                      report.status === 'In Progress' ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-50' :
+                                      report.status === 'Pending' ? 'bg-gray-100 text-gray-800 hover:bg-gray-50' :
+                                      report.status === 'Under Review' ? 'bg-blue-100 text-blue-800 hover:bg-blue-50' :
+                                      'bg-gray-100 text-gray-800 hover:bg-gray-50'
+                                    }>
+                                      {report.status || 'Pending'}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() => {
+                                            navigate('/manage-reports', { 
+                                              state: { highlightReportId: report.id } 
+                                            });
+                                          }}
+                                          className="text-brand-orange border-brand-orange hover:bg-brand-orange hover:text-white"
+                                        >
+                                          <Eye className="h-4 w-4" />
+                                        </Button>
+                                      </TooltipTrigger>
+                                      <TooltipContent>
+                                        <p>View full report details</p>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
                     </div>
                   </div>
                 )}
