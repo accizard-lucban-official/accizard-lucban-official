@@ -1,5 +1,5 @@
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react-swc";
+import react from "@vitejs/plugin-react";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
 
@@ -56,5 +56,10 @@ export default defineConfig(({ mode }) => ({
       'firebase/firestore',
       'firebase/storage',
     ],
+    esbuildOptions: {
+      // Ignore source maps during dependency optimization to avoid parsing errors
+      sourcemap: false,
+      legalComments: 'none',
+    },
   },
 }));
