@@ -198,14 +198,15 @@ export function usePushNotifications() {
       setState(prev => ({
         ...prev,
         permission,
-        isLoading: false,
       }));
 
       if (permission === 'granted') {
-        // Register service worker and get token
-        await subscribe();
+        // Permission granted, but don't call subscribe here
+        // Let the caller handle subscription
+        setState(prev => ({ ...prev, isLoading: false }));
         return true;
       } else {
+        setState(prev => ({ ...prev, isLoading: false }));
         toast.error('Notification permission denied');
         return false;
       }
@@ -248,9 +249,10 @@ export function usePushNotifications() {
     }
 
     // Ensure messaging is initialized
-    if (!messaging) {
+    let messagingInstance = messaging;
+    if (!messagingInstance) {
       try {
-        const messagingInstance = getMessaging(app);
+        messagingInstance = getMessaging(app);
         setMessaging(messagingInstance);
       } catch (error) {
         console.error('Error initializing messaging:', error);
@@ -263,7 +265,8 @@ export function usePushNotifications() {
     setState(prev => ({ ...prev, isLoading: true, error: null }));
 
     // Add timeout to prevent infinite loading
-    const timeoutId = setTimeout(() => {
+    let timeoutId: NodeJS.Timeout | null = null;
+    timeoutId = setTimeout(() => {
       setState(prev => {
         if (prev.isLoading) {
           return {
@@ -281,18 +284,22 @@ export function usePushNotifications() {
       // Register service worker
       const registration = await registerServiceWorker();
       if (!registration) {
-        clearTimeout(timeoutId);
-        throw new Error('Failed to register service worker');
+        if (timeoutId) clearTimeout(timeoutId);
+        setState(prev => ({ ...prev, isLoading: false, error: 'Failed to register service worker' }));
+        toast.error('Failed to register service worker');
+        return false;
       }
 
       // Initialize messaging and get token
       const token = await initializeMessaging(registration);
       if (!token) {
-        clearTimeout(timeoutId);
-        throw new Error('No registration token available. Please check your VAPID key configuration.');
+        if (timeoutId) clearTimeout(timeoutId);
+        setState(prev => ({ ...prev, isLoading: false, error: 'No registration token available. Please check your VAPID key configuration.' }));
+        toast.error('No registration token available. Please check your VAPID key configuration.');
+        return false;
       }
 
-      clearTimeout(timeoutId);
+      if (timeoutId) clearTimeout(timeoutId);
       setState(prev => ({
         ...prev,
         isSubscribed: true,
@@ -303,7 +310,7 @@ export function usePushNotifications() {
       toast.success('Push notifications enabled successfully!');
       return true;
     } catch (error: any) {
-      clearTimeout(timeoutId);
+      if (timeoutId) clearTimeout(timeoutId);
       console.error('Error subscribing to push notifications:', error);
       const errorMessage = error.message || 'Failed to subscribe to push notifications';
       setState(prev => ({
@@ -388,26 +395,44 @@ export function usePushNotifications() {
       return false;
     }
 
-    if (state.isSubscribed) {
-      return await unsubscribe();
-    } else {
-      // Check current permission state (might have changed in browser settings)
-      const currentPermission = Notification.permission;
-      
-      // Update state with current permission
+    // Set loading state at the start
+    setState(prev => ({ ...prev, isLoading: true, error: null }));
+
+    try {
+      if (state.isSubscribed) {
+        const result = await unsubscribe();
+        // unsubscribe already handles loading state
+        return result;
+      } else {
+        // Check current permission state (might have changed in browser settings)
+        const currentPermission = Notification.permission;
+        
+        // Update state with current permission
+        setState(prev => ({
+          ...prev,
+          permission: currentPermission,
+        }));
+
+        // If permission is not granted, request it first
+        if (currentPermission !== 'granted') {
+          const granted = await requestPermission();
+          if (!granted) {
+            setState(prev => ({ ...prev, isLoading: false }));
+            return false;
+          }
+        }
+        // subscribe will handle its own loading state
+        return await subscribe();
+      }
+    } catch (error: any) {
+      console.error('Error in toggleSubscription:', error);
       setState(prev => ({
         ...prev,
-        permission: currentPermission,
+        isLoading: false,
+        error: error.message || 'Failed to toggle subscription',
       }));
-
-      // If permission is not granted, request it first
-      if (currentPermission !== 'granted') {
-        const granted = await requestPermission();
-        if (!granted) {
-          return false;
-        }
-      }
-      return await subscribe();
+      toast.error(error.message || 'Failed to toggle subscription');
+      return false;
     }
   }, [state.isSubscribed, state.isLoading, state.permission, subscribe, unsubscribe, requestPermission]);
 

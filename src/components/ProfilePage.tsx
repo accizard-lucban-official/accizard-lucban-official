@@ -1002,7 +1002,12 @@ export function ProfilePage() {
                           <Switch
                             checked={isSubscribed}
                             onCheckedChange={async () => {
-                              await toggleSubscription();
+                              try {
+                                await toggleSubscription();
+                              } catch (error) {
+                                console.error('Error toggling subscription:', error);
+                                toast.error('Failed to toggle push notifications');
+                              }
                             }}
                             disabled={notificationsLoading || (permission === 'denied' && !isSubscribed)}
                           />
