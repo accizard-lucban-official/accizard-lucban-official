@@ -350,6 +350,24 @@ service cloud.firestore {
     }
     
     // ========================================
+    // FCM TOKENS COLLECTION
+    // ========================================
+    match /fcmTokens/{tokenId} {
+      // Allow authenticated users to read/delete their own tokens
+      // Used during account deletion to clean up FCM tokens
+      allow read: if isAuthenticated() && 
+                     resource.data.userId == request.auth.uid;
+      
+      // Allow authenticated users to delete their own tokens
+      allow delete: if isAuthenticated() && 
+                       resource.data.userId == request.auth.uid;
+      
+      // Allow public write for web app to register web FCM tokens
+      // Application-level checks ensure proper access
+      allow create, update: if true;
+    }
+    
+    // ========================================
     // DEFAULT: DENY ALL OTHER ACCESS
     // ========================================
     match /{document=**} {

@@ -73,11 +73,30 @@ export async function initializeMessaging(
 ): Promise<string | null> {
   try {
     const messaging = getMessaging(app);
-    const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY;
+    let vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY;
 
     if (!vapidKey) {
       throw new Error('VAPID key not configured. Please set VITE_FIREBASE_VAPID_KEY in your .env file');
     }
+
+    // Trim whitespace (newlines, spaces, etc.) that might be present in GitHub Secrets
+    vapidKey = vapidKey.trim();
+
+    // Validate that it's a non-empty string
+    if (!vapidKey || vapidKey.length === 0) {
+      throw new Error('VAPID key is empty. Please check your VITE_FIREBASE_VAPID_KEY environment variable');
+    }
+
+    // Basic validation: VAPID keys are base64-encoded strings
+    // They should only contain alphanumeric characters, +, /, and = (for padding)
+    const base64Regex = /^[A-Za-z0-9+/=]+$/;
+    if (!base64Regex.test(vapidKey)) {
+      console.error('Invalid VAPID key format. Key length:', vapidKey.length);
+      console.error('First 20 chars:', vapidKey.substring(0, 20));
+      throw new Error('VAPID key contains invalid characters. It should be a base64-encoded string without spaces or newlines. Please check your VITE_FIREBASE_VAPID_KEY environment variable');
+    }
+
+    console.log('Using VAPID key (first 20 chars):', vapidKey.substring(0, 20) + '...');
 
     const token = await getToken(messaging, {
       vapidKey,
