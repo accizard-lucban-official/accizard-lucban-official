@@ -87,13 +87,14 @@ export async function initializeMessaging(
       throw new Error('VAPID key is empty. Please check your VITE_FIREBASE_VAPID_KEY environment variable');
     }
 
-    // Basic validation: VAPID keys are base64-encoded strings
-    // They should only contain alphanumeric characters, +, /, and = (for padding)
-    const base64Regex = /^[A-Za-z0-9+/=]+$/;
-    if (!base64Regex.test(vapidKey)) {
+    // Basic validation: VAPID keys are base64url-encoded strings
+    // Base64url uses - and _ instead of + and / (standard base64)
+    // They should only contain alphanumeric characters, -, _, and = (for padding)
+    const base64urlRegex = /^[A-Za-z0-9\-_=]+$/;
+    if (!base64urlRegex.test(vapidKey)) {
       console.error('Invalid VAPID key format. Key length:', vapidKey.length);
       console.error('First 20 chars:', vapidKey.substring(0, 20));
-      throw new Error('VAPID key contains invalid characters. It should be a base64-encoded string without spaces or newlines. Please check your VITE_FIREBASE_VAPID_KEY environment variable');
+      throw new Error('VAPID key contains invalid characters. It should be a base64url-encoded string (may contain -, _, and =) without spaces or newlines. Please check your VITE_FIREBASE_VAPID_KEY environment variable');
     }
 
     console.log('Using VAPID key (first 20 chars):', vapidKey.substring(0, 20) + '...');
