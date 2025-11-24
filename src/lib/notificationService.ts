@@ -5,7 +5,8 @@
 
 import { getMessaging, getToken, Messaging } from 'firebase/messaging';
 import app, { auth, db } from '@/lib/firebase';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { SessionManager } from '@/lib/sessionManager';
 
 /**
  * Register service worker and pass Firebase config
@@ -88,11 +89,40 @@ export async function initializeMessaging(
       
       // Save token to Firestore if user is authenticated
       if (auth.currentUser) {
-        const userRef = doc(db, 'users', auth.currentUser.uid);
-        await setDoc(userRef, {
-          webFcmToken: token,
-          webFcmTokenUpdatedAt: new Date().toISOString(),
-        }, { merge: true });
+        const session = SessionManager.getSession();
+        const isSuperAdmin = session?.userType === 'superadmin';
+        
+        if (isSuperAdmin) {
+          // Super admin: save to superAdmin collection by email
+          const email = auth.currentUser.email;
+          if (email) {
+            const superAdminQuery = query(
+              collection(db, 'superAdmin'),
+              where('email', '==', email)
+            );
+            const querySnapshot = await getDocs(superAdminQuery);
+            
+            if (!querySnapshot.empty) {
+              const superAdminDocId = querySnapshot.docs[0].id;
+              const superAdminRef = doc(db, 'superAdmin', superAdminDocId);
+              await setDoc(superAdminRef, {
+                webFcmToken: token,
+                webFcmTokenUpdatedAt: new Date().toISOString(),
+              }, { merge: true });
+              console.log('FCM Token saved to superAdmin collection');
+            } else {
+              console.warn('Super admin document not found in Firestore');
+            }
+          }
+        } else {
+          // Regular user or admin: save to users collection
+          const userRef = doc(db, 'users', auth.currentUser.uid);
+          await setDoc(userRef, {
+            webFcmToken: token,
+            webFcmTokenUpdatedAt: new Date().toISOString(),
+          }, { merge: true });
+          console.log('FCM Token saved to users collection');
+        }
       }
       
       return token;

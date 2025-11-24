@@ -284,14 +284,26 @@ export const sendChatNotification = onDocumentCreated(
         }
         
         // Get all web users (users with webFcmToken)
+        // Check both users collection and superAdmin collection
         const usersSnapshot = await admin.firestore().collection("users").get();
+        const superAdminSnapshot = await admin.firestore().collection("superAdmin").get();
         
-        const webUsers = usersSnapshot.docs
-          .map(doc => ({
-            userId: doc.id,
-            webFcmToken: doc.data().webFcmToken
-          }))
-          .filter(user => user.webFcmToken); // Only users with web FCM tokens
+        const webUsers = [
+          // Regular users and admins from users collection
+          ...usersSnapshot.docs
+            .map(doc => ({
+              userId: doc.id,
+              webFcmToken: doc.data().webFcmToken
+            }))
+            .filter(user => user.webFcmToken),
+          // Super admins from superAdmin collection
+          ...superAdminSnapshot.docs
+            .map(doc => ({
+              userId: doc.id,
+              webFcmToken: doc.data().webFcmToken
+            }))
+            .filter(user => user.webFcmToken)
+        ];
 
         if (webUsers.length === 0) {
           logger.info("No web users with FCM tokens found");
@@ -377,11 +389,23 @@ export const sendChatNotification = onDocumentCreated(
         if (invalidTokens.length > 0) {
           logger.info(`Removing ${invalidTokens.length} invalid web FCM tokens`);
           
-          const deletePromises = invalidTokens.map(userId =>
-            admin.firestore().collection("users").doc(userId).update({
-              webFcmToken: admin.firestore.FieldValue.delete()
-            })
-          );
+          const deletePromises = invalidTokens.map(async (userId) => {
+            // Try to delete from users collection first
+            const userDoc = await admin.firestore().collection("users").doc(userId).get();
+            if (userDoc.exists) {
+              return admin.firestore().collection("users").doc(userId).update({
+                webFcmToken: admin.firestore.FieldValue.delete()
+              });
+            }
+            // If not found in users, try superAdmin collection
+            const superAdminDoc = await admin.firestore().collection("superAdmin").doc(userId).get();
+            if (superAdminDoc.exists) {
+              return admin.firestore().collection("superAdmin").doc(userId).update({
+                webFcmToken: admin.firestore.FieldValue.delete()
+              });
+            }
+            return Promise.resolve();
+          });
           
           await Promise.all(deletePromises);
         }
@@ -441,14 +465,26 @@ export const sendReportCreatedNotification = onDocumentCreated(
       }
 
       // Get all web users (users with webFcmToken)
+      // Check both users collection and superAdmin collection
       const usersSnapshot = await admin.firestore().collection("users").get();
+      const superAdminSnapshot = await admin.firestore().collection("superAdmin").get();
       
-      const webUsers = usersSnapshot.docs
-        .map(doc => ({
-          userId: doc.id,
-          webFcmToken: doc.data().webFcmToken
-        }))
-        .filter(user => user.webFcmToken); // Only users with web FCM tokens
+      const webUsers = [
+        // Regular users and admins from users collection
+        ...usersSnapshot.docs
+          .map(doc => ({
+            userId: doc.id,
+            webFcmToken: doc.data().webFcmToken
+          }))
+          .filter(user => user.webFcmToken),
+        // Super admins from superAdmin collection
+        ...superAdminSnapshot.docs
+          .map(doc => ({
+            userId: doc.id,
+            webFcmToken: doc.data().webFcmToken
+          }))
+          .filter(user => user.webFcmToken)
+      ];
 
       if (webUsers.length === 0) {
         logger.info("No web users with FCM tokens found");
@@ -540,11 +576,23 @@ export const sendReportCreatedNotification = onDocumentCreated(
       if (invalidTokens.length > 0) {
         logger.info(`Removing ${invalidTokens.length} invalid web FCM tokens`);
         
-        const deletePromises = invalidTokens.map(userId =>
-          admin.firestore().collection("users").doc(userId).update({
-            webFcmToken: admin.firestore.FieldValue.delete()
-          })
-        );
+        const deletePromises = invalidTokens.map(async (userId) => {
+          // Try to delete from users collection first
+          const userDoc = await admin.firestore().collection("users").doc(userId).get();
+          if (userDoc.exists) {
+            return admin.firestore().collection("users").doc(userId).update({
+              webFcmToken: admin.firestore.FieldValue.delete()
+            });
+          }
+          // If not found in users, try superAdmin collection
+          const superAdminDoc = await admin.firestore().collection("superAdmin").doc(userId).get();
+          if (superAdminDoc.exists) {
+            return admin.firestore().collection("superAdmin").doc(userId).update({
+              webFcmToken: admin.firestore.FieldValue.delete()
+            });
+          }
+          return Promise.resolve();
+        });
         
         await Promise.all(deletePromises);
       }
@@ -737,14 +785,26 @@ export const sendNewUserRegistrationNotification = onDocumentCreated(
 
     try {
       // Get all web users (users with webFcmToken)
+      // Check both users collection and superAdmin collection
       const usersSnapshot = await admin.firestore().collection("users").get();
+      const superAdminSnapshot = await admin.firestore().collection("superAdmin").get();
       
-      const webUsers = usersSnapshot.docs
-        .map(doc => ({
-          userId: doc.id,
-          webFcmToken: doc.data().webFcmToken
-        }))
-        .filter(user => user.webFcmToken && user.userId !== event.params.userId); // Exclude the new user and only web users
+      const webUsers = [
+        // Regular users and admins from users collection
+        ...usersSnapshot.docs
+          .map(doc => ({
+            userId: doc.id,
+            webFcmToken: doc.data().webFcmToken
+          }))
+          .filter(user => user.webFcmToken && user.userId !== event.params.userId),
+        // Super admins from superAdmin collection
+        ...superAdminSnapshot.docs
+          .map(doc => ({
+            userId: doc.id,
+            webFcmToken: doc.data().webFcmToken
+          }))
+          .filter(user => user.webFcmToken && user.userId !== event.params.userId)
+      ];
 
       if (webUsers.length === 0) {
         logger.info("No web users with FCM tokens found");
@@ -833,11 +893,23 @@ export const sendNewUserRegistrationNotification = onDocumentCreated(
       if (invalidTokens.length > 0) {
         logger.info(`Removing ${invalidTokens.length} invalid web FCM tokens`);
         
-        const deletePromises = invalidTokens.map(userId =>
-          admin.firestore().collection("users").doc(userId).update({
-            webFcmToken: admin.firestore.FieldValue.delete()
-          })
-        );
+        const deletePromises = invalidTokens.map(async (userId) => {
+          // Try to delete from users collection first
+          const userDoc = await admin.firestore().collection("users").doc(userId).get();
+          if (userDoc.exists) {
+            return admin.firestore().collection("users").doc(userId).update({
+              webFcmToken: admin.firestore.FieldValue.delete()
+            });
+          }
+          // If not found in users, try superAdmin collection
+          const superAdminDoc = await admin.firestore().collection("superAdmin").doc(userId).get();
+          if (superAdminDoc.exists) {
+            return admin.firestore().collection("superAdmin").doc(userId).update({
+              webFcmToken: admin.firestore.FieldValue.delete()
+            });
+          }
+          return Promise.resolve();
+        });
         
         await Promise.all(deletePromises);
       }

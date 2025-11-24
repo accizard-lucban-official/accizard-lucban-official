@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getMessaging, getToken, onMessage, Messaging, isSupported } from 'firebase/messaging';
 import { auth, db } from '@/lib/firebase';
-import { doc, updateDoc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, updateDoc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { toast } from '@/components/ui/sonner';
 import app from '@/lib/firebase';
 import { registerServiceWorker, initializeMessaging } from '@/lib/notificationService';
+import { SessionManager } from '@/lib/sessionManager';
 
 export interface NotificationPermission {
   state: NotificationPermissionState;
@@ -129,9 +130,30 @@ export function usePushNotifications() {
       }
 
       try {
-        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-        const userData = userDoc.data();
-        const hasWebFcmToken = !!userData?.webFcmToken;
+        const session = SessionManager.getSession();
+        const isSuperAdmin = session?.userType === 'superadmin';
+        let hasWebFcmToken = false;
+
+        if (isSuperAdmin) {
+          // Super admin: check superAdmin collection by email
+          const email = auth.currentUser?.email;
+          if (email) {
+            const superAdminQuery = query(
+              collection(db, 'superAdmin'),
+              where('email', '==', email)
+            );
+            const querySnapshot = await getDocs(superAdminQuery);
+            if (!querySnapshot.empty) {
+              const superAdminData = querySnapshot.docs[0].data();
+              hasWebFcmToken = !!superAdminData?.webFcmToken;
+            }
+          }
+        } else {
+          // Regular user or admin: check users collection
+          const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+          const userData = userDoc.data();
+          hasWebFcmToken = !!userData?.webFcmToken;
+        }
 
         setState(prev => ({
           ...prev,
@@ -306,11 +328,35 @@ export function usePushNotifications() {
 
     try {
       // Remove token from Firestore
-      const userRef = doc(db, 'users', auth.currentUser.uid);
-      await updateDoc(userRef, {
-        webFcmToken: null,
-        webFcmTokenUpdatedAt: null,
-      });
+      const session = SessionManager.getSession();
+      const isSuperAdmin = session?.userType === 'superadmin';
+
+      if (isSuperAdmin) {
+        // Super admin: remove from superAdmin collection by email
+        const email = auth.currentUser?.email;
+        if (email) {
+          const superAdminQuery = query(
+            collection(db, 'superAdmin'),
+            where('email', '==', email)
+          );
+          const querySnapshot = await getDocs(superAdminQuery);
+          if (!querySnapshot.empty) {
+            const superAdminDocId = querySnapshot.docs[0].id;
+            const superAdminRef = doc(db, 'superAdmin', superAdminDocId);
+            await updateDoc(superAdminRef, {
+              webFcmToken: null,
+              webFcmTokenUpdatedAt: null,
+            });
+          }
+        }
+      } else {
+        // Regular user or admin: remove from users collection
+        const userRef = doc(db, 'users', auth.currentUser.uid);
+        await updateDoc(userRef, {
+          webFcmToken: null,
+          webFcmTokenUpdatedAt: null,
+        });
+      }
 
       setState(prev => ({
         ...prev,
