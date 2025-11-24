@@ -2038,9 +2038,9 @@ export function MapboxMap({
       }
     };
 
-    // Toggle health-facilities layer
-    const healthFacilitiesVisible = facilityTypes.includes('Health Facilities');
-    toggleLayer('health-facilities', healthFacilitiesVisible);
+    // Health facilities layer is NOT toggled - using manual pins from Firestore instead
+    // const healthFacilitiesVisible = facilityTypes.includes('Health Facilities');
+    // toggleLayer('health-facilities', healthFacilitiesVisible);
 
     // Evacuation centers layer is NOT toggled - using manual pins instead
     // const evacuationCentersVisible = facilityTypes.includes('Evacuation Centers');
@@ -2363,8 +2363,9 @@ export function MapboxMap({
     `;
   };
 
-  // Handle hover for tileset layers (health-facilities only - evacuation-centers uses manual pins)
-  // Note: These layers only exist in the custom streets style, not in satellite
+  // Handle hover for tileset layers
+  // Note: Health facilities and evacuation centers now use manual pins from Firestore
+  // This effect is kept for potential future tileset layers but currently handles no layers
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
 
@@ -2375,8 +2376,9 @@ export function MapboxMap({
     const handleMouseMove = (e: mapboxgl.MapMouseEvent) => {
       if (!map.current) return;
 
-      // Query features at the mouse position for tileset layers (evacuation-centers removed - using manual pins)
-      const layers = ['health-facilities'];
+      // Query features at the mouse position for tileset layers
+      // Health facilities now use manual pins from Firestore, so no tileset layers to query
+      const layers: string[] = [];
       const features = map.current.queryRenderedFeatures(e.point, {
         layers: layers
       });
@@ -2402,11 +2404,8 @@ export function MapboxMap({
         const feature = features[0];
         const layerId = feature.layer?.id || '';
         
-        // Determine layer type (evacuation-centers removed - using manual pins)
+        // Determine layer type
         let layerType = 'Facility';
-        if (layerId.includes('health')) {
-          layerType = 'Health Facility';
-        }
 
         // Get coordinates from feature
         let coordinates: [number, number] | null = null;
@@ -2439,7 +2438,7 @@ export function MapboxMap({
           canvas.style.cursor = '';
         }
       }
-      
+      // Remove tileset hover popup
       if (tilesetHoverPopupRef.current) {
         tilesetHoverPopupRef.current.remove();
         tilesetHoverPopupRef.current = null;
