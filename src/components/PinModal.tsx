@@ -463,8 +463,8 @@ export function PinModal({
                 id="location-name"
                 placeholder="Location will be set automatically"
                 value={formData.locationName}
-                readOnly={mode === "edit" || isUnpinningFromReport}
-                disabled={mode === "edit" || isUnpinningFromReport}
+                readOnly={isFromReport || mode === "edit" || isUnpinningFromReport}
+                disabled={isFromReport || mode === "edit" || isUnpinningFromReport}
                 className="h-10 bg-gray-50 cursor-not-allowed border-gray-200"
               />
             </div>
@@ -479,10 +479,10 @@ export function PinModal({
                 type="text"
                 placeholder="Latitude, Longitude (e.g., 14.1139, 121.5556)"
                 value={coordinatesInput}
-                readOnly={isUnpinningFromReport}
-                disabled={isUnpinningFromReport}
+                readOnly={isFromReport || isUnpinningFromReport}
+                disabled={isFromReport || isUnpinningFromReport}
                 onChange={(e) => {
-                  if (isUnpinningFromReport) return;
+                  if (isFromReport || isUnpinningFromReport) return;
                   const val = e.target.value;
                   
                   // Update input value immediately for free typing
@@ -537,7 +537,7 @@ export function PinModal({
                 }}
                 className={cn(
                   "h-10",
-                  isUnpinningFromReport 
+                  (isFromReport || isUnpinningFromReport)
                     ? "bg-gray-50 cursor-not-allowed border-gray-200" 
                     : coordinatesError
                       ? "border-red-500 focus:border-red-500 focus:ring-red-500/20"
@@ -731,8 +731,8 @@ export function PinModal({
             </div>
           )}
 
-          {/* Map Click Helper */}
-          {isWaitingForMapClick && (
+          {/* Map Click Helper - Hide when pin is connected to a report */}
+          {isWaitingForMapClick && !isFromReport && (
             <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-lg">
               <div className="flex items-start gap-2">
                 <MapPin className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
@@ -742,6 +742,23 @@ export function PinModal({
                   </p>
                   <p className="text-xs text-blue-700 mt-0.5">
                     Click on the map to set coordinates automatically
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* Info message when pin is connected to a report */}
+          {isFromReport && (
+            <div className="p-2.5 bg-orange-50 border border-orange-200 rounded-lg">
+              <div className="flex items-start gap-2">
+                <MapPin className="h-4 w-4 text-orange-600 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-orange-900">
+                    Location Locked
+                  </p>
+                  <p className="text-xs text-orange-700 mt-0.5">
+                    This pin is connected to a report. Location cannot be changed.
                   </p>
                 </div>
               </div>

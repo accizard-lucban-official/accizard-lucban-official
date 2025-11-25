@@ -711,6 +711,13 @@ ${placemarks}
 
   // Handle coordinate changes from PinModal
   const handleCoordinatesChange = async (coordinates: { lat: number; lng: number }) => {
+    // Don't allow coordinate changes if pin is connected to a report
+    const hasReportId = pinModalPrefill?.reportId || editingPin?.reportId;
+    if (hasReportId) {
+      // Pin is connected to a report - don't allow location changes
+      return;
+    }
+    
     // Update the temporary clicked location to move the marker
     if (coordinates.lat !== 0 && coordinates.lng !== 0) {
       // Reverse geocode to get location name
@@ -1240,7 +1247,17 @@ ${placemarks}
                 const locationName = await reverseGeocode(lngLat.lat.toString(), lngLat.lng.toString());
                 
                 // If modal is already open (create mode), just update coordinates
+                // BUT: Don't update if pin is connected to a report (reportId exists)
                 if (isPinModalOpen && pinModalMode === "create") {
+                  // Check if pin is connected to a report
+                  const hasReportId = pinModalPrefill?.reportId || editingPin?.reportId;
+                  
+                  if (hasReportId) {
+                    // Pin is connected to a report - don't allow location changes
+                    toast.info("Location is locked because this pin is connected to a report");
+                    return;
+                  }
+                  
                   setPinModalPrefill(prev => ({
                     ...prev,
                     latitude: lngLat.lat,

@@ -140,8 +140,12 @@ export function usePins() {
 
       console.log('Creating pin in Firestore:', pinDoc);
 
+      // Route to correct collection based on category
+      // Facilities go to "pins", accidents/hazards go to "reportPins"
+      const collectionName = category === 'facility' ? 'pins' : 'reportPins';
+      
       // Add to Firestore
-      const docRef = await addDoc(collection(db, "pins"), pinDoc);
+      const docRef = await addDoc(collection(db, collectionName), pinDoc);
       
       console.log('Pin created successfully with ID:', docRef.id);
       
@@ -190,15 +194,26 @@ export function usePins() {
         throw new Error("Invalid longitude: must be between -180 and 180");
       }
 
-      const pinRef = doc(db, "pins", pinId);
+      // Try to find pin in both collections
+      let pinRef = doc(db, "pins", pinId);
+      let pinSnap = await getDoc(pinRef);
       
-      // Get current pin data for search terms regeneration
-      const pinSnap = await getDoc(pinRef);
       if (!pinSnap.exists()) {
-        throw new Error("Pin not found");
+        // Try reportPins collection
+        pinRef = doc(db, "reportPins", pinId);
+        pinSnap = await getDoc(pinRef);
+        if (!pinSnap.exists()) {
+          throw new Error("Pin not found");
+        }
       }
 
       const currentData = pinSnap.data();
+      const collectionName = currentData.category === 'facility' ? 'pins' : 'reportPins';
+      
+      // Update pinRef to correct collection if needed
+      if (pinRef.path.split('/')[0] !== collectionName) {
+        pinRef = doc(db, collectionName, pinId);
+      }
       
       // Prepare update object
       const updateData: any = {
@@ -270,10 +285,20 @@ export function usePins() {
     setError(null);
 
     try {
-      const pinRef = doc(db, "pins", pinId);
+      // Try to find pin in both collections
+      let pinRef = doc(db, "pins", pinId);
+      let pinSnap = await getDoc(pinRef);
+      
+      if (!pinSnap.exists()) {
+        // Try reportPins collection
+        pinRef = doc(db, "reportPins", pinId);
+        pinSnap = await getDoc(pinRef);
+        if (!pinSnap.exists()) {
+          throw new Error("Pin not found");
+        }
+      }
       
       // Get pin data before deletion for logging
-      const pinSnap = await getDoc(pinRef);
       const pinData = pinSnap.exists() ? pinSnap.data() : null;
       
       console.log('Deleting pin:', pinId);
@@ -310,11 +335,17 @@ export function usePins() {
    */
   const getPinById = async (pinId: string): Promise<Pin | null> => {
     try {
-      const pinRef = doc(db, "pins", pinId);
-      const pinSnap = await getDoc(pinRef);
+      // Try pins collection first
+      let pinRef = doc(db, "pins", pinId);
+      let pinSnap = await getDoc(pinRef);
       
       if (!pinSnap.exists()) {
-        return null;
+        // Try reportPins collection
+        pinRef = doc(db, "reportPins", pinId);
+        pinSnap = await getDoc(pinRef);
+        if (!pinSnap.exists()) {
+          return null;
+        }
       }
 
       const data = pinSnap.data();
@@ -349,81 +380,119 @@ export function usePins() {
     onError?: (error: Error) => void
   ): (() => void) => {
     try {
-      let q = query(collection(db, "pins"));
+      // Determine which collections to query based on category filter
+      const needsFacilities = !filters.categories || filters.categories.includes('facility');
+      const needsAccidents = !filters.categories || filters.categories.includes('accident');
+      
+      const collections: string[] = [];
+      if (needsFacilities) collections.push('pins');
+      if (needsAccidents) collections.push('reportPins');
+      
+      // If no category filter, query both collections
+      if (collections.length === 0) {
+        collections.push('pins', 'reportPins');
+      }
 
-      // Apply filters
-      if (filters.types && filters.types.length > 0) {
-        // Firestore "in" operator has a limit of 10 items
-        // If more than 10 types, we need to split into multiple queries or use a different approach
-        if (filters.types.length > 10) {
-          console.warn('Too many types selected (max 10). Using first 10 types.');
-          filters.types = filters.types.slice(0, 10);
+      // Create queries for each collection
+      const createQuery = (collectionName: string) => {
+        let q = query(collection(db, collectionName));
+
+        // Apply filters
+        if (filters.types && filters.types.length > 0) {
+          // Firestore "in" operator has a limit of 10 items
+          if (filters.types.length > 10) {
+            console.warn('Too many types selected (max 10). Using first 10 types.');
+            filters.types = filters.types.slice(0, 10);
+          }
+          q = query(collection(db, collectionName), where("type", "in", filters.types));
         }
-        console.log('Querying pins with types:', filters.types);
-        // Remove orderBy to avoid needing composite index - we'll sort client-side
-        q = query(collection(db, "pins"), where("type", "in", filters.types));
-      } else {
-        console.log('Querying all pins (no type filter)');
+
+        if (filters.categories && filters.categories.length > 0) {
+          const category = collectionName === 'pins' ? 'facility' : 'accident';
+          if (!filters.categories.includes(category)) {
+            return null; // Skip this collection if category doesn't match
+          }
+        }
+
+        if (filters.reportId) {
+          q = query(collection(db, collectionName), where("reportId", "==", filters.reportId));
+        }
+
+        return q;
+      };
+
+      const queries = collections.map(createQuery).filter(q => q !== null) as any[];
+
+      if (queries.length === 0) {
+        onUpdate([]);
+        return () => {};
       }
 
-      if (filters.categories && filters.categories.length > 0) {
-        // Remove orderBy to avoid needing composite index - we'll sort client-side
-        q = query(collection(db, "pins"), where("category", "in", filters.categories));
-      }
+      // Subscribe to all queries and combine results
+      const unsubscribes: (() => void)[] = [];
+      let allPins: Pin[] = [];
 
-      if (filters.reportId) {
-        // Remove orderBy to avoid needing composite index - we'll sort client-side
-        q = query(collection(db, "pins"), where("reportId", "==", filters.reportId));
-      }
+      const updateCombined = () => {
+        // Sort by createdAt descending
+        allPins.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
-      const unsubscribe = onSnapshot(
-        q,
-        (snapshot) => {
-          console.log('Pins snapshot received:', snapshot.docs.length, 'pins');
-          
-          let pins = snapshot.docs.map(doc => {
-            const data = doc.data();
-            return {
-              id: doc.id,
-              type: data.type,
-              category: data.category,
-              title: data.title,
-              description: data.description || undefined,
-              latitude: data.latitude,
-              longitude: data.longitude,
-              locationName: data.locationName,
-              reportId: data.reportId,
-              createdAt: data.createdAt?.toDate() || new Date(),
-              updatedAt: data.updatedAt?.toDate() || new Date(),
-              createdBy: data.createdBy,
-              createdByName: data.createdByName
-            } as Pin;
-          });
+        // Client-side filtering for date range
+        let filteredPins = [...allPins];
+        if (filters.dateFrom) {
+          filteredPins = filteredPins.filter(pin => pin.createdAt >= filters.dateFrom!);
+        }
+        if (filters.dateTo) {
+          filteredPins = filteredPins.filter(pin => pin.createdAt <= filters.dateTo!);
+        }
 
-          // Sort by createdAt descending (client-side to avoid composite index requirement)
-          pins.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        // Client-side search filtering
+        if (filters.searchQuery && filters.searchQuery.trim()) {
+          const searchLower = filters.searchQuery.toLowerCase();
+          filteredPins = filteredPins.filter(pin => 
+            pin.title.toLowerCase().includes(searchLower) ||
+            pin.locationName.toLowerCase().includes(searchLower) ||
+            pin.type.toLowerCase().includes(searchLower)
+          );
+        }
 
-          // Client-side filtering for date range (Firestore doesn't support complex queries)
-          if (filters.dateFrom) {
-            pins = pins.filter(pin => pin.createdAt >= filters.dateFrom!);
-          }
-          if (filters.dateTo) {
-            pins = pins.filter(pin => pin.createdAt <= filters.dateTo!);
-          }
+        console.log('Filtered pins:', filteredPins.length);
+        onUpdate(filteredPins);
+      };
 
-          // Client-side search filtering
-          if (filters.searchQuery && filters.searchQuery.trim()) {
-            const searchLower = filters.searchQuery.toLowerCase();
-            pins = pins.filter(pin => 
-              pin.title.toLowerCase().includes(searchLower) ||
-              pin.locationName.toLowerCase().includes(searchLower) ||
-              pin.type.toLowerCase().includes(searchLower)
-            );
-          }
+      queries.forEach((q, index) => {
+        const unsubscribe = onSnapshot(
+          q,
+          (snapshot) => {
+            console.log(`Pins snapshot received from ${collections[index]}:`, snapshot.docs.length, 'pins');
+            
+            const collectionPins = snapshot.docs.map(doc => {
+              const data = doc.data();
+              return {
+                id: doc.id,
+                type: data.type,
+                category: data.category,
+                title: data.title,
+                description: data.description || undefined,
+                latitude: data.latitude,
+                longitude: data.longitude,
+                locationName: data.locationName,
+                reportId: data.reportId,
+                createdAt: data.createdAt?.toDate() || new Date(),
+                updatedAt: data.updatedAt?.toDate() || new Date(),
+                createdBy: data.createdBy,
+                createdByName: data.createdByName
+              } as Pin;
+            });
 
-          console.log('Filtered pins:', pins.length);
-          onUpdate(pins);
-        },
+            // Update allPins array - remove old pins from this collection and add new ones
+            allPins = allPins.filter(pin => {
+              // Check if pin exists in current collection snapshot
+              return !collectionPins.some(cp => cp.id === pin.id);
+            });
+            allPins.push(...collectionPins);
+
+            updateCombined();
+          },
         (err: any) => {
           console.error('Error in pins subscription:', err);
           console.error('Error details:', {
@@ -463,9 +532,14 @@ export function usePins() {
             onError(error);
           }
         }
-      );
+        );
+        unsubscribes.push(unsubscribe);
+      });
 
-      return unsubscribe;
+      // Return combined unsubscribe function
+      return () => {
+        unsubscribes.forEach(unsub => unsub());
+      };
     } catch (err: any) {
       console.error('Error setting up pins subscription:', err);
       if (onError) {
@@ -483,41 +557,54 @@ export function usePins() {
     setError(null);
 
     try {
-      let q = query(collection(db, "pins"), orderBy("createdAt", "desc"));
-
-      // Apply filters
-      if (filters?.types && filters.types.length > 0) {
-        q = query(collection(db, "pins"), where("type", "in", filters.types), orderBy("createdAt", "desc"));
-      }
-
-      if (filters?.categories && filters.categories.length > 0) {
-        q = query(collection(db, "pins"), where("category", "in", filters.categories), orderBy("createdAt", "desc"));
-      }
-
-      if (filters?.reportId) {
-        q = query(collection(db, "pins"), where("reportId", "==", filters.reportId), orderBy("createdAt", "desc"));
-      }
-
-      const snapshot = await getDocs(q);
+      // Determine which collections to query
+      const needsFacilities = !filters?.categories || filters.categories.includes('facility');
+      const needsAccidents = !filters?.categories || filters.categories.includes('accident');
       
-      let pins = snapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          type: data.type,
-          category: data.category,
-          title: data.title,
-          description: data.description || undefined,
-          latitude: data.latitude,
-          longitude: data.longitude,
-          locationName: data.locationName,
-          reportId: data.reportId,
-          createdAt: data.createdAt?.toDate() || new Date(),
-          updatedAt: data.updatedAt?.toDate() || new Date(),
-          createdBy: data.createdBy,
-          createdByName: data.createdByName
-        } as Pin;
+      const collections: string[] = [];
+      if (needsFacilities) collections.push('pins');
+      if (needsAccidents) collections.push('reportPins');
+      
+      if (collections.length === 0) {
+        collections.push('pins', 'reportPins');
+      }
+
+      // Fetch from all relevant collections
+      const fetchPromises = collections.map(async (collectionName) => {
+        let q = query(collection(db, collectionName), orderBy("createdAt", "desc"));
+
+        // Apply filters
+        if (filters?.types && filters.types.length > 0) {
+          q = query(collection(db, collectionName), where("type", "in", filters.types), orderBy("createdAt", "desc"));
+        }
+
+        if (filters?.reportId) {
+          q = query(collection(db, collectionName), where("reportId", "==", filters.reportId), orderBy("createdAt", "desc"));
+        }
+
+        const snapshot = await getDocs(q);
+        return snapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            type: data.type,
+            category: data.category,
+            title: data.title,
+            description: data.description || undefined,
+            latitude: data.latitude,
+            longitude: data.longitude,
+            locationName: data.locationName,
+            reportId: data.reportId,
+            createdAt: data.createdAt?.toDate() || new Date(),
+            updatedAt: data.updatedAt?.toDate() || new Date(),
+            createdBy: data.createdBy,
+            createdByName: data.createdByName
+          } as Pin;
+        });
       });
+
+      const results = await Promise.all(fetchPromises);
+      let pins = results.flat();
 
       // Client-side filtering
       if (filters?.dateFrom) {
@@ -534,6 +621,9 @@ export function usePins() {
           pin.type.toLowerCase().includes(searchLower)
         );
       }
+
+      // Sort by createdAt descending
+      pins.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
       setLoading(false);
       return pins;

@@ -746,12 +746,15 @@ export function ManageReportsPage() {
   useEffect(() => {
     const fetchPinnedReports = async () => {
       try {
-        // Get all pins and filter those with reportId
-        const pinsQuery = query(collection(db, "pins"));
-        const querySnapshot = await getDocs(pinsQuery);
+        // Get all pins from both collections and filter those with reportId
+        // Report pins are in reportPins collection, but we check both for backward compatibility
+        const [pinsSnapshot, reportPinsSnapshot] = await Promise.all([
+          getDocs(query(collection(db, "pins"))),
+          getDocs(query(collection(db, "reportPins")))
+        ]);
         const pinnedMap = new Map<string, string>();
         
-        querySnapshot.docs.forEach((doc) => {
+        [...pinsSnapshot.docs, ...reportPinsSnapshot.docs].forEach((doc) => {
           const pinData = doc.data();
           if (pinData.reportId) {
             pinnedMap.set(pinData.reportId, doc.id);
@@ -766,20 +769,47 @@ export function ManageReportsPage() {
 
     fetchPinnedReports();
     
-    // Subscribe to real-time updates
-    const pinsQuery = query(collection(db, "pins"));
-    const unsubscribe = onSnapshot(pinsQuery, (snapshot) => {
-      const pinnedMap = new Map<string, string>();
+    // Subscribe to real-time updates from both collections
+    const unsubscribePins = onSnapshot(query(collection(db, "pins")), (snapshot) => {
+      const pinnedMap = new Map(pinnedReports);
       snapshot.docs.forEach((doc) => {
         const pinData = doc.data();
         if (pinData.reportId) {
           pinnedMap.set(pinData.reportId, doc.id);
+        } else {
+          // Remove if reportId was removed
+          pinnedMap.forEach((pinId, reportId) => {
+            if (pinId === doc.id) {
+              pinnedMap.delete(reportId);
+            }
+          });
+        }
+      });
+      setPinnedReports(pinnedMap);
+    });
+    
+    const unsubscribeReportPins = onSnapshot(query(collection(db, "reportPins")), (snapshot) => {
+      const pinnedMap = new Map(pinnedReports);
+      snapshot.docs.forEach((doc) => {
+        const pinData = doc.data();
+        if (pinData.reportId) {
+          pinnedMap.set(pinData.reportId, doc.id);
+        } else {
+          // Remove if reportId was removed
+          pinnedMap.forEach((pinId, reportId) => {
+            if (pinId === doc.id) {
+              pinnedMap.delete(reportId);
+            }
+          });
         }
       });
       setPinnedReports(pinnedMap);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribePins();
+      unsubscribeReportPins();
+    };
   }, []);
 
   // Fetch team members from database
@@ -2644,25 +2674,26 @@ useEffect(() => {
       }
 
       // Check if there's a pin associated with this report and delete it
+      // Report pins are stored in reportPins collection (not pins collection)
       const reportId = reportToDeleteData?.id || reportToDeleteData?.reportId;
       if (reportId) {
         try {
-          // Find pin with matching reportId
-          const pinsQuery = query(collection(db, "pins"), where("reportId", "==", reportId));
+          // Find pin with matching reportId in reportPins collection
+          const pinsQuery = query(collection(db, "reportPins"), where("reportId", "==", reportId));
           const pinsSnapshot = await getDocs(pinsQuery);
           
           // Delete all pins associated with this report
           if (!pinsSnapshot.empty) {
             await Promise.all(
               pinsSnapshot.docs.map(async (pinDoc) => {
-                await deleteDoc(doc(db, "pins", pinDoc.id));
-                console.log("Deleted associated pin:", pinDoc.id);
+                await deleteDoc(doc(db, "reportPins", pinDoc.id));
+                console.log("Deleted associated report pin:", pinDoc.id);
               })
             );
-            console.log(`Deleted ${pinsSnapshot.docs.length} pin(s) associated with report ${reportId}`);
+            console.log(`Deleted ${pinsSnapshot.docs.length} report pin(s) associated with report ${reportId}`);
           }
         } catch (pinError) {
-          console.error("Error deleting associated pin(s):", pinError);
+          console.error("Error deleting associated report pin(s):", pinError);
           // Continue with report deletion even if pin deletion fails
         }
       }
@@ -4542,14 +4573,15 @@ useEffect(() => {
           
           for (let i = 0; i < reportIdsToDelete.length; i += batchSize) {
             const batch = reportIdsToDelete.slice(i, i + batchSize);
-            const pinsQuery = query(collection(db, "pins"), where("reportId", "in", batch));
+            // Check reportPins collection (report pins are stored there)
+            const pinsQuery = query(collection(db, "reportPins"), where("reportId", "in", batch));
             const pinsSnapshot = await getDocs(pinsQuery);
             
             if (!pinsSnapshot.empty) {
               pinsSnapshot.docs.forEach((pinDoc) => {
                 pinDeletionPromises.push(
-                  deleteDoc(doc(db, "pins", pinDoc.id)).then(() => {
-                    console.log("Deleted associated pin:", pinDoc.id);
+                  deleteDoc(doc(db, "reportPins", pinDoc.id)).then(() => {
+                    console.log("Deleted associated report pin:", pinDoc.id);
                   })
                 );
               });

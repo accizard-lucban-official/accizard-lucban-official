@@ -285,25 +285,47 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin() || true;
     }
 
-    // Pins collection (Map Markers)
-    // Supports report pinning flow: pins can be linked to reports via reportId field
+    // Pins collection (Emergency Facility Markers Only)
+    // Reserved for emergency facilities: Evacuation Centers, Health Facilities, Police Stations, Fire Stations, Government Offices
     match /pins/{pinId} {
+      // Public read access (mobile app + web app + anyone can view pins)
+      allow read: if true;
+      
+      // Create: Admins can create facility pins
+      // Since regular admins don't have Firebase Auth, we allow public create
+      // Application-level checks ensure only authorized admins can create pins
+      allow create: if canAddPlacemark() || true;
+      
+      // Update: Admins can update facility pins
+      // Since regular admins don't have Firebase Auth, we allow public update
+      // Application-level checks ensure only authorized admins can update pins
+      allow update: if canEditPins() || true;
+      
+      // Delete: Admins can delete facility pins
+      // Since regular admins don't have Firebase Auth, we allow public delete
+      // Application-level checks ensure only authorized admins can delete pins
+      allow delete: if canDeletePins() || true;
+    }
+    
+    // ReportPins collection (Accident/Hazard Markers)
+    // Stores all accident and hazard pins, whether connected to a report or manually added
+    match /reportPins/{pinId} {
       // Public read access (mobile app + web app + anyone can view pins)
       // Also needed for querying pins by reportId (where("reportId", "==", reportId))
       // and batch queries (where("reportId", "in", batch))
       allow read: if true;
       
-      // Create: Admins can create pins, including pins linked to reports (report pinning)
+      // Create: Admins can create report pins, including pins linked to reports (report pinning)
       // Since regular admins don't have Firebase Auth, we allow public create
       // Application-level checks ensure only authorized admins can create pins
       allow create: if canAddPlacemark() || true;
       
-      // Update: Admins can update pins, including updating pin location when report location changes
+      // Update: Admins can update report pins, including updating pin location when report location changes
       // Since regular admins don't have Firebase Auth, we allow public update
       // Application-level checks ensure only authorized admins can update pins
       allow update: if canEditPins() || true;
       
-      // Delete: Admins can delete pins, including deletion when associated reports are deleted
+      // Delete: Admins can delete report pins, including deletion when associated reports are deleted
       // Since regular admins don't have Firebase Auth, we allow public delete
       // Application-level checks ensure only authorized admins can delete pins
       allow delete: if canDeletePins() || true;
