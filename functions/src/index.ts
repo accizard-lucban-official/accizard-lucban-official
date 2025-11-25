@@ -131,12 +131,6 @@ export const sendChatNotification = onDocumentCreated(
       return;
     }
 
-    // Don't send notification if sender is the user themselves
-    if (userId === senderId) {
-      logger.info("Message sent by user themselves, skipping notification");
-      return;
-    }
-
     try {
       // Check if sender is a web user or mobile user
       // Web user: has webFcmToken OR doesn't have fcmToken (admin)
@@ -157,6 +151,13 @@ export const sendChatNotification = onDocumentCreated(
         // (admins might not have user documents, or senderId might be in admin-{userId} format)
         isWebSender = true;
         logger.info(`Sender document not found for senderId: ${senderId}, assuming web user`);
+      }
+
+      // Don't send notification if web user is sending to themselves
+      // (Mobile users sending messages should notify web users, so we don't skip those)
+      if (isWebSender && userId === senderId) {
+        logger.info("Web user sent message to themselves, skipping notification");
+        return;
       }
 
       // Determine notification body based on message type
@@ -324,6 +325,19 @@ export const sendChatNotification = onDocumentCreated(
             messageId: event.params.messageId,
             senderId: senderId,
             senderName: senderName || "New Message",
+          },
+          webpush: {
+            notification: {
+              title: senderName || "New Message",
+              body: notificationBody,
+              icon: "/accizard-uploads/accizard-logo-white-png.png",
+              badge: "/accizard-uploads/accizard-logo-white-png.png",
+              requireInteraction: true,
+              vibrate: [200, 100, 200],
+            },
+            fcmOptions: {
+              link: "/chat",
+            },
           },
           android: {
             priority: "high" as const,
@@ -512,6 +526,19 @@ export const sendReportCreatedNotification = onDocumentCreated(
           location: location || "",
           createdBy: userId,
         },
+        webpush: {
+          notification: {
+            title: notificationTitle,
+            body: notificationBody,
+            icon: "/accizard-uploads/accizard-logo-white-png.png",
+            badge: "/accizard-uploads/accizard-logo-white-png.png",
+            requireInteraction: true,
+            vibrate: [200, 100, 200],
+          },
+          fcmOptions: {
+            link: `/reports?highlight=${event.params.reportId}`,
+          },
+        },
         android: {
           priority: "high" as const,
           notification: {
@@ -668,6 +695,19 @@ export const sendAnnouncementNotification = onDocumentCreated(
           announcementType: type || "general",
           priority: priority || "low",
           date: date || "",
+        },
+        webpush: {
+          notification: {
+            title: notificationTitle,
+            body: notificationBody,
+            icon: "/accizard-uploads/accizard-logo-white-png.png",
+            badge: "/accizard-uploads/accizard-logo-white-png.png",
+            requireInteraction: priority === "high",
+            vibrate: priority === "high" ? [200, 100, 200] : [200],
+          },
+          fcmOptions: {
+            link: `/announcements?id=${event.params.announcementId}`,
+          },
         },
         android: {
           priority: priority === "high" ? "high" as const : "normal" as const,
@@ -828,6 +868,19 @@ export const sendNewUserRegistrationNotification = onDocumentCreated(
           type: "user_registered",
           newUserId: event.params.userId,
           userName: userName,
+        },
+        webpush: {
+          notification: {
+            title: notificationTitle,
+            body: notificationBody,
+            icon: "/accizard-uploads/accizard-logo-white-png.png",
+            badge: "/accizard-uploads/accizard-logo-white-png.png",
+            requireInteraction: false,
+            vibrate: [200],
+          },
+          fcmOptions: {
+            link: "/users",
+          },
         },
         android: {
           priority: "normal" as const,
