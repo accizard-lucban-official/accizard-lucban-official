@@ -1955,16 +1955,27 @@ export function MapboxMap({
       }
     };
 
-    // Toggle barangay boundaries - toggle both regular and satellite layers together
+    // Toggle barangay boundaries - different layers for streets vs satellite mode
     // Note: lucban-boundary stays visible (not controlled by these toggles)
     const barangayVisible = layerFilters.barangay ?? false;
-    // Toggle both layers together - the appropriate one will show based on style
-    toggleLayer('lucban-brgys', barangayVisible);
-    toggleLayer('lucban-brgys-satellite', barangayVisible);
-    toggleLayer('lucban-fill', barangayVisible); // Toggle fill layer together with boundaries
-
-    // Toggle barangay labels (lucban-brgy-names) - use barangay filter instead of barangayLabel
-    toggleLayer('lucban-brgy-names', barangayVisible);
+    
+    if (isSatellite) {
+      // Satellite mode: show satellite-specific layer + regular layers
+      // lucban-brgys-satellite + lucban-boundary + lucban-fill + lucban-brgys
+      toggleLayer('lucban-brgys-satellite', barangayVisible);
+      toggleLayer('lucban-brgys', barangayVisible);
+      toggleLayer('lucban-fill', barangayVisible);
+      // Hide barangay names in satellite mode
+      toggleLayer('lucban-brgy-names', false);
+    } else {
+      // Streets mode: show regular layers + barangay names
+      // lucban-brgy-names + lucban-boundary + lucban-fill + lucban-brgys
+      toggleLayer('lucban-brgys', barangayVisible);
+      toggleLayer('lucban-fill', barangayVisible);
+      toggleLayer('lucban-brgy-names', barangayVisible); // Show names in streets mode
+      // Hide satellite layer in streets mode
+      toggleLayer('lucban-brgys-satellite', false);
+    }
 
     // Toggle waterways - use different layers based on satellite mode
     if (isSatellite) {
@@ -2186,18 +2197,21 @@ export function MapboxMap({
                     
                     // Set initial visibility based on layer filters
                     const layerFilters = activeFilters?.layerFilters;
+                    const isSatelliteMode = layerFilters?.satellite ?? false;
+                    const barangayVisible = layerFilters?.barangay ?? false;
+                    
                     if (layer.id === 'lucban-boundary') {
                       // Always keep boundary visible
                       map.current.setLayoutProperty(layer.id, 'visibility', 'visible');
                     } else if (layer.id === 'lucban-brgys-satellite') {
-                      // Use satellite-specific layer for barangay boundaries
-                      map.current.setLayoutProperty(layer.id, 'visibility', layerFilters?.barangay ? 'visible' : 'none');
+                      // Satellite mode: show satellite layer when barangay filter is ON
+                      map.current.setLayoutProperty(layer.id, 'visibility', (isSatelliteMode && barangayVisible) ? 'visible' : 'none');
                     } else if (layer.id === 'lucban-brgys' || layer.id === 'lucban-fill') {
-                      // Hide regular boundaries in satellite mode (use satellite-specific instead)
-                      map.current.setLayoutProperty(layer.id, 'visibility', 'none');
+                      // Show both layers when barangay filter is ON (works in both modes)
+                      map.current.setLayoutProperty(layer.id, 'visibility', barangayVisible ? 'visible' : 'none');
                     } else if (layer.id === 'lucban-brgy-names') {
-                      // Use barangay filter for barangay names overlay
-                      map.current.setLayoutProperty(layer.id, 'visibility', layerFilters?.barangay ? 'visible' : 'none');
+                      // Only show names in streets mode when barangay filter is ON
+                      map.current.setLayoutProperty(layer.id, 'visibility', (!isSatelliteMode && barangayVisible) ? 'visible' : 'none');
                     } else if (waterwayPattern.test(layer.id)) {
                       // In satellite mode, only show waterway-satellite, hide regular waterway
                       if (layer.id === 'waterway-satellite') {

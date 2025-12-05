@@ -9,7 +9,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Search, Plus, Edit, Trash2, Shield, ShieldOff, ShieldCheck, ShieldX, Eye, User, FileText, Calendar as CalendarIcon, CheckSquare, Square, UserPlus, EyeOff, ChevronUp, ChevronDown, ArrowUp, ArrowDown, ArrowUpDown, Upload, X, FileDown, Camera, Check } from "lucide-react";
+import { Search, Plus, Edit, Trash2, Shield, ShieldOff, ShieldCheck, ShieldX, Eye, User, FileText, Calendar as CalendarIcon, CheckSquare, Square, UserPlus, EyeOff, ChevronUp, ChevronDown, ArrowUp, ArrowDown, ArrowUpDown, Upload, X, FileDown, Camera, Check, ArrowUpRight } from "lucide-react";
 import { Layout } from "./Layout";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -1739,46 +1739,112 @@ export function ManageUsersPage() {
         setLoadingReports(true);
         try {
           const querySnapshot = await getDocs(collection(db, "reports"));
-          // Use firebaseUid to match reports (reports use Firebase Auth UID)
+          console.log("📊 Fetched reports from Firestore:", querySnapshot.size, "documents");
+          console.log("👤 Selected resident:", {
+            id: selectedResident.id,
+            firebaseUid: selectedResident.firebaseUid,
+            userId: selectedResident.userId,
+            fullName: selectedResident.fullName,
+            email: selectedResident.email
+          });
+          
+          // Use multiple matching strategies to find reports for this resident
           const reports = querySnapshot.docs
             .filter(doc => {
               const data = doc.data();
-              // Match by Firebase UID (most reliable)
+              
+              // Strategy 1: Match by Firebase UID (most reliable - reports typically use Firebase Auth UID)
               if (selectedResident.firebaseUid && data.userId === selectedResident.firebaseUid) {
+                console.log("✅ Matched report by firebaseUid:", doc.id);
                 return true;
               }
-              // Fallback: match by userId field (RID- format)
+              
+              // Strategy 2: Match by userId field (RID- format or other formats)
               if (selectedResident.userId && data.userId === selectedResident.userId) {
+                console.log("✅ Matched report by userId:", doc.id);
                 return true;
               }
-              // Fallback: match by reportedBy name
+              
+              // Strategy 3: Match by reportedBy name (exact match)
               if (data.reportedBy && selectedResident.fullName && data.reportedBy === selectedResident.fullName) {
+                console.log("✅ Matched report by reportedBy name:", doc.id);
                 return true;
               }
+              
+              // Strategy 4: Match by reportedBy email
+              if (data.reportedByEmail && selectedResident.email && data.reportedByEmail === selectedResident.email) {
+                console.log("✅ Matched report by reportedByEmail:", doc.id);
+                return true;
+              }
+              
+              // Strategy 5: Match by residentId field
+              if (data.residentId && (data.residentId === selectedResident.id || data.residentId === selectedResident.firebaseUid || data.residentId === selectedResident.userId)) {
+                console.log("✅ Matched report by residentId:", doc.id);
+                return true;
+              }
+              
+              // Strategy 6: Match by userEmail field
+              if (data.userEmail && selectedResident.email && data.userEmail === selectedResident.email) {
+                console.log("✅ Matched report by userEmail:", doc.id);
+                return true;
+              }
+              
               return false;
             })
-            .map(doc => ({
-              id: doc.id,
-              ...doc.data(),
-              reportId: doc.data().reportId || doc.id,
-              timestamp: doc.data().timestamp || doc.data().createdAt || doc.data().createdDate
-            }))
+            .map(doc => {
+              const data = doc.data();
+              return {
+                id: doc.id,
+                ...data,
+                reportId: data.reportId || data.id || doc.id,
+                timestamp: data.timestamp || data.createdAt || data.createdDate || data.date || data.submittedAt,
+                // Ensure all common report fields are available
+                type: data.type || data.hazardType || data.reportType || 'Unknown',
+                hazardType: data.hazardType || data.type || 'Unknown',
+                description: data.description || data.details || data.notes || '',
+                location: data.location || data.locationName || data.address || data.barangay || 'Location not specified',
+                locationName: data.locationName || data.location || data.address || data.barangay || 'Location not specified',
+                latitude: data.latitude || data.lat || null,
+                longitude: data.longitude || data.lng || data.lon || null,
+                status: data.status || data.reportStatus || 'Pending',
+                images: data.images || data.photos || data.attachments || [],
+                reportedBy: data.reportedBy || data.reporterName || data.userName || selectedResident.fullName || 'Unknown'
+              };
+            })
             .sort((a, b) => {
               // Sort by timestamp descending (newest first)
-              const aTime = a.timestamp?.toDate ? a.timestamp.toDate() : new Date(a.timestamp);
-              const bTime = b.timestamp?.toDate ? b.timestamp.toDate() : new Date(b.timestamp);
-              return bTime.getTime() - aTime.getTime();
+              try {
+                const aTime = a.timestamp?.toDate 
+                  ? a.timestamp.toDate() 
+                  : a.timestamp 
+                    ? new Date(a.timestamp) 
+                    : new Date(0);
+                const bTime = b.timestamp?.toDate 
+                  ? b.timestamp.toDate() 
+                  : b.timestamp 
+                    ? new Date(b.timestamp) 
+                    : new Date(0);
+                return bTime.getTime() - aTime.getTime();
+              } catch (error) {
+                console.error("Error sorting reports:", error);
+                return 0;
+              }
             });
           
+          console.log("✅ Filtered reports for resident:", reports.length);
           setResidentReports(reports);
           setResidentReportsCount(reports.length);
         } catch (e) {
-          console.error("Error fetching resident reports:", e);
+          console.error("❌ Error fetching resident reports:", e);
           setResidentReports([]);
           setResidentReportsCount(0);
         } finally {
           setLoadingReports(false);
         }
+      } else {
+        // Reset reports when preview is closed
+        setResidentReports([]);
+        setResidentReportsCount(0);
       }
     }
     fetchReportData();
@@ -4894,15 +4960,24 @@ export function ManageUsersPage() {
                 ) : (
                   <div className="space-y-4">
                     {/* Total Reports Summary */}
-                    <div className="bg-brand-orange/10 border border-brand-orange/20 rounded-lg p-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-gray-700">Total Reports Submitted</p>
-                          <p className="text-2xl font-bold text-brand-orange mt-1">{residentReports.length}</p>
+                    <Card className="shadow-sm">
+                      <CardContent className="p-6">
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-start gap-3">
+                            <div className="h-10 w-10 bg-orange-50 border border-orange-200 rounded-lg flex items-center justify-center flex-shrink-0">
+                              <FileText className="h-5 w-5 text-brand-orange" />
+                            </div>
+                            <div className="space-y-0.5">
+                              <p className="text-xs font-semibold text-gray-800 uppercase tracking-wide">Total Reports Submitted</p>
+                              <p className="text-xs text-brand-orange font-medium">All time</p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-3xl font-bold text-gray-900">{residentReports.length}</p>
+                          </div>
                         </div>
-                        <FileText className="h-8 w-8 text-brand-orange/50" />
-                      </div>
-                    </div>
+                      </CardContent>
+                    </Card>
 
                     {/* Reports Table */}
                     <div className="border border-gray-200 rounded-lg overflow-hidden">
@@ -4912,11 +4987,8 @@ export function ManageUsersPage() {
                             <TableRow>
                               <TableHead className="text-left">Report ID</TableHead>
                               <TableHead className="text-left">Type</TableHead>
-                              <TableHead className="text-left">Location</TableHead>
-                              <TableHead className="text-left">Description</TableHead>
                               <TableHead className="text-left">Date & Time</TableHead>
                               <TableHead className="text-left">Status</TableHead>
-                              <TableHead className="text-left">Actions</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
@@ -4941,15 +5013,6 @@ export function ManageUsersPage() {
                                   })
                                 : '';
                               
-                              // Truncate description for display
-                              const description = report.description || '';
-                              const truncatedDescription = description.length > 50 
-                                ? `${description.substring(0, 50)}...` 
-                                : description || 'No description';
-                              
-                              // Get location
-                              const location = report.location || report.locationName || report.barangay || 'Location not specified';
-                              
                               return (
                                 <TableRow key={report.id} className="hover:bg-gray-50">
                                   <TableCell className="font-medium">
@@ -4959,43 +5022,36 @@ export function ManageUsersPage() {
                                           state: { highlightReportId: report.id } 
                                         });
                                       }}
-                                      className="text-brand-orange hover:text-brand-orange-400 hover:underline font-medium transition-colors"
+                                      className="relative group text-gray-900 hover:text-brand-orange hover:underline font-medium transition-colors pr-6"
                                     >
                                       {report.reportId || report.id?.slice(-8) || 'N/A'}
+                                      <ArrowUpRight className="absolute top-0 right-0 h-3.5 w-3.5 text-brand-orange opacity-60 group-hover:opacity-100 transition-opacity" />
                                     </button>
                                   </TableCell>
                                   <TableCell>
-                                    <Badge className={
-                                      report.hazardType === 'Fire' ? 'bg-red-100 text-red-800 hover:bg-red-50' :
-                                      report.hazardType === 'Flood' ? 'bg-blue-100 text-blue-800 hover:bg-blue-50' :
-                                      report.hazardType === 'Earthquake' ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-50' :
-                                      report.hazardType === 'Landslide' ? 'bg-orange-100 text-orange-800 hover:bg-orange-50' :
-                                      report.hazardType === 'Typhoon' ? 'bg-purple-100 text-purple-800 hover:bg-purple-50' :
-                                      report.type === 'Emergency' ? 'bg-red-100 text-red-800 hover:bg-red-50' :
-                                      report.type === 'Hazard' ? 'bg-orange-100 text-orange-800 hover:bg-orange-50' :
-                                      'bg-gray-100 text-gray-800 hover:bg-gray-50'
-                                    }>
-                                      {report.hazardType || report.type || 'Unknown'}
-                                    </Badge>
-                                  </TableCell>
-                                  <TableCell>
-                                    <div className="max-w-[200px]">
-                                      <p className="text-sm text-gray-900 truncate" title={location}>
-                                        {location}
-                                      </p>
-                                      {(report.latitude && report.longitude) && (
-                                        <p className="text-xs text-gray-500 mt-1">
-                                          {parseFloat(report.latitude).toFixed(6)}, {parseFloat(report.longitude).toFixed(6)}
-                                        </p>
-                                      )}
-                                    </div>
-                                  </TableCell>
-                                  <TableCell>
-                                    <div className="max-w-[250px]">
-                                      <p className="text-sm text-gray-700 truncate" title={description}>
-                                        {truncatedDescription}
-                                      </p>
-                                    </div>
+                                    <span className={cn(
+                                      "font-medium",
+                                      report.type === 'Road Crash' ? 'text-red-600' :
+                                      report.type === 'Fire' ? 'text-orange-600' :
+                                      report.type === 'Medical Emergency' ? 'text-pink-600' :
+                                      report.type === 'Flooding' ? 'text-blue-600' :
+                                      report.type === 'Volcanic Activity' ? 'text-amber-600' :
+                                      report.type === 'Landslide' ? 'text-yellow-800' :
+                                      report.type === 'Earthquake' ? 'text-red-800' :
+                                      report.type === 'Civil Disturbance' ? 'text-violet-600' :
+                                      report.type === 'Armed Conflict' ? 'text-red-800' :
+                                      report.type === 'Infectious Disease' ? 'text-emerald-600' :
+                                      report.type === 'Poor Infrastructure' ? 'text-amber-800' :
+                                      report.type === 'Obstructions' ? 'text-yellow-600' :
+                                      report.type === 'Electrical Hazard' ? 'text-yellow-500' :
+                                      report.type === 'Environmental Hazard' ? 'text-green-600' :
+                                      report.type === 'Animal Concerns' ? 'text-purple-600' :
+                                      report.type === 'Emergency' ? 'text-red-600' :
+                                      report.type === 'Hazard' ? 'text-orange-600' :
+                                      'text-gray-600'
+                                    )}>
+                                      {report.type || report.hazardType || 'Unknown'}
+                                    </span>
                                   </TableCell>
                                   <TableCell>
                                     <div className="text-sm">
@@ -5006,36 +5062,21 @@ export function ManageUsersPage() {
                                     </div>
                                   </TableCell>
                                   <TableCell>
-                                    <Badge className={
-                                      report.status === 'Resolved' ? 'bg-green-100 text-green-800 hover:bg-green-50' :
-                                      report.status === 'In Progress' ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-50' :
-                                      report.status === 'Pending' ? 'bg-gray-100 text-gray-800 hover:bg-gray-50' :
-                                      report.status === 'Under Review' ? 'bg-blue-100 text-blue-800 hover:bg-blue-50' :
-                                      'bg-gray-100 text-gray-800 hover:bg-gray-50'
-                                    }>
+                                    <span className={cn(
+                                      "font-medium",
+                                      report.status === 'Pending' && 'text-orange-600',
+                                      report.status === 'Ongoing' && 'text-blue-600',
+                                      report.status === 'In Progress' && 'text-blue-600',
+                                      report.status === 'Not Responded' && 'text-red-600',
+                                      report.status === 'Responded' && 'text-green-600',
+                                      report.status === 'Resolved' && 'text-green-600',
+                                      report.status === 'False Report' && 'text-gray-600',
+                                      report.status === 'Redundant' && 'text-purple-600',
+                                      report.status === 'Under Review' && 'text-blue-600',
+                                      !report.status && 'text-orange-600'
+                                    )}>
                                       {report.status || 'Pending'}
-                                    </Badge>
-                                  </TableCell>
-                                  <TableCell>
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <Button
-                                          size="sm"
-                                          variant="outline"
-                                          onClick={() => {
-                                            navigate('/manage-reports', { 
-                                              state: { highlightReportId: report.id } 
-                                            });
-                                          }}
-                                          className="text-brand-orange border-brand-orange hover:bg-brand-orange hover:text-white"
-                                        >
-                                          <Eye className="h-4 w-4" />
-                                        </Button>
-                                      </TooltipTrigger>
-                                      <TooltipContent>
-                                        <p>View full report details</p>
-                                      </TooltipContent>
-                                    </Tooltip>
+                                    </span>
                                   </TableCell>
                                 </TableRow>
                               );

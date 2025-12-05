@@ -2,15 +2,14 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { User, Camera, Check, X, Briefcase, Building, MapPin, Hash, AtSign, Plus, Trash2, Edit3, StickyNote, Bell } from "lucide-react";
+import { User, Camera, Check, X, Briefcase, Building, MapPin, Hash, AtSign, Bell, Lock, CheckCircle2 } from "lucide-react";
 import { Layout } from "./Layout";
 import { useNavigate } from "react-router-dom";
 import { db, auth, storage } from "@/lib/firebase";
-import { updateProfile, updateEmail, signOut } from "firebase/auth";
-import { collection, query, where, getDocs, doc, updateDoc, addDoc, deleteDoc, orderBy, limit, serverTimestamp, Timestamp } from "firebase/firestore";
+import { updateProfile, updateEmail, signOut, sendPasswordResetEmail } from "firebase/auth";
+import { collection, query, where, getDocs, doc, updateDoc, orderBy, limit, Timestamp } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { toast } from "@/components/ui/sonner";
 import { useUserRole } from "@/hooks/useUserRole";
@@ -26,6 +25,7 @@ import {
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export function ProfilePage() {
   const navigate = useNavigate();
@@ -49,14 +49,9 @@ export function ProfilePage() {
   const [pendingCoverImage, setPendingCoverImage] = useState<string | null>(null);
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
-  const [notes, setNotes] = useState<any[]>([]);
-  const [notesLoading, setNotesLoading] = useState(false);
-  const [showNoteDialog, setShowNoteDialog] = useState(false);
-  const [editingNote, setEditingNote] = useState<any>(null);
-  const [noteForm, setNoteForm] = useState({
-    title: "",
-    description: ""
-  });
+  const [showPasswordRecoveryModal, setShowPasswordRecoveryModal] = useState(false);
+  const [isSendingRecoveryLink, setIsSendingRecoveryLink] = useState(false);
+  const [recoveryLinkSent, setRecoveryLinkSent] = useState(false);
 
   // Helper function to format Firestore timestamps
   const formatTimestamp = (timestamp: any): string => {
@@ -506,7 +501,7 @@ export function ProfilePage() {
             collection(db, "activityLogs"),
             where("admin", "==", userName),
             orderBy("timestamp", "desc"),
-            limit(20)
+            limit(5)
           );
           const snap1 = await getDocs(q1);
           snap1.docs.forEach(doc => {
@@ -542,7 +537,7 @@ export function ProfilePage() {
             collection(db, "activityLogs"),
             where("actor", "==", userName),
             orderBy("timestamp", "desc"),
-            limit(20)
+            limit(5)
           );
           const snap2 = await getDocs(q2);
           snap2.docs.forEach(doc => {
@@ -572,14 +567,14 @@ export function ProfilePage() {
           }
         }
         
-        // Sort all logs by timestamp (descending) and limit to 20
+        // Sort all logs by timestamp (descending) and limit to 5
         allLogs.sort((a: any, b: any) => {
           const aTime = a.timestamp instanceof Date ? a.timestamp.getTime() : 0;
           const bTime = b.timestamp instanceof Date ? b.timestamp.getTime() : 0;
           return bTime - aTime; // desc order
         });
         
-        setActivityLogs(allLogs.slice(0, 20));
+        setActivityLogs(allLogs.slice(0, 5));
       } catch (error) {
         console.error("Error fetching activity logs:", error);
       } finally {
@@ -589,144 +584,69 @@ export function ProfilePage() {
     fetchLogs();
   }, [profile.name, profile.username]);
 
-  // Fetch personal notes
-  useEffect(() => {
-    async function fetchNotes() {
-      if (!profile.username) return;
-      setNotesLoading(true);
-      try {
-        const q = query(
-          collection(db, "personalNotes"),
-          where("username", "==", profile.username),
-          orderBy("createdAt", "desc")
-        );
-        const snap = await getDocs(q);
-        setNotes(snap.docs.map(doc => ({ ...doc.data(), id: doc.id })));
-      } catch (error: any) {
-        // If composite index is missing, try without orderBy
-        if (error.code === 'failed-precondition') {
-          const q = query(
-            collection(db, "personalNotes"),
-            where("username", "==", profile.username)
-          );
-          const snap = await getDocs(q);
-          const notesData = snap.docs.map(doc => ({ ...doc.data(), id: doc.id }));
-          // Sort manually by createdAt
-          notesData.sort((a: any, b: any) => {
-            const aTime = getTimestampMillis(a.createdAt);
-            const bTime = getTimestampMillis(b.createdAt);
-            return bTime - aTime; // desc order
-          });
-          setNotes(notesData);
-        } else {
-          console.error("Error fetching notes:", error);
-        }
-      } finally {
-        setNotesLoading(false);
-      }
-    }
-    fetchNotes();
-  }, [profile.username]);
-
-  // Notes CRUD operations
-  const handleSaveNote = async () => {
-    if (!noteForm.description.trim()) {
-      toast.error("Please enter a note");
+  const handleRequestPasswordRecovery = async () => {
+    if (!profile.email) {
+      toast.error("Email address not found. Please refresh the page and try again.");
       return;
     }
 
-    if (!profile.username) {
-      toast.error("Username not found. Please refresh the page and try again.");
-      return;
-    }
-
+    setIsSendingRecoveryLink(true);
+    
     try {
-      if (editingNote) {
-        // Update existing note
-        await updateDoc(doc(db, "personalNotes", editingNote.id), {
-          description: noteForm.description,
-          updatedAt: serverTimestamp()
-        });
-        toast.success("Note updated successfully!");
-      } else {
-        // Create new note
-        await addDoc(collection(db, "personalNotes"), {
-          description: noteForm.description,
-          username: profile.username,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        });
-        toast.success("Note created successfully!");
+      // Email validation
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(profile.email)) {
+        toast.error("Please enter a valid email address.");
+        setIsSendingRecoveryLink(false);
+        return;
       }
       
-      // Refresh notes - try with orderBy first, fallback to without if index missing
-      try {
-        const q = query(
-          collection(db, "personalNotes"),
-          where("username", "==", profile.username),
-          orderBy("createdAt", "desc")
-        );
-        const snap = await getDocs(q);
-        setNotes(snap.docs.map(doc => ({ ...doc.data(), id: doc.id })));
-      } catch (queryError: any) {
-        // If composite index is missing, try without orderBy
-        if (queryError.code === 'failed-precondition') {
-          const q = query(
-            collection(db, "personalNotes"),
-            where("username", "==", profile.username)
-          );
-          const snap = await getDocs(q);
-          const notesData = snap.docs.map(doc => ({ ...doc.data(), id: doc.id }));
-          // Sort manually by createdAt
-          notesData.sort((a: any, b: any) => {
-            const aTime = getTimestampMillis(a.createdAt);
-            const bTime = getTimestampMillis(b.createdAt);
-            return bTime - aTime; // desc order
-          });
-          setNotes(notesData);
-        } else {
-          throw queryError;
-        }
+      // Check if the email exists in the superAdmin collection
+      const superAdminQuery = query(
+        collection(db, "superAdmin"),
+        where("email", "==", profile.email)
+      );
+      const querySnapshot = await getDocs(superAdminQuery);
+      
+      if (querySnapshot.empty) {
+        toast.error("Access denied. Password recovery is only available for authorized super admin accounts.");
+        setIsSendingRecoveryLink(false);
+        return;
       }
       
-      // Reset form
-      setNoteForm({ title: "", description: "" });
-      setEditingNote(null);
-      setShowNoteDialog(false);
-    } catch (error: any) {
-      console.error("Error saving note:", error);
-      if (error.code === 'permission-denied') {
-        toast.error("Permission denied. Please make sure Firestore rules are deployed.");
-      } else {
-        toast.error(`Failed to save note: ${error.message || 'Unknown error'}`);
+      // Email is found in superAdmin collection, proceed with password reset
+      await sendPasswordResetEmail(auth, profile.email);
+      setRecoveryLinkSent(true);
+      toast.success("Recovery link sent! Please check your email.");
+    } catch (err: any) {
+      console.error("Password recovery error:", err);
+      
+      // Check for network connectivity
+      if (!navigator.onLine) {
+        toast.error("No internet connection. Please check your network and try again.");
       }
+      // Check for Firebase network errors
+      else if (err.code === 'auth/network-request-failed' || 
+               err.message?.includes('network') ||
+               err.message?.includes('fetch')) {
+        toast.error("Network error. Please check your internet connection and try again.");
+      }
+      // Check if email is not found in Firebase Auth
+      else if (err.code === 'auth/user-not-found') {
+        toast.error("No account found with this email address. Please verify your email and try again.");
+      }
+      // Generic error fallback
+      else {
+        toast.error(err.message || "Failed to send recovery link.");
+      }
+    } finally {
+      setIsSendingRecoveryLink(false);
     }
   };
 
-  const handleDeleteNote = async (noteId: string) => {
-    try {
-      await deleteDoc(doc(db, "personalNotes", noteId));
-      setNotes(notes.filter(note => note.id !== noteId));
-      toast.success("Note deleted successfully!");
-    } catch (error) {
-      console.error("Error deleting note:", error);
-      toast.error("Failed to delete note. Please try again.");
-    }
-  };
-
-  const handleEditNote = (note: any) => {
-    setEditingNote(note);
-    setNoteForm({
-      title: "",
-      description: note.description || ""
-    });
-    setShowNoteDialog(true);
-  };
-
-  const handleNewNote = () => {
-    setEditingNote(null);
-    setNoteForm({ title: "", description: "" });
-    setShowNoteDialog(true);
+  const handleClosePasswordRecoveryModal = () => {
+    setShowPasswordRecoveryModal(false);
+    setRecoveryLinkSent(false);
   };
 
   const EditableField = ({ field, label, icon: Icon, value, type = "text" }: {
@@ -1021,104 +941,28 @@ export function ProfilePage() {
                     </div>
                   </div>
                 </div>
+
+                {/* Change Password Button */}
+                <div className="pt-4 border-t border-gray-200">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setShowPasswordRecoveryModal(true)}
+                    className="w-full flex items-center justify-center gap-2"
+                  >
+                    <Lock className="h-4 w-4" />
+                    Change Password
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           </div>
 
-          {/* Right Column - Activity Logs and Notes */}
-          <div className="lg:col-span-3 space-y-6 flex flex-col h-full">
-            {/* Personal Notes */}
-            <Card className="flex flex-col">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-lg font-semibold">Personal Notes</CardTitle>
-                <Dialog open={showNoteDialog} onOpenChange={setShowNoteDialog}>
-                  <DialogTrigger asChild>
-                    <Button onClick={handleNewNote} size="sm" className="bg-brand-orange hover:bg-brand-orange/90 text-white">
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add Note
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-md">
-                    <DialogHeader className="border-b border-gray-200 pb-4">
-                      <DialogTitle className="flex items-center gap-2">
-                        <StickyNote className="h-5 w-5 text-[#FF4F0B]" />
-                        {editingNote ? 'Edit Note' : 'Add New Note'}
-                      </DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="note-description">Note</Label>
-                        <Textarea
-                          id="note-description"
-                          value={noteForm.description}
-                          onChange={(e) => setNoteForm(prev => ({ ...prev, description: e.target.value }))}
-                          placeholder="Enter your note..."
-                          rows={6}
-                        />
-                      </div>
-                      <div className="flex justify-end space-x-2">
-                        <Button variant="outline" onClick={() => setShowNoteDialog(false)}>
-                          Cancel
-                        </Button>
-                        <Button onClick={handleSaveNote} className="bg-brand-orange hover:bg-brand-orange/90 text-white">
-                          {editingNote ? 'Update' : 'Save'} Note
-                        </Button>
-                      </div>
-                    </div>
-                  </DialogContent>
-                </Dialog>
-              </CardHeader>
-              <CardContent className="px-4 pb-4 pt-2">
-                {notesLoading ? (
-                  <div className="text-center text-gray-500 py-4 text-sm">Loading notes...</div>
-                ) : notes.length === 0 ? (
-                  <div className="text-center text-gray-500 py-4">
-                    <StickyNote className="h-8 w-8 mx-auto mb-2 text-gray-300" />
-                    <p className="text-sm">No notes yet. Create your first note!</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2 max-h-[180px] overflow-y-auto pr-2 flex-1">
-                    {notes.map((note) => (
-                      <div key={note.id} className="border rounded-md p-2.5 hover:bg-gray-50 transition-colors">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1 min-w-0 flex flex-col">
-                            <p className="text-sm text-gray-900 mb-2 line-clamp-3">{note.description || note.title}</p>
-                            <p className="text-xs text-gray-400">
-                              {formatTimestamp(note.createdAt)}
-                              {note.updatedAt && getTimestampMillis(note.updatedAt) !== getTimestampMillis(note.createdAt) && (
-                                <span> • Updated</span>
-                              )}
-                            </p>
-                          </div>
-                          <div className="flex space-x-1 flex-shrink-0">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handleEditNote(note)}
-                              className="h-7 w-7 p-0 text-gray-400 hover:text-blue-600 hover:bg-blue-50"
-                            >
-                              <Edit3 className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handleDeleteNote(note.id)}
-                              className="h-7 w-7 p-0 text-gray-400 hover:text-red-600 hover:bg-red-50"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
+          {/* Right Column - Activity Logs */}
+          <div className="lg:col-span-3 flex flex-col h-full">
             {/* Personal Activity Log */}
-            <Card className="flex-1 flex flex-col min-h-0">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <Card className="flex-1 flex flex-col min-h-0 h-full">
+              <CardHeader className="flex flex-row items-center justify-between pb-2 flex-shrink-0">
                 <CardTitle className="text-lg font-semibold">Personal Activity Log</CardTitle>
                 {activityLogs.length > 0 && (
                   <Button
@@ -1131,7 +975,7 @@ export function ProfilePage() {
                   </Button>
                 )}
               </CardHeader>
-              <CardContent className="flex-1 overflow-y-auto">
+              <CardContent className="flex-1 overflow-y-auto min-h-0">
                 {logsLoading ? (
                   <div className="text-center text-gray-500 py-8 text-sm">Loading activity logs...</div>
                 ) : activityLogs.length === 0 ? (
@@ -1175,6 +1019,74 @@ export function ProfilePage() {
           </div>
         </div>
       </div>
+
+      {/* Password Recovery Confirmation Modal */}
+      <Dialog open={showPasswordRecoveryModal} onOpenChange={handleClosePasswordRecoveryModal}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader className="border-b border-gray-200 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 bg-brand-orange/10 rounded-full flex items-center justify-center">
+                <Lock className="h-5 w-5 text-brand-orange" />
+              </div>
+              <DialogTitle className="text-xl font-semibold text-gray-900">
+                Change Password
+              </DialogTitle>
+            </div>
+          </DialogHeader>
+          
+          {!recoveryLinkSent ? (
+            <div className="space-y-4 py-4">
+              <p className="text-sm text-gray-700">
+                A password recovery link will be sent to <span className="font-semibold">{profile.email}</span>. 
+                Please check your email for further instructions.
+              </p>
+              <div className="flex justify-end space-x-2 pt-2">
+                <Button
+                  variant="outline"
+                  onClick={handleClosePasswordRecoveryModal}
+                  disabled={isSendingRecoveryLink}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleRequestPasswordRecovery}
+                  disabled={isSendingRecoveryLink}
+                  className="bg-brand-orange hover:bg-brand-orange-400 text-white"
+                >
+                  {isSendingRecoveryLink ? (
+                    <div className="flex items-center">
+                      <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Sending...
+                    </div>
+                  ) : (
+                    "Send Recovery Link"
+                  )}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4 py-4">
+              <Alert className="bg-green-50 border-green-200">
+                <CheckCircle2 className="h-5 w-5 text-green-600" />
+                <AlertDescription className="text-sm text-green-700 font-medium">
+                  Recovery link sent successfully! Please check your email ({profile.email}) for further instructions.
+                </AlertDescription>
+              </Alert>
+              <div className="flex justify-end pt-2">
+                <Button
+                  onClick={handleClosePasswordRecoveryModal}
+                  className="bg-brand-orange hover:bg-brand-orange-400 text-white"
+                >
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 }
