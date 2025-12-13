@@ -32,6 +32,33 @@ export function useUserRole() {
           const querySnapshot = await getDocs(q);
           if (!querySnapshot.empty) {
             const data = querySnapshot.docs[0].data();
+            
+            // Build permissions array from both permissions field and hasEditPermission
+            let permissions: string[] = Array.isArray(data.permissions) ? [...data.permissions] : [];
+            
+            // If hasEditPermission is true, add all edit permissions
+            if (data.hasEditPermission === true) {
+              const editPermissions = [
+                'edit_reports',
+                'edit_residents',
+                'edit_announcements',
+                'edit_pins',
+                'delete_reports',
+                'delete_residents',
+                'delete_announcements',
+                'delete_pins',
+                'add_report_to_map',
+                'change_resident_status'
+              ];
+              
+              // Add permissions that aren't already in the array
+              editPermissions.forEach(perm => {
+                if (!permissions.includes(perm)) {
+                  permissions.push(perm);
+                }
+              });
+            }
+            
             setUserRole({
               id: querySnapshot.docs[0].id,
               username: data.username || username,
@@ -42,7 +69,7 @@ export function useUserRole() {
               idNumber: data.idNumber || "",
               profilePicture: data.profilePicture || "/accizard-uploads/login-signup-cover.png",
               coverImage: data.coverImage || "",
-              permissions: data.permissions || []
+              permissions: permissions
             });
             setLoading(false);
             return;

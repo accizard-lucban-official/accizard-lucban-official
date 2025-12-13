@@ -111,9 +111,17 @@ export function ProfilePage() {
           const querySnapshot = await getDocs(q);
           if (!querySnapshot.empty) {
             const docRef = doc(db, "admins", querySnapshot.docs[0].id);
-            await updateDoc(docRef, {
-              [field]: tempValue
-            });
+            const updateData: any = {};
+            
+            // Handle field name mapping for admins
+            // Admins use 'name' field, not 'fullName'
+            updateData[field] = tempValue;
+            
+            await updateDoc(docRef, updateData);
+            
+            // Update local profile state immediately
+            setProfile(prev => ({ ...prev, [field]: tempValue }));
+            
             // Refresh userRole to get updated data from Firestore
             await refreshUserRole();
             toast.success(`${field.charAt(0).toUpperCase() + field.slice(1)} updated successfully!`);
@@ -207,7 +215,7 @@ export function ProfilePage() {
 
   // Confirm profile picture change
   const confirmProfilePicture = async () => {
-    if (!pendingProfilePicture || !userRole) return;
+    if (!pendingProfilePicture) return;
 
     setSaving(true);
     try {
@@ -222,6 +230,8 @@ export function ProfilePage() {
             await updateDoc(docRef, {
               profilePicture: pendingProfilePicture
             });
+            // Update local profile state immediately
+            setProfile(prev => ({ ...prev, profilePicture: pendingProfilePicture }));
             // Refresh userRole to get updated data from Firestore
             await refreshUserRole();
             setPendingProfilePicture(null);
@@ -243,6 +253,8 @@ export function ProfilePage() {
             await updateDoc(docRef, {
               profilePicture: pendingProfilePicture
             });
+            // Update local profile state immediately
+            setProfile(prev => ({ ...prev, profilePicture: pendingProfilePicture }));
             // Refresh userRole to get updated data from Firestore
             await refreshUserRole();
             setPendingProfilePicture(null);
@@ -276,7 +288,7 @@ export function ProfilePage() {
 
   // Confirm cover image change
   const confirmCoverImage = async () => {
-    if (!pendingCoverImage || !userRole) return;
+    if (!pendingCoverImage) return;
 
     setSaving(true);
     try {
@@ -291,6 +303,8 @@ export function ProfilePage() {
             await updateDoc(docRef, {
               coverImage: pendingCoverImage
             });
+            // Update local profile state immediately
+            setProfile(prev => ({ ...prev, coverImage: pendingCoverImage }));
             // Refresh userRole to get updated data from Firestore
             await refreshUserRole();
             setPendingCoverImage(null);
@@ -312,6 +326,8 @@ export function ProfilePage() {
             await updateDoc(docRef, {
               coverImage: pendingCoverImage
             });
+            // Update local profile state immediately
+            setProfile(prev => ({ ...prev, coverImage: pendingCoverImage }));
             // Refresh userRole to get updated data from Firestore
             await refreshUserRole();
             setPendingCoverImage(null);
@@ -346,7 +362,29 @@ export function ProfilePage() {
   const handleProfilePictureUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (!userRole) {
+      // Get user ID from userRole or localStorage
+      let userId: string | null = null;
+      const adminLoggedIn = localStorage.getItem("adminLoggedIn") === "true";
+      
+      if (adminLoggedIn) {
+        // For admins, get the admin document ID from Firestore
+        const username = localStorage.getItem("adminUsername");
+        if (username) {
+          try {
+            const q = query(collection(db, "admins"), where("username", "==", username));
+            const querySnapshot = await getDocs(q);
+            if (!querySnapshot.empty) {
+              userId = querySnapshot.docs[0].id;
+            }
+          } catch (error) {
+            console.error("Error fetching admin ID:", error);
+          }
+        }
+      } else if (userRole) {
+        userId = userRole.id;
+      }
+      
+      if (!userId) {
         toast.error("User information not loaded. Please refresh the page and try again.");
         return;
       }
@@ -365,7 +403,7 @@ export function ProfilePage() {
 
         const timestamp = Date.now();
         const fileExtension = file.name.split('.').pop() || 'jpg';
-        const filename = `profile-pictures-web/${userRole.id}-${timestamp}.${fileExtension}`;
+        const filename = `profile-pictures-web/${userId}-${timestamp}.${fileExtension}`;
         
         const storageRef = ref(storage, filename);
         const snapshot = await uploadBytes(storageRef, file);
@@ -386,7 +424,29 @@ export function ProfilePage() {
   const handleCoverImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (!userRole) {
+      // Get user ID from userRole or localStorage
+      let userId: string | null = null;
+      const adminLoggedIn = localStorage.getItem("adminLoggedIn") === "true";
+      
+      if (adminLoggedIn) {
+        // For admins, get the admin document ID from Firestore
+        const username = localStorage.getItem("adminUsername");
+        if (username) {
+          try {
+            const q = query(collection(db, "admins"), where("username", "==", username));
+            const querySnapshot = await getDocs(q);
+            if (!querySnapshot.empty) {
+              userId = querySnapshot.docs[0].id;
+            }
+          } catch (error) {
+            console.error("Error fetching admin ID:", error);
+          }
+        }
+      } else if (userRole) {
+        userId = userRole.id;
+      }
+      
+      if (!userId) {
         toast.error("User information not loaded. Please refresh the page and try again.");
         return;
       }
@@ -405,7 +465,7 @@ export function ProfilePage() {
 
         const timestamp = Date.now();
         const fileExtension = file.name.split('.').pop() || 'jpg';
-        const filename = `cover-images-web/${userRole.id}-${timestamp}.${fileExtension}`;
+        const filename = `cover-images-web/${userId}-${timestamp}.${fileExtension}`;
         
         const storageRef = ref(storage, filename);
         const snapshot = await uploadBytes(storageRef, file);
@@ -424,41 +484,85 @@ export function ProfilePage() {
   };
 
   useEffect(() => {
-    if (userRole && !roleLoading) {
-      // Only update profile if it's different to avoid unnecessary resets
-      // This prevents overwriting user edits with stale data
-      setProfile(prev => {
-        const newProfile = {
-        name: userRole.name || "",
-        position: userRole.position || "",
-        idNumber: userRole.idNumber || "",
-        username: userRole.username || "",
-        email: userRole.email || "",
-        profilePicture: userRole.profilePicture || "/accizard-uploads/login-signup-cover.png",
-        coverImage: userRole.coverImage || ""
-        };
-        // Only update if values actually changed (prevents overwriting during save)
-        // Check each field individually to avoid unnecessary updates
-        const hasChanges = 
-          prev.name !== newProfile.name ||
-          prev.position !== newProfile.position ||
-          prev.idNumber !== newProfile.idNumber ||
-          prev.username !== newProfile.username ||
-          prev.email !== newProfile.email ||
-          prev.profilePicture !== newProfile.profilePicture ||
-          prev.coverImage !== newProfile.coverImage;
-        
-        if (hasChanges && !editingField) {
-          return newProfile;
+    const loadProfileData = async () => {
+      const adminLoggedIn = localStorage.getItem("adminLoggedIn") === "true";
+      
+      // If userRole is loaded, use it
+      if (userRole && !roleLoading) {
+        setProfile(prev => {
+          const newProfile = {
+            name: userRole.name || "",
+            position: userRole.position || "",
+            idNumber: userRole.idNumber || "",
+            username: userRole.username || "",
+            email: userRole.email || "",
+            profilePicture: userRole.profilePicture || "/accizard-uploads/login-signup-cover.png",
+            coverImage: userRole.coverImage || ""
+          };
+          // Only update if values actually changed (prevents overwriting during save)
+          const hasChanges = 
+            prev.name !== newProfile.name ||
+            prev.position !== newProfile.position ||
+            prev.idNumber !== newProfile.idNumber ||
+            prev.username !== newProfile.username ||
+            prev.email !== newProfile.email ||
+            prev.profilePicture !== newProfile.profilePicture ||
+            prev.coverImage !== newProfile.coverImage;
+          
+          if (hasChanges && !editingField) {
+            return newProfile;
+          }
+          return prev;
+        });
+        // Clear any pending changes when userRole changes (only when not editing)
+        if (!editingField) {
+          setPendingProfilePicture(null);
+          setPendingCoverImage(null);
         }
-        return prev;
-      });
-      // Clear any pending changes when userRole changes (only when not editing)
-      if (!editingField) {
-      setPendingProfilePicture(null);
-      setPendingCoverImage(null);
-    }
-    }
+      } 
+      // If userRole is not loaded yet and user is admin, fetch directly from Firestore
+      else if (adminLoggedIn && !userRole && !roleLoading) {
+        const username = localStorage.getItem("adminUsername");
+        if (username) {
+          try {
+            const q = query(collection(db, "admins"), where("username", "==", username));
+            const querySnapshot = await getDocs(q);
+            if (!querySnapshot.empty) {
+              const data = querySnapshot.docs[0].data();
+              setProfile(prev => {
+                const newProfile = {
+                  name: data.name || data.fullName || "",
+                  position: data.position || "",
+                  idNumber: data.idNumber || "",
+                  username: data.username || username,
+                  email: data.email || "",
+                  profilePicture: data.profilePicture || "/accizard-uploads/login-signup-cover.png",
+                  coverImage: data.coverImage || ""
+                };
+                // Only update if values actually changed
+                const hasChanges = 
+                  prev.name !== newProfile.name ||
+                  prev.position !== newProfile.position ||
+                  prev.idNumber !== newProfile.idNumber ||
+                  prev.username !== newProfile.username ||
+                  prev.email !== newProfile.email ||
+                  prev.profilePicture !== newProfile.profilePicture ||
+                  prev.coverImage !== newProfile.coverImage;
+                
+                if (hasChanges && !editingField) {
+                  return newProfile;
+                }
+                return prev;
+              });
+            }
+          } catch (error) {
+            console.error("Error fetching admin profile:", error);
+          }
+        }
+      }
+    };
+    
+    loadProfileData();
   }, [userRole, roleLoading, editingField]);
 
   // Fetch personal activity logs

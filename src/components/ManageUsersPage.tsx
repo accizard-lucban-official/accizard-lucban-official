@@ -751,6 +751,7 @@ export function ManageUsersPage() {
         password: newAdmin.password,
         profilePicture: newAdmin.profilePicture || "",
         hasEditPermission: false,
+        permissions: [], // Initialize permissions array
         role: "admin",
         createdDate: now.toLocaleDateString(),
         createdTime: now.toLocaleTimeString()
@@ -866,12 +867,49 @@ export function ManageUsersPage() {
   const confirmTogglePermission = async () => {
     try {
       const wasGranted = !confirmPermissionChange.hasEditPermission;
+      
+      // Define all edit permissions that should be granted/revoked
+      const editPermissions = [
+        'edit_reports',
+        'edit_residents',
+        'edit_announcements',
+        'edit_pins',
+        'delete_reports',
+        'delete_residents',
+        'delete_announcements',
+        'delete_pins',
+        'add_report_to_map',
+        'change_resident_status'
+      ];
+      
+      // Get current permissions array
+      const currentPermissions = Array.isArray(confirmPermissionChange.permissions) 
+        ? [...confirmPermissionChange.permissions] 
+        : [];
+      
+      // Update permissions array based on grant/revoke
+      let updatedPermissions: string[];
+      if (wasGranted) {
+        // Add permissions that aren't already in the array
+        updatedPermissions = [...currentPermissions];
+        editPermissions.forEach(perm => {
+          if (!updatedPermissions.includes(perm)) {
+            updatedPermissions.push(perm);
+          }
+        });
+      } else {
+        // Remove edit permissions from the array
+        updatedPermissions = currentPermissions.filter(perm => !editPermissions.includes(perm));
+      }
+      
       await updateDoc(doc(db, "admins", confirmPermissionChange.id), {
-        hasEditPermission: wasGranted
+        hasEditPermission: wasGranted,
+        permissions: updatedPermissions
       });
       setAdminUsers(adminUsers.map(admin => admin.id === confirmPermissionChange.id ? {
         ...admin,
-        hasEditPermission: wasGranted
+        hasEditPermission: wasGranted,
+        permissions: updatedPermissions
       } : admin));
       
       // Log activity

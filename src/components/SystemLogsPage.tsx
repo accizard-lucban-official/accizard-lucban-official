@@ -214,9 +214,13 @@ export function SystemLogsPage() {
         setActivityLogs(logs);
 
         // Pre-fetch custom IDs for logs that have entityType and entityId
+        // This ensures all custom IDs are available when rendering
         const logsToFetch = logs.filter((log: any) => log.entityType && log.entityId);
         const fetchPromises = logsToFetch.map((log: any) => 
-          fetchCustomId(log.entityType, log.entityId)
+          fetchCustomId(log.entityType, log.entityId).catch(err => {
+            console.warn(`Failed to fetch custom ID for ${log.entityType}:${log.entityId}:`, err);
+            return null;
+          })
         );
         await Promise.all(fetchPromises);
       } catch (error) {
@@ -232,6 +236,41 @@ export function SystemLogsPage() {
 
     return () => clearInterval(interval);
   }, [fetchCustomId]);
+
+  // Additional effect to ensure custom IDs are fetched for filtered logs
+  // This runs when filtered logs change to catch any IDs that weren't fetched initially
+  useEffect(() => {
+    const fetchMissingCustomIds = async () => {
+      // Use a Set to track which IDs we've already fetched in this batch
+      const fetchedInBatch = new Set<string>();
+      
+      const logsNeedingIds = filteredActivityLogs.filter((log: any) => {
+        if (!log.entityType || !log.entityId) return false;
+        const cacheKey = `${log.entityType}:${log.entityId}`;
+        // Check both cache and batch set to avoid duplicate fetches
+        if (customIdCache.has(cacheKey) || fetchedInBatch.has(cacheKey)) {
+          return false;
+        }
+        fetchedInBatch.add(cacheKey);
+        return true;
+      });
+
+      if (logsNeedingIds.length > 0) {
+        const fetchPromises = logsNeedingIds.map((log: any) =>
+          fetchCustomId(log.entityType, log.entityId).catch(err => {
+            console.warn(`Failed to fetch custom ID for ${log.entityType}:${log.entityId}:`, err);
+            return null;
+          })
+        );
+        await Promise.all(fetchPromises);
+      }
+    };
+
+    // Only fetch if we have logs and the cache is not empty (to avoid fetching on initial render)
+    if (filteredActivityLogs.length > 0) {
+      fetchMissingCustomIds();
+    }
+  }, [filteredActivityLogs, fetchCustomId]);
 
   // Filter activity logs based on search and filters
   const filteredActivityLogs = activityLogs.filter(log => {
@@ -930,11 +969,12 @@ export function SystemLogsPage() {
                                   // Escape special regex characters in the Firestore ID
                                   const escapedId = log.entityId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                                   
-                                  // Pattern 1: Look for (entityId) - most common format
+                                  // Pattern 1: Look for (entityId) - most common format from formatLogMessage
                                   const parenthesesPattern = new RegExp(`\\(${escapedId}\\)`, 'g');
                                   formattedMessage = formattedMessage.replace(parenthesesPattern, `(${customId})`);
                                   
                                   // Pattern 2: Look for entityId at word boundaries (for cases without parentheses)
+                                  // This catches IDs that appear standalone in the message
                                   const wordBoundaryPattern = new RegExp(`\\b${escapedId}\\b`, 'g');
                                   formattedMessage = formattedMessage.replace(wordBoundaryPattern, customId);
                                   
@@ -947,6 +987,19 @@ export function SystemLogsPage() {
                                   formattedMessage = formattedMessage.replace(idPrefixPattern, (match, prefix) => {
                                     return `${prefix}: ${customId}`;
                                   });
+                                  
+                                  // Pattern 5: Look for entityId after "with ID", "with id", etc.
+                                  const withIdPattern = new RegExp(`(with\\s+(?:ID|id|Id)\\s+)?${escapedId}\\b`, 'gi');
+                                  formattedMessage = formattedMessage.replace(withIdPattern, (match, prefix) => {
+                                    return prefix ? `${prefix}${customId}` : customId;
+                                  });
+                                  
+                                  // Pattern 6: Look for entityId in any context - final catch-all
+                                  // This ensures we catch any remaining instances
+                                  const finalPattern = new RegExp(escapedId, 'g');
+                                  if (formattedMessage.includes(log.entityId)) {
+                                    formattedMessage = formattedMessage.replace(finalPattern, customId);
+                                  }
                                 }
                               }
                               

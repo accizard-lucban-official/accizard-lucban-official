@@ -6233,8 +6233,28 @@ useEffect(() => {
               : []
         };
         
+        // Calculate and save response time if both timeOfDispatch and timeOfArrival are present
+        if (mergedDispatchInfo.timeOfDispatch && mergedDispatchInfo.timeOfArrival) {
+          const responseTimeFormatted = calculateResponseTime(
+            mergedDispatchInfo.timeOfDispatch,
+            mergedDispatchInfo.timeOfArrival
+          );
+          const responseTimeMinutes = calculateResponseTimeMinutes(
+            mergedDispatchInfo.timeOfDispatch,
+            mergedDispatchInfo.timeOfArrival
+          );
+          
+          mergedDispatchInfo.responseTime = responseTimeFormatted;
+          mergedDispatchInfo.responseTimeMinutes = responseTimeMinutes;
+        } else {
+          // Clear response time if either field is missing
+          mergedDispatchInfo.responseTime = null;
+          mergedDispatchInfo.responseTimeMinutes = null;
+        }
+        
         // Debug log to verify agencyPresent is being saved
         console.log('Saving dispatch data - agencyPresent:', mergedDispatchInfo.agencyPresent);
+        console.log('Saving dispatch data - responseTime:', mergedDispatchInfo.responseTime);
         console.log('Full mergedDispatchInfo:', mergedDispatchInfo);
         
         await updateDoc(docRef, {
@@ -7457,6 +7477,22 @@ useEffect(() => {
         changes.location = { 
           from: selectedReport.location || '', 
           to: previewEditData.location || '' 
+        };
+      }
+
+      // Update adminMedia if changed
+      const currentAdminMedia = Array.isArray(selectedReport.adminMedia) ? selectedReport.adminMedia : [];
+      const newAdminMedia = Array.isArray(previewEditData.adminMedia) ? previewEditData.adminMedia : [];
+      
+      // Compare arrays by converting to strings (simple comparison)
+      const currentAdminMediaStr = JSON.stringify(currentAdminMedia.sort());
+      const newAdminMediaStr = JSON.stringify(newAdminMedia.sort());
+      
+      if (currentAdminMediaStr !== newAdminMediaStr) {
+        updateData.adminMedia = newAdminMedia;
+        changes.adminMedia = { 
+          from: currentAdminMedia.length, 
+          to: newAdminMedia.length 
         };
       }
 
@@ -9911,18 +9947,27 @@ useEffect(() => {
                         <TableRow>
                           <TableCell className="font-medium text-gray-700 align-top w-1/3 min-w-[150px]">Response Time</TableCell>
                           <TableCell>
-                            {dispatchData.timeOfDispatch && dispatchData.timeOfArrival ? (
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium text-brand-orange">
-                                  {calculateResponseTime(dispatchData.timeOfDispatch, dispatchData.timeOfArrival)}
-                                </span>
-                                <span className="text-sm text-gray-500">
-                                  ({calculateResponseTimeMinutes(dispatchData.timeOfDispatch, dispatchData.timeOfArrival)} minutes)
-                                </span>
-                              </div>
-                            ) : (
-                              <span className="text-gray-500">Calculate after entering dispatch and arrival times</span>
-                            )}
+                            {(() => {
+                              // Use saved response time if available, otherwise calculate on the fly
+                              if (dispatchData.responseTime && dispatchData.responseTimeMinutes !== undefined) {
+                                return (
+                                  <span className="text-black">
+                                    {dispatchData.responseTime}
+                                  </span>
+                                );
+                              } else if (dispatchData.timeOfDispatch && dispatchData.timeOfArrival) {
+                                // Calculate on the fly if both times are present but response time not saved
+                                return (
+                                  <span className="text-black">
+                                    {calculateResponseTime(dispatchData.timeOfDispatch, dispatchData.timeOfArrival)}
+                                  </span>
+                                );
+                              } else {
+                                return (
+                                  <span className="text-gray-500">Calculate after entering dispatch and arrival times</span>
+                                );
+                              }
+                            })()}
                           </TableCell>
                         </TableRow>
                         <TableRow>
