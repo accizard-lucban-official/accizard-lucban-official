@@ -19,6 +19,7 @@ interface SidebarProps {
   manageReportsBadge?: number;
   chatSupportBadge?: number;
   residentChatBadge?: number;
+  adminChatUnreadCount?: number;
   isMobileOpen?: boolean;
   onMobileClose?: () => void;
 }
@@ -68,7 +69,7 @@ const otherItems = [{
   preload: () => import("@/components/SystemLogsPage")
 }];
 
-export function Sidebar({ isCollapsed, onCollapse, manageUsersBadge, manageReportsBadge, chatSupportBadge, residentChatBadge, isMobileOpen = false, onMobileClose }: SidebarProps) {
+export function Sidebar({ isCollapsed, onCollapse, manageUsersBadge, manageReportsBadge, chatSupportBadge, residentChatBadge, adminChatUnreadCount, isMobileOpen = false, onMobileClose }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const [showSignOut, setShowSignOut] = useState(false);
@@ -203,9 +204,12 @@ export function Sidebar({ isCollapsed, onCollapse, manageUsersBadge, manageRepor
                       {(!isCollapsed || isMobileOpen) && (
                         <div className="flex items-center gap-2">
                           {(chatSupportBadge ?? 0) > 0 && (
-                            <Badge className="bg-orange-500 hover:bg-orange-400 text-white text-xs border-0 font-semibold">
-                              {chatSupportBadge}
-                            </Badge>
+                            <div className={cn(
+                              "w-2 h-2 rounded-full flex-shrink-0",
+                              (location.pathname === '/chat-support' || location.pathname === '/admin-chat')
+                                ? "bg-brand-orange"
+                                : "bg-white"
+                            )}></div>
                           )}
                           <ChevronDown className={cn("h-4 w-4 transition-transform", chatSupportExpanded && "rotate-180")} />
                         </div>
@@ -229,9 +233,7 @@ export function Sidebar({ isCollapsed, onCollapse, manageUsersBadge, manageRepor
                         >
                           <span>Resident Support</span>
                           {(residentChatBadge ?? 0) > 0 && (
-                            <Badge className="bg-white text-brand-orange text-[11px] font-semibold border-0">
-                              {residentChatBadge}
-                            </Badge>
+                            <div className="w-2 h-2 bg-brand-orange rounded-full flex-shrink-0"></div>
                           )}
                         </button>
                         <button
@@ -240,13 +242,16 @@ export function Sidebar({ isCollapsed, onCollapse, manageUsersBadge, manageRepor
                             if (onMobileClose) onMobileClose();
                           }}
                           className={cn(
-                            "w-full flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200",
+                            "w-full flex items-center justify-between px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200",
                             location.pathname === "/admin-chat"
                               ? "bg-white text-brand-orange"
                               : "text-white/90 hover:bg-white/20 hover:text-white"
                           )}
                         >
-                          Admin Chat
+                          <span>Admin Chat</span>
+                          {(adminChatUnreadCount ?? 0) > 0 && (
+                            <div className="w-2 h-2 bg-brand-orange rounded-full flex-shrink-0"></div>
+                          )}
                         </button>
                       </div>
                     )}

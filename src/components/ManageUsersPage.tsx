@@ -9,7 +9,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Search, Plus, Edit, Trash2, Shield, ShieldOff, ShieldCheck, ShieldX, Eye, User, FileText, Calendar as CalendarIcon, CheckSquare, Square, UserPlus, EyeOff, ChevronUp, ChevronDown, ArrowUp, ArrowDown, ArrowUpDown, Upload, X, FileDown, Camera, Check, ArrowUpRight } from "lucide-react";
+import { Search, Plus, Edit, Trash2, Shield, ShieldOff, ShieldCheck, ShieldX, Eye, User, FileText, Calendar as CalendarIcon, CheckSquare, Square, UserPlus, EyeOff, ChevronUp, ChevronDown, ArrowUp, ArrowDown, ArrowUpDown, Upload, X, FileDown, Camera, Check, ArrowUpRight, Car, Flame, Ambulance, Waves, Mountain, CircleAlert, Users, ShieldAlert, Activity, Wrench, AlertTriangle, Zap, Leaf, Heart } from "lucide-react";
 import { Layout } from "./Layout";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -92,6 +92,28 @@ function formatToMMDDYYYY(dateString: string): string {
     return dateString;
   }
 }
+
+// Helper function to get icon for report type
+const getReportTypeIcon = (type: string) => {
+  const iconMap: Record<string, any> = {
+    'Road Crash': Car,
+    'Fire': Flame,
+    'Medical Emergency': Ambulance,
+    'Flooding': Waves,
+    'Volcanic Activity': Mountain,
+    'Landslide': Mountain,
+    'Earthquake': CircleAlert,
+    'Civil Disturbance': Users,
+    'Armed Conflict': ShieldAlert,
+    'Infectious Disease': Activity,
+    'Poor Infrastructure': Wrench,
+    'Obstructions': AlertTriangle,
+    'Electrical Hazard': Zap,
+    'Environmental Hazard': Leaf,
+    'Animal Concerns': Heart,
+  };
+  return iconMap[type] || FileText;
+};
 
 const ADMIN_POSITIONS_COLLECTION = "adminPositions";
 
@@ -5029,8 +5051,8 @@ export function ManageUsersPage() {
                                     </button>
                                   </TableCell>
                                   <TableCell>
-                                    <span className={cn(
-                                      "font-medium",
+                                    <Badge variant="outline" className={cn(
+                                      "flex items-center gap-1.5 border-0 bg-transparent w-fit",
                                       report.type === 'Road Crash' ? 'text-red-600' :
                                       report.type === 'Fire' ? 'text-orange-600' :
                                       report.type === 'Medical Emergency' ? 'text-pink-600' :
@@ -5050,8 +5072,12 @@ export function ManageUsersPage() {
                                       report.type === 'Hazard' ? 'text-orange-600' :
                                       'text-gray-600'
                                     )}>
+                                      {(() => {
+                                        const Icon = getReportTypeIcon(report.type || report.hazardType || 'Unknown');
+                                        return <Icon className="h-3.5 w-3.5" />;
+                                      })()}
                                       {report.type || report.hazardType || 'Unknown'}
-                                    </span>
+                                    </Badge>
                                   </TableCell>
                                   <TableCell>
                                     <div className="text-sm">

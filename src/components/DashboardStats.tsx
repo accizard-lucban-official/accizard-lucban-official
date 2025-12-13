@@ -56,7 +56,7 @@ export function DashboardStats() {
   const [weatherOutlook, setWeatherOutlook] = useState([]);
   const [temperatureUnit, setTemperatureUnit] = useState<'celsius' | 'fahrenheit'>('celsius');
   const [pins, setPins] = useState<Pin[]>([]);
-  const [mapLayerMode, setMapLayerMode] = useState<'normal' | 'roadNetwork' | 'waterways' | 'traffic' | 'satellite'>('normal');
+  const [mapLayerMode, setMapLayerMode] = useState<'normal' | 'barangayBoundaries' | 'roadNetwork' | 'waterways' | 'traffic' | 'satellite'>('normal');
   const [reports, setReports] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [onlineAdminsCount, setOnlineAdminsCount] = useState(0);
@@ -302,71 +302,9 @@ export function DashboardStats() {
       });
   }, [users, officialBarangays]);
 
-  // Reports over time data - calculated from real Firestore data
-  const reportsOverTimeData = useMemo(() => {
-    const filteredReports = filterReportsByPeriod(reports, reportTypeFilter);
-    const reportTypes = [
-      'Road Crash', 'Fire', 'Medical Emergency', 'Flooding', 
-      'Volcanic Activity', 'Landslide', 'Earthquake', 'Civil Disturbance',
-      'Armed Conflict', 'Infectious Disease', 'Poor Infrastructure',
-      'Obstructions', 'Electrical Hazard', 'Environmental Hazard', 'Others'
-    ];
-    
-    const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-    ];
-    
-    // Group reports by type and month
-    const dataByTypeAndMonth: Record<string, Record<string, number>> = {};
-    
-    reportTypes.forEach(type => {
-      dataByTypeAndMonth[type] = {};
-      months.forEach(() => {
-        dataByTypeAndMonth[type] = { ...dataByTypeAndMonth[type] };
-      });
-    });
-    
-    filteredReports.forEach(report => {
-      const reportType = report.type || 'Others';
-      // Handle different timestamp formats from Firestore
-      let reportDate: Date;
-      if (report.timestamp instanceof Date) {
-        reportDate = report.timestamp;
-      } else if (report.timestamp?.toDate && typeof report.timestamp.toDate === 'function') {
-        reportDate = report.timestamp.toDate();
-      } else if (report.timestamp) {
-        reportDate = new Date(report.timestamp);
-      } else {
-        // Skip reports without valid timestamps
-        return;
-      }
-      const monthIndex = reportDate.getMonth();
-      const monthName = months[monthIndex];
-      
-      if (!dataByTypeAndMonth[reportType]) {
-        dataByTypeAndMonth[reportType] = {};
-      }
-      
-      if (!dataByTypeAndMonth[reportType][monthName]) {
-        dataByTypeAndMonth[reportType][monthName] = 0;
-      }
-      
-      dataByTypeAndMonth[reportType][monthName]++;
-    });
-    
-    return reportTypes.map(reportType => ({
-      id: reportType,
-      data: months.map(month => ({
-        x: month,
-        y: dataByTypeAndMonth[reportType]?.[month] || 0
-      }))
-    }));
-  }, [reports, reportTypeFilter]);
-
   // Helper function to normalize category values to match expected type names
   // Maps kebab-case values (like 'road-crash') to Title Case (like 'Road Crash')
-  const normalizeCategoryToType = (category: string | undefined | null): string => {
+  function normalizeCategoryToType(category: string | undefined | null): string {
     if (!category) return 'Others';
     
     const normalized = category.trim();
@@ -438,7 +376,99 @@ export function DashboardStats() {
     
     // Return as-is if it doesn't match (will be shown in chart with default color)
     return normalized;
-  };
+  }
+
+  // Reports over time data - calculated from real Firestore data
+  const reportsOverTimeData = useMemo(() => {
+    console.log('=== Reports Over Time Calculation ===');
+    console.log('Total reports:', reports.length);
+    console.log('Report type filter:', reportTypeFilter);
+    
+    const filteredReports = filterReportsByPeriod(reports, reportTypeFilter);
+    console.log('Filtered reports count:', filteredReports.length);
+    
+    const reportTypes = [
+      'Road Crash', 'Fire', 'Medical Emergency', 'Flooding', 
+      'Volcanic Activity', 'Landslide', 'Earthquake', 'Civil Disturbance',
+      'Armed Conflict', 'Infectious Disease', 'Poor Infrastructure',
+      'Obstructions', 'Electrical Hazard', 'Environmental Hazard', 'Animal Concerns', 'Others'
+    ];
+    
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    
+    // Group reports by type and month
+    const dataByTypeAndMonth: Record<string, Record<string, number>> = {};
+    
+    reportTypes.forEach(type => {
+      dataByTypeAndMonth[type] = {};
+      months.forEach(() => {
+        dataByTypeAndMonth[type] = { ...dataByTypeAndMonth[type] };
+      });
+    });
+    
+    // Debug: Log sample reports
+    if (filteredReports.length > 0) {
+      console.log('Sample reports (first 3):', filteredReports.slice(0, 3).map(r => ({
+        id: r.id,
+        reportType: r.reportType,
+        type: r.type,
+        category: r.category,
+        timestamp: r.timestamp
+      })));
+    }
+    
+    filteredReports.forEach(report => {
+      // Use reportType field first (same as donut chart for consistency)
+      // Then fall back to type (which is mapped during fetch) or category
+      const reportTypeValue = report.reportType || report.type || report.category || 'Others';
+      // Normalize to match expected type names (same normalization as donut chart)
+      const normalizedType = normalizeCategoryToType(reportTypeValue);
+      
+      // Handle different timestamp formats from Firestore
+      let reportDate: Date;
+      if (report.timestamp instanceof Date) {
+        reportDate = report.timestamp;
+      } else if (report.timestamp?.toDate && typeof report.timestamp.toDate === 'function') {
+        reportDate = report.timestamp.toDate();
+      } else if (report.timestamp) {
+        reportDate = new Date(report.timestamp);
+      } else {
+        // Skip reports without valid timestamps
+        return;
+      }
+      const monthIndex = reportDate.getMonth();
+      const monthName = months[monthIndex];
+      
+      if (!dataByTypeAndMonth[normalizedType]) {
+        dataByTypeAndMonth[normalizedType] = {};
+      }
+      
+      if (!dataByTypeAndMonth[normalizedType][monthName]) {
+        dataByTypeAndMonth[normalizedType][monthName] = 0;
+      }
+      
+      dataByTypeAndMonth[normalizedType][monthName]++;
+    });
+    
+    // Debug: Log the data structure
+    console.log('Data by type and month:', dataByTypeAndMonth);
+    
+    const result = reportTypes.map(reportType => ({
+      id: reportType,
+      data: months.map(month => ({
+        x: month,
+        y: dataByTypeAndMonth[reportType]?.[month] || 0
+      }))
+    }));
+    
+    console.log('Final reports over time result:', result);
+    console.log('=== End Reports Over Time Calculation ===');
+    
+    return result;
+  }, [reports, reportTypeFilter]);
 
   // Report type distribution data - calculated from real Firestore data
   const reportTypeData = useMemo(() => {
@@ -464,19 +494,20 @@ export function DashboardStats() {
       console.log('All reports:', reports);
     }
     
-    // Count reports by type - use category field directly from Firestore
+    // Count reports by type - use reportType field from Firestore (primary field)
     const typeCounts: Record<string, number> = {};
     filteredReports.forEach(report => {
-      // Use category field directly (as specified by user)
-      const categoryValue = report.category || report.reportType || report.type || 'Others';
-      console.log(`Processing report ${report.id}: category="${report.category}", reportType="${report.reportType}", type="${report.type}", using="${categoryValue}"`);
+      // Use reportType field first (this is what's actually stored in Firestore)
+      // Then fall back to type (which is mapped during fetch) or category
+      const reportTypeValue = report.reportType || report.type || report.category || 'Others';
+      console.log(`Processing report ${report.id}: reportType="${report.reportType}", type="${report.type}", category="${report.category}", using="${reportTypeValue}"`);
       // Normalize to match expected type names
-      const normalizedType = normalizeCategoryToType(categoryValue);
+      const normalizedType = normalizeCategoryToType(reportTypeValue);
       typeCounts[normalizedType] = (typeCounts[normalizedType] || 0) + 1;
     });
     
     // Debug: Log the counts
-    console.log('Type counts from category field:', typeCounts);
+    console.log('Type counts from reportType field:', typeCounts);
     
     // Calculate total for percentage
     const total = filteredReports.length || 1;
@@ -565,42 +596,96 @@ export function DashboardStats() {
     }));
   }, [reports, peakHoursFilter]);
 
-  // Calendar heatmap data for 2025 only - static data to prevent randomization
-  const calendarData2025 = useMemo(() => {
-    const data = [];
-    const startDate = new Date(2025, 0, 1); // January 1, 2025
-    const endDate = new Date(2025, 11, 31); // December 31, 2025
-    
-    // Static data pattern for consistent display
-    const staticPatterns = {
-      0: 2, // Sunday
-      1: 4, // Monday
-      2: 3, // Tuesday
-      3: 5, // Wednesday
-      4: 4, // Thursday
-      5: 3, // Friday
-      6: 1  // Saturday
-    };
-    
+  // Get current year for dynamic calendar
+  const currentYear = new Date().getFullYear();
+
+  // Color thresholds for calendar intensity
+  const calendarColorThresholds = {
+    1: 5,  // Level 1: 0-5 reports (lightest)
+    2: 10, // Level 2: 6-10 reports
+    3: 15, // Level 3: 11-15 reports
+    4: 20, // Level 4: 16-20 reports
+    5: 21  // Level 5: 20+ reports (darkest); treated as >= value
+  };
+
+  // Map a report count to its corresponding color
+  const getCalendarColor = (value: number): string => {
+    if (value === 0) return '#D9D0C4'; // 0 reports use faded orange-gray
+    if (value <= calendarColorThresholds[1]) return '#FFCD90'; // 1-5 reports
+    if (value <= calendarColorThresholds[2]) return '#FFB76B'; // 6-10 reports
+    if (value <= calendarColorThresholds[3]) return '#FFA652'; // 11-15 reports
+    if (value <= calendarColorThresholds[4]) return '#FF8D21'; // 16-20 reports
+    return '#FF7B00'; // 20+ reports
+  };
+
+  const calendarData = useMemo(() => {
+    const data: { day: string; value: number; color: string }[] = [];
+    const startDate = new Date(currentYear, 0, 1);
+    const endDate = new Date(currentYear, 11, 31);
+
+    // Count reports per day (prefer createdDate string, fallback to timestamp)
+    const reportsByDay = new Map<string, number>();
+    reports.forEach((report) => {
+      let reportDate: Date | null = null;
+
+      // Prefer createdDate if present (format: MM/DD/YYYY)
+      if (report?.createdDate) {
+        const parts = String(report.createdDate).split('/');
+        if (parts.length === 3) {
+          const [mm, dd, yyyy] = parts.map((p: string) => parseInt(p, 10));
+          if (!isNaN(mm) && !isNaN(dd) && !isNaN(yyyy)) {
+            // Month in Date constructor is 0-based
+            reportDate = new Date(yyyy, mm - 1, dd);
+          }
+        }
+      }
+
+      // Fallback to timestamp field
+      if (!reportDate && report?.timestamp) {
+        if (report.timestamp instanceof Date) {
+          reportDate = report.timestamp;
+        } else if (report.timestamp?.toDate && typeof report.timestamp.toDate === 'function') {
+          reportDate = report.timestamp.toDate();
+        } else if (typeof report.timestamp === 'string' || typeof report.timestamp === 'number') {
+          reportDate = new Date(report.timestamp);
+        }
+      }
+
+      if (!reportDate || isNaN(reportDate.getTime())) return;
+      if (reportDate.getFullYear() !== currentYear) return;
+
+      const dateStr = reportDate.toISOString().split('T')[0];
+      const currentCount = reportsByDay.get(dateStr) || 0;
+      reportsByDay.set(dateStr, currentCount + 1);
+    });
+
+    // Build calendar data for every day of the current year
+    // Normalize values to 0-4 range for discrete color mapping
     for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
       const dateStr = d.toISOString().split('T')[0];
-      const dayOfWeek = d.getDay();
+      const reportCount = reportsByDay.get(dateStr) || 0;
       
-      // Use static pattern with occasional variations
-      let value = staticPatterns[dayOfWeek as keyof typeof staticPatterns];
+      // Normalize value to 0-5 for color array indexing
+      let normalizedValue = 0;
+      if (reportCount === 0) {
+        normalizedValue = 0; // 0 reports -> faded orange-gray
+      } else if (reportCount <= calendarColorThresholds[1]) {
+        normalizedValue = 1; // 1-5 reports -> lightest orange
+      } else if (reportCount <= calendarColorThresholds[2]) {
+        normalizedValue = 2; // 6-10 reports -> second color
+      } else if (reportCount <= calendarColorThresholds[3]) {
+        normalizedValue = 3; // 11-15 reports -> third color
+      } else if (reportCount <= calendarColorThresholds[4]) {
+        normalizedValue = 4; // 16-20 reports -> fourth color
+      } else {
+        normalizedValue = 5; // 20+ reports -> darkest color
+      }
       
-      // Add some variation based on date to make it look more realistic
-      const dayOfMonth = d.getDate();
-      if (dayOfMonth % 7 === 0) value += 1; // Every 7th day gets +1
-      if (dayOfMonth % 15 === 0) value += 2; // Every 15th day gets +2
-      
-      data.push({
-        day: dateStr,
-        value: Math.min(value, 8) // Cap at 8
-      });
+      data.push({ day: dateStr, value: normalizedValue, originalValue: reportCount });
     }
+
     return data;
-  }, []);
+  }, [reports, currentYear]);
 
   // Enhanced Weather API integration with dynamic geolocation
   const fetchWeatherData = async () => {
@@ -997,19 +1082,20 @@ export function DashboardStats() {
         
         const fetched = snapshot.docs.map(doc => {
           const data = doc.data();
-          // Use category field as the primary source for report type (as specified)
-          const reportType = data.category || data.reportType || data.type || 'Others';
+          // Use reportType field as the primary source (this is what's stored in Firestore)
+          // Fall back to type or category if reportType doesn't exist
+          const reportType = data.reportType || data.type || data.category || 'Others';
           
           // Debug: Log first few reports to see what we're getting
           if (snapshot.docs.indexOf(doc) < 3) {
             console.log(`Report ${doc.id}:`, {
-              category: data.category,
               reportType: data.reportType,
               type: data.type,
+              category: data.category,
               mappedType: reportType,
-              hasCategory: !!data.category,
               hasReportType: !!data.reportType,
-              hasType: !!data.type
+              hasType: !!data.type,
+              hasCategory: !!data.category
             });
           }
           
@@ -1017,11 +1103,11 @@ export function DashboardStats() {
             id: doc.id,
             ...data,
             // Map Firestore field names to expected field names
-            // Use category field first (as specified by user)
+            // Use reportType field first (primary field in Firestore)
             type: reportType,
             // Keep original fields for reference
-            category: data.category,
             reportType: data.reportType,
+            category: data.category,
             barangay: data.barangay || data.locationName || 'Unknown', // Use barangay or locationName
             locationName: data.locationName || data.location || data.barangay || 'Unknown',
             timestamp: data.timestamp?.toDate ? data.timestamp.toDate() : (data.timestamp instanceof Date ? data.timestamp : new Date())
@@ -1261,12 +1347,8 @@ export function DashboardStats() {
                       if (shouldAdd && !map.current!.getLayer(layer.id)) {
                         if (layer.source && map.current!.getSource(layer.source)) {
                           map.current!.addLayer(layer);
-                          // Set initial visibility - barangay boundaries always visible, others hidden
-                          if (layer.id === 'lucban-boundary' || layer.id === 'lucban-brgys' || layer.id === 'lucban-brgys-satellite' || layer.id === 'lucban-fill' || layer.id === 'lucban-brgy-names') {
-                            map.current!.setLayoutProperty(layer.id, 'visibility', 'visible');
-                          } else {
-                            map.current!.setLayoutProperty(layer.id, 'visibility', 'none');
-                          }
+                          // Set initial visibility - all custom layers hidden by default (shown only when selected mode)
+                          map.current!.setLayoutProperty(layer.id, 'visibility', 'none');
                         }
                       }
                     } catch (error) {
@@ -1333,12 +1415,9 @@ export function DashboardStats() {
     markersRef.current.forEach(marker => marker.remove());
     markersRef.current = [];
 
-    // Only show pins in 'normal' mode
-    if (mapLayerMode !== 'normal') {
-      return;
-    }
-
-    // Add markers for each pin
+    // Don't show any markers - normal mode should not display markers
+    // Markers are intentionally hidden for all modes
+    return;
     pins.forEach(pin => {
       const iconPath = getPinMarkerIcon(pin.type);
       
@@ -1421,11 +1500,11 @@ export function DashboardStats() {
     function applyLayerToggles() {
       if (!map.current || !currentMap.isStyleLoaded()) return;
 
-      // Always show barangay boundaries
-      toggleLayer('lucban-brgys', true);
-      toggleLayer('lucban-brgys-satellite', true);
-      toggleLayer('lucban-fill', true);
-      toggleLayer('lucban-brgy-names', true);
+      // Show barangay boundaries only in barangayBoundaries mode
+      toggleLayer('lucban-brgys', mapLayerMode === 'barangayBoundaries');
+      toggleLayer('lucban-brgys-satellite', mapLayerMode === 'barangayBoundaries');
+      toggleLayer('lucban-fill', mapLayerMode === 'barangayBoundaries');
+      toggleLayer('lucban-brgy-names', mapLayerMode === 'barangayBoundaries');
 
       // Toggle road network
       const roadLayerNames = ['road', 'roads', 'road-network', 'highway', 'road-label', 'road-satellite'];
@@ -1480,12 +1559,8 @@ export function DashboardStats() {
         toggleLayer('traffic', false);
       }
 
-      // Hide/show markers based on mode (only show in normal mode)
-      if (mapLayerMode === 'normal') {
-        markersRef.current.forEach(marker => marker.getElement().style.display = 'block');
-      } else {
-        markersRef.current.forEach(marker => marker.getElement().style.display = 'none');
-      }
+      // Hide markers in all modes - normal mode should not display markers
+      markersRef.current.forEach(marker => marker.getElement().style.display = 'none');
     }
 
     // Check if we need to switch styles
@@ -1545,11 +1620,7 @@ export function DashboardStats() {
                         if (layer.source && map.current!.getSource(layer.source)) {
                           map.current!.addLayer(layer);
                           // Set initial visibility - will be updated by applyLayerToggles
-                          if (layer.id === 'lucban-boundary') {
-                            map.current!.setLayoutProperty(layer.id, 'visibility', 'visible');
-                          } else {
-                            map.current!.setLayoutProperty(layer.id, 'visibility', 'none');
-                          }
+                          map.current!.setLayoutProperty(layer.id, 'visibility', 'none');
                         }
                       }
                     } catch (error) {
@@ -1643,11 +1714,7 @@ export function DashboardStats() {
                         if (layer.source && map.current!.getSource(layer.source)) {
                           map.current!.addLayer(layer);
                           // Set initial visibility - will be updated by applyLayerToggles
-                          if (layer.id === 'lucban-boundary') {
-                            map.current!.setLayoutProperty(layer.id, 'visibility', 'visible');
-                          } else {
-                            map.current!.setLayoutProperty(layer.id, 'visibility', 'none');
-                          }
+                          map.current!.setLayoutProperty(layer.id, 'visibility', 'none');
                         }
                       }
                     } catch (error) {
@@ -3681,7 +3748,7 @@ ${calendarChart ? `
         {/* Calendar Heatmap - Report Activity */}
         <Card className="relative overflow-hidden">
           <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>Report Activity Calendar</CardTitle>
+            <CardTitle>{currentYear} Report Activity</CardTitle>
             <div className="flex items-center gap-2">
               {/* Export Dropdown */}
               <DropdownMenu>
@@ -3717,17 +3784,13 @@ ${calendarChart ? `
               {/* Nivo Calendar Chart */}
               <div id="calendar-chart" style={{ height: '120px', minHeight: '100px' }}>
                 <ResponsiveCalendar
-                  data={calendarData2025}
-                  from="2025-01-01"
-                  to="2025-12-31"
+                  data={calendarData}
+                  from={`${currentYear}-01-01`}
+                  to={`${currentYear}-12-31`}
                   emptyColor="#f3f4f6"
-                  colors={[
-                    '#FFCD90', // lightest
-                    '#FFB76B', // light
-                    '#FFA652', // medium
-                    '#FF8D21', // medium-dark
-                    '#FF7B00'  // darkest
-                  ]}
+                  colors={['#D9D0C4', '#FFCD90', '#FFB76B', '#FFA652', '#FF8D21', '#FF7B00']}
+                  minValue={0}
+                  maxValue={5}
                   margin={{ top: 20, right: 20, bottom: 20, left: 20 }}
                   yearSpacing={20}
                   monthBorderColor="#ffffff"
@@ -3746,7 +3809,13 @@ ${calendarChart ? `
                     }
                   ]}
                   theme={nivoTheme}
-                  tooltip={({ day, value }) => (
+                  tooltip={({ day, value }) => {
+                    // Find the original data point to get originalValue
+                    const dayStr = typeof day === 'string' ? day : new Date(day).toISOString().split('T')[0];
+                    const dataPoint = calendarData.find(d => d.day === dayStr);
+                    const reportCount = dataPoint?.originalValue ?? value;
+                    
+                    return (
                     <div style={{
                       background: 'white',
                       padding: '8px 12px',
@@ -3765,10 +3834,11 @@ ${calendarChart ? `
                         })}
                       </div>
                       <div style={{ color: '#f97316', fontWeight: 500 }}>
-                        {value} reports
+                          {reportCount} reports
                       </div>
                     </div>
-                  )}
+                    );
+                  }}
                 />
               </div>
 
@@ -3776,6 +3846,7 @@ ${calendarChart ? `
               <div className="flex items-center justify-center gap-2 pt-1">
                 <span className="text-xs text-gray-600 font-medium">Less</span>
                 <div className="flex gap-0.5">
+                  <div className="w-5 h-3 rounded" style={{ backgroundColor: '#D9D0C4' }}></div>
                   <div className="w-5 h-3 rounded" style={{ backgroundColor: '#FFCD90' }}></div>
                   <div className="w-5 h-3 rounded" style={{ backgroundColor: '#FFB76B' }}></div>
                   <div className="w-5 h-3 rounded" style={{ backgroundColor: '#FFA652' }}></div>
@@ -3789,19 +3860,19 @@ ${calendarChart ? `
               <div className="grid grid-cols-3 gap-3 pt-2 border-t">
                 <div className="text-center">
                   <div className="text-xl font-bold text-brand-orange">
-                    {calendarData2025.reduce((sum, day) => sum + day.value, 0)}
+                    {calendarData.reduce((sum, day) => sum + (day.originalValue ?? day.value ?? 0), 0)}
                   </div>
                   <div className="text-xs text-gray-600">Total Reports</div>
                 </div>
                 <div className="text-center">
                   <div className="text-xl font-bold text-brand-red">
-                    {Math.max(...calendarData2025.map(d => d.value))}
+                    {Math.max(...calendarData.map(d => d.originalValue ?? d.value ?? 0), 0)}
                   </div>
                   <div className="text-xs text-gray-600">Peak Day</div>
                 </div>
                 <div className="text-center">
                   <div className="text-xl font-bold text-gray-700">
-                    {(calendarData2025.reduce((sum, day) => sum + day.value, 0) / calendarData2025.length).toFixed(1)}
+                    {(calendarData.reduce((sum, day) => sum + (day.originalValue ?? day.value ?? 0), 0) / calendarData.length).toFixed(1)}
                   </div>
                   <div className="text-xs text-gray-600">Avg/Day</div>
                 </div>
@@ -3825,9 +3896,10 @@ ${calendarChart ? `
             variant="secondary"
             className="absolute top-2 right-2 bg-brand-orange/90 hover:bg-brand-orange text-white border border-brand-orange shadow-sm"
             onClick={() => {
-              // Cycle through: normal -> roadNetwork -> waterways -> traffic -> satellite -> normal
+              // Cycle through: normal -> barangayBoundaries -> roadNetwork -> waterways -> traffic -> satellite -> normal
               setMapLayerMode(prev => {
-                if (prev === 'normal') return 'roadNetwork';
+                if (prev === 'normal') return 'barangayBoundaries';
+                if (prev === 'barangayBoundaries') return 'roadNetwork';
                 if (prev === 'roadNetwork') return 'waterways';
                 if (prev === 'waterways') return 'traffic';
                 if (prev === 'traffic') return 'satellite';
@@ -3839,6 +3911,12 @@ ${calendarChart ? `
               <>
                 <Layers className="h-3 w-3 mr-1" />
                 Normal
+              </>
+            )}
+            {mapLayerMode === 'barangayBoundaries' && (
+              <>
+                <Building2 className="h-3 w-3 mr-1" />
+                Barangay Boundaries
               </>
             )}
             {mapLayerMode === 'roadNetwork' && (
@@ -4739,17 +4817,13 @@ ${calendarChart ? `
           <div className="flex-1 min-h-0 mt-4">
             <div id="calendar-chart-modal" style={{ height: 'calc(90vh - 140px)', minHeight: '500px' }}>
               <ResponsiveCalendar
-                data={calendarData2025}
-                from="2025-01-01"
-                to="2025-12-31"
+                data={calendarData}
+                from={`${currentYear}-01-01`}
+                to={`${currentYear}-12-31`}
                 emptyColor="#f3f4f6"
-                colors={[
-                  '#FFCD90', // lightest
-                  '#FFB76B', // light
-                  '#FFA652', // medium
-                  '#FF8D21', // medium-dark
-                  '#FF7B00'  // darkest
-                ]}
+                colors={['#D9D0C4', '#FFCD90', '#FFB76B', '#FFA652', '#FF8D21', '#FF7B00']}
+                minValue={0}
+                maxValue={5}
                 margin={{ top: 40, right: 40, bottom: 40, left: 40 }}
                 yearSpacing={40}
                 monthBorderColor="#ffffff"
@@ -4768,7 +4842,13 @@ ${calendarChart ? `
                   }
                 ]}
                 theme={nivoTheme}
-                tooltip={({ day, value }) => (
+                tooltip={({ day, value }) => {
+                  // Find the original data point to get originalValue
+                  const dayStr = typeof day === 'string' ? day : new Date(day).toISOString().split('T')[0];
+                  const dataPoint = calendarData.find(d => d.day === dayStr);
+                  const reportCount = dataPoint?.originalValue ?? value;
+                  
+                  return (
                   <div style={{
                     background: 'white',
                     padding: '10px 14px',
@@ -4787,10 +4867,11 @@ ${calendarChart ? `
                       })}
                     </div>
                     <div style={{ color: '#f97316', fontWeight: 500 }}>
-                      {value} reports
+                        {reportCount} reports
                     </div>
                   </div>
-                )}
+                  );
+                }}
               />
             </div>
 
@@ -4798,19 +4879,19 @@ ${calendarChart ? `
             <div className="grid grid-cols-3 gap-4 pt-6 border-t border-gray-200 mt-4">
               <div className="text-center">
                 <div className="text-2xl font-bold">
-                  {calendarData2025.reduce((sum, day) => sum + day.value, 0)}
+                  {calendarData.reduce((sum, day) => sum + (day.originalValue ?? day.value ?? 0), 0)}
                 </div>
                 <div className="text-sm text-gray-600 mt-1">Total Reports</div>
               </div>
               <div className="text-center">
                 <div className="text-2xl font-bold">
-                  {Math.max(...calendarData2025.map(d => d.value))}
+                  {Math.max(...calendarData.map(d => d.originalValue ?? d.value ?? 0), 0)}
                 </div>
                 <div className="text-sm text-gray-600 mt-1">Peak Day</div>
               </div>
               <div className="text-center">
                 <div className="text-2xl font-bold text-gray-700">
-                  {(calendarData2025.reduce((sum, day) => sum + day.value, 0) / calendarData2025.length).toFixed(1)}
+                  {(calendarData.reduce((sum, day) => sum + (day.originalValue ?? day.value ?? 0), 0) / calendarData.length).toFixed(1)}
                 </div>
                 <div className="text-sm text-gray-600 mt-1">Avg/Day</div>
               </div>

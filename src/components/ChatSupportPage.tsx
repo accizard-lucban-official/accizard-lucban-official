@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -72,6 +72,12 @@ export function ChatSupportPage() {
   const [sendingMessage, setSendingMessage] = useState(false);
   const [startingChat, setStartingChat] = useState<string | null>(null);
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
+  
+  // Notification sound state and refs
+  const notificationAudioRefs = useRef<HTMLAudioElement[]>([]);
+  const notifiedMessageIds = useRef<Set<string>>(new Set());
+  const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
+  const isBroadcastingRef = useRef(false);
   const [chatToDelete, setChatToDelete] = useState<any>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [attachmentPreviews, setAttachmentPreviews] = useState<AttachmentPreview[]>([]);
@@ -369,7 +375,51 @@ export function ChatSupportPage() {
         const deduplicatedSessions = Array.from(uniqueSessions.values());
         console.log(`🔍 Deduplicated ${sessionsData.length} sessions to ${deduplicatedSessions.length} unique sessions`);
         
-        setChatSessions(deduplicatedSessions);
+        // Filter to only show sessions with existing messages
+        const messagesRef = collection(db, "chat_messages");
+        const sessionsWithMessages = await Promise.all(
+          deduplicatedSessions.map(async (session) => {
+            const userIds = [
+              session.userId,
+              session.id,
+              session.firebaseUid,
+              session.userID
+            ].filter(Boolean);
+            
+            if (userIds.length === 0) return null;
+            
+            // Check if there are any messages for this session
+            let hasMessages = false;
+            for (const userId of userIds) {
+              try {
+                // Check userId field
+                const query1 = query(messagesRef, where("userId", "==", userId));
+                const snapshot1 = await getDocs(query1);
+                if (!snapshot1.empty) {
+                  hasMessages = true;
+                  break;
+                }
+                
+                // Check userID field (mobile app compatibility)
+                const query2 = query(messagesRef, where("userID", "==", userId));
+                const snapshot2 = await getDocs(query2);
+                if (!snapshot2.empty) {
+                  hasMessages = true;
+                  break;
+                }
+              } catch (error) {
+                console.error(`Error checking messages for userId ${userId}:`, error);
+              }
+            }
+            
+            return hasMessages ? session : null;
+          })
+        );
+        
+        const filteredSessions = sessionsWithMessages.filter(session => session !== null);
+        console.log(`📨 Filtered ${deduplicatedSessions.length} sessions to ${filteredSessions.length} sessions with messages`);
+        
+        setChatSessions(filteredSessions);
         setLoadingChatSessions(false);
       }, (error) => {
         console.error("Error loading chat sessions:", error);
@@ -384,10 +434,12 @@ export function ChatSupportPage() {
   }, []);
 
   // Real-time listener for unread message counts
+  // Uses lastAccessTime comparison instead of isRead field (since mobile app sets isRead incorrectly)
   useEffect(() => {
     try {
       const messagesRef = collection(db, "chat_messages");
-      const q = query(messagesRef, where("isRead", "==", false));
+      // Get all messages (not just isRead=false) since mobile app sets isRead incorrectly
+      const q = query(messagesRef);
       
       const unsubscribe = onSnapshot(q, (snapshot) => {
         const counts: Record<string, number> = {};
@@ -400,11 +452,56 @@ export function ChatSupportPage() {
             )
           );
           const residentSenderId = data.userId || data.userID;
+          
           // Only count messages from users (not admin messages)
           if (identifiers.length > 0 && residentSenderId && data.senderId === residentSenderId) {
-            identifiers.forEach((identifier) => {
-              counts[identifier] = (counts[identifier] || 0) + 1;
+            // Find the corresponding chat session to get lastAccessTime
+            const session = chatSessions.find(s => {
+              const sessionIds = [s.userId, s.id, s.firebaseUid, s.userID].filter(Boolean);
+              return sessionIds.some(id => identifiers.includes(id));
             });
+            
+            if (session) {
+              // Get message timestamp
+              let messageTime: number | null = null;
+              if (data.timestamp?.toDate) {
+                messageTime = data.timestamp.toDate().getTime();
+              } else if (data.timestamp instanceof Date) {
+                messageTime = data.timestamp.getTime();
+              } else if (typeof data.timestamp === 'number') {
+                messageTime = data.timestamp;
+              } else if (typeof data.timestamp === 'string') {
+                messageTime = new Date(data.timestamp).getTime();
+              }
+              
+              // Get lastAccessTime from session
+              let lastAccessTime: number | null = null;
+              if (session.lastAccessTime?.toDate) {
+                lastAccessTime = session.lastAccessTime.toDate().getTime();
+              } else if (session.lastAccessTime instanceof Date) {
+                lastAccessTime = session.lastAccessTime.getTime();
+              } else if (typeof session.lastAccessTime === 'number') {
+                lastAccessTime = session.lastAccessTime;
+              }
+              
+              // Message is unread if:
+              // 1. No lastAccessTime exists (session never opened), OR
+              // 2. Message timestamp is newer than lastAccessTime
+              const isUnread = !lastAccessTime || (messageTime && messageTime > lastAccessTime);
+              
+              if (isUnread && messageTime) {
+                identifiers.forEach((identifier) => {
+                  counts[identifier] = (counts[identifier] || 0) + 1;
+                });
+              }
+            } else {
+              // If no session found, fall back to isRead check (for backwards compatibility)
+              if (!data.isRead) {
+                identifiers.forEach((identifier) => {
+                  counts[identifier] = (counts[identifier] || 0) + 1;
+                });
+              }
+            }
           }
         });
         
@@ -413,8 +510,192 @@ export function ChatSupportPage() {
 
       return () => unsubscribe();
     } catch (error) {
-      console.error("Error setting up unread counts listener:", error);
+      console.error("Error setting up unread message counts listener:", error);
     }
+  }, [chatSessions]);
+
+  // Play notification sound
+  const playNotificationSound = useCallback(() => {
+    try {
+      // Stop any currently playing notification sounds
+      notificationAudioRefs.current.forEach(audio => {
+        try {
+          audio.pause();
+          audio.currentTime = 0;
+        } catch (e) {}
+      });
+      notificationAudioRefs.current = [];
+      
+      const audio = new Audio('/accizard-uploads/message_notif.wav');
+      audio.volume = 0.7;
+      notificationAudioRefs.current.push(audio);
+      
+      audio.addEventListener('ended', () => {
+        notificationAudioRefs.current = notificationAudioRefs.current.filter(a => a !== audio);
+      });
+      
+      audio.addEventListener('error', () => {
+        console.log("Notification sound file error");
+        notificationAudioRefs.current = notificationAudioRefs.current.filter(a => a !== audio);
+      });
+      
+      audio.play().catch((error) => {
+        console.log("Notification sound playback failed:", error);
+        notificationAudioRefs.current = notificationAudioRefs.current.filter(a => a !== audio);
+      });
+    } catch (error) {
+      console.error("Error playing notification sound:", error);
+    }
+  }, []);
+
+  // Setup BroadcastChannel for cross-tab communication
+  useEffect(() => {
+    if (typeof BroadcastChannel !== 'undefined') {
+      broadcastChannelRef.current = new BroadcastChannel('chat-notifications');
+      
+      broadcastChannelRef.current.onmessage = (event) => {
+        if (event.data.type === 'NEW_MESSAGE') {
+          // Prevent handling our own broadcast
+          if (isBroadcastingRef.current) {
+            isBroadcastingRef.current = false;
+            return;
+          }
+          // Play sound for messages from other tabs
+          playNotificationSound();
+        }
+      };
+      
+      return () => {
+        if (broadcastChannelRef.current) {
+          broadcastChannelRef.current.close();
+        }
+      };
+    }
+  }, [playNotificationSound]);
+
+  // Listen for new resident chat messages and play notification
+  useEffect(() => {
+    try {
+      const messagesRef = collection(db, "chat_messages");
+      const q = query(messagesRef);
+      
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        // Get current user/admin ID
+        const currentUser = auth.currentUser;
+        const sessionUser = SessionManager.getCurrentUser();
+        const currentAdminId = currentUser?.uid || sessionUser?.userId || sessionUser?.username || "";
+        
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added') {
+            const data = change.doc.data();
+            const messageId = change.doc.id;
+            
+            // Skip if we've already notified for this message
+            if (notifiedMessageIds.current.has(messageId)) {
+              return;
+            }
+            
+            // Only notify for messages not sent by current user/admin
+            if (data.senderId !== currentAdminId) {
+              // Check if message is for currently selected session
+              const messageUserId = data.userId || data.userID;
+              const isCurrentSession = selectedSession && (
+                selectedSession.userId === messageUserId ||
+                selectedSession.id === messageUserId ||
+                selectedSession.firebaseUid === messageUserId ||
+                selectedSession.userID === messageUserId
+              );
+              
+              // Mark as notified
+              notifiedMessageIds.current.add(messageId);
+              
+              // Play sound (even if viewing the chat, as user might be in another tab)
+              playNotificationSound();
+              
+              // Broadcast to other tabs
+              if (broadcastChannelRef.current) {
+                isBroadcastingRef.current = true;
+                broadcastChannelRef.current.postMessage({
+                  type: 'NEW_MESSAGE',
+                  messageId: messageId
+                });
+                // Reset flag after a short delay
+                setTimeout(() => {
+                  isBroadcastingRef.current = false;
+                }, 100);
+              }
+            }
+          }
+        });
+      });
+
+      return () => unsubscribe();
+    } catch (error) {
+      console.error("Error setting up message notification listener:", error);
+    }
+  }, [playNotificationSound, selectedSession]);
+
+  // Listen for new admin chat messages and play notification
+  useEffect(() => {
+    try {
+      const currentUser = auth.currentUser;
+      const sessionUser = SessionManager.getCurrentUser();
+      const currentAdminId = currentUser?.uid || sessionUser?.userId || sessionUser?.username || "admin";
+      
+      const adminChatRef = collection(db, "admin_chat_messages");
+      const unsubscribe = onSnapshot(adminChatRef, (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added') {
+            const data = change.doc.data();
+            const messageId = change.doc.id;
+            
+            // Skip if we've already notified for this message
+            if (notifiedMessageIds.current.has(`admin_${messageId}`)) {
+              return;
+            }
+            
+            // Only notify for messages not sent by current user and are unread
+            if (data.senderId !== currentAdminId && !data.isRead) {
+              // Mark as notified
+              notifiedMessageIds.current.add(`admin_${messageId}`);
+              
+              // Play sound
+              playNotificationSound();
+              
+              // Broadcast to other tabs
+              if (broadcastChannelRef.current) {
+                isBroadcastingRef.current = true;
+                broadcastChannelRef.current.postMessage({
+                  type: 'NEW_MESSAGE',
+                  messageId: `admin_${messageId}`
+                });
+                // Reset flag after a short delay
+                setTimeout(() => {
+                  isBroadcastingRef.current = false;
+                }, 100);
+              }
+            }
+          }
+        });
+      });
+
+      return () => unsubscribe();
+    } catch (error) {
+      console.error("Error setting up admin chat notification listener:", error);
+    }
+  }, [playNotificationSound]);
+
+  // Cleanup audio on unmount
+  useEffect(() => {
+    return () => {
+      notificationAudioRefs.current.forEach(audio => {
+        try {
+          audio.pause();
+          audio.currentTime = 0;
+        } catch (e) {}
+      });
+      notificationAudioRefs.current = [];
+    };
   }, []);
 
   // Real-time listener for user online status
@@ -898,10 +1179,34 @@ export function ChatSupportPage() {
   };
 
   // Handler to select a chat session
-  const handleSelectSession = (session: any) => {
+  const handleSelectSession = async (session: any) => {
     setSelectedSession(session);
     if (isMobileView) {
       setShowChatOnMobile(true);
+    }
+    
+    // Update lastAccessTime when session is selected (for unread detection)
+    if (session) {
+      try {
+        const sessionIds = [session.userId, session.id, session.firebaseUid, session.userID].filter(Boolean);
+        if (sessionIds.length > 0) {
+          // Try to find the chat document
+          for (const sessionId of sessionIds) {
+            try {
+              const chatRef = doc(db, "chats", sessionId);
+              await updateDoc(chatRef, {
+                lastAccessTime: serverTimestamp()
+              });
+              break; // Successfully updated, no need to try other IDs
+            } catch (error) {
+              // Continue to next ID if this one fails
+              continue;
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error updating lastAccessTime:", error);
+      }
     }
   };
 
@@ -1276,12 +1581,7 @@ export function ChatSupportPage() {
                   <div className="flex items-center gap-2">
                     <CardTitle>Chat Sessions</CardTitle>
                     {totalUnreadSessions > 0 && (
-                      <>
-                        <Badge className="bg-brand-orange hover:bg-brand-orange-400 text-white text-xs px-2 py-0 h-5">
-                          {totalUnreadSessions}
-                        </Badge>
-                        <div className="h-2 w-2 bg-brand-orange rounded-full"></div>
-                      </>
+                      <div className="h-2 w-2 bg-brand-orange rounded-full flex-shrink-0"></div>
                     )}
                   </div>
                 </div>
@@ -1389,24 +1689,24 @@ export function ChatSupportPage() {
                         return (
                         <div
                           key={user.id}
-                          className={`p-4 border-b cursor-pointer hover:bg-gray-50 transition-colors ${
+                          className={`p-4 border-b cursor-pointer hover:bg-gray-50 transition-colors relative ${
                             selectedSession?.id === user.id
                               ? 'bg-orange-50 border-l-4 border-l-brand-orange'
                               : hasUnread
-                                ? 'bg-orange-50/40'
+                                ? 'bg-orange-50/40 border-l-4 border-l-brand-orange'
                                 : ''
                           }`}
                           onClick={() => handleSelectSession(user)}
                         >
-                          <div className="flex items-start justify-between">
-                            <div className="flex items-center min-w-0 gap-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center min-w-0 gap-2 flex-1">
                               <button
                                 type="button"
                                 onClick={e => { 
                                   e.stopPropagation(); 
                                   goToResidentProfile(user); 
                                 }}
-                                className="focus:outline-none relative"
+                                className="focus:outline-none relative flex-shrink-0"
                                 title="View Resident Profile"
                               >
                                 {user.profilePicture ? (
@@ -1434,16 +1734,10 @@ export function ChatSupportPage() {
                                 )}
                               </button>
                               <div className="flex-1 min-w-0">
-                                <div className="flex items-center space-x-2">
-                                  <span className={`font-medium text-sm truncate ${hasUnread ? 'text-gray-900' : ''}`}>
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className={`text-sm truncate flex-1 min-w-0 ${hasUnread ? 'font-bold text-brand-orange' : 'font-medium text-gray-700'}`}>
                                     {user.fullName || user.userName || user.name || user.userId}
                                   </span>
-                                  {/* Unread count badge */}
-                                  {hasUnread && (
-                                    <Badge className="bg-brand-orange hover:bg-brand-orange-400 text-white text-xs px-2 py-0 h-5">
-                                      {unreadCount}
-                                    </Badge>
-                                  )}
                                 </div>
                                 {user.lastMessage && (
                                   <p className="text-xs text-gray-600 mt-1 truncate font-medium">
@@ -1644,11 +1938,6 @@ export function ChatSupportPage() {
                       ) : messages.length === 0 ? (
                         <div className="text-center text-gray-500 py-4">
                           <p className="mb-2">No messages yet. Start the conversation!</p>
-                          <p className="text-xs text-gray-400">
-                            Session ID: {selectedSession?.id || 'N/A'} | 
-                            User ID: {selectedSession?.userId || 'N/A'} | 
-                            Firebase UID: {selectedSession?.firebaseUid || 'N/A'}
-                          </p>
                         </div>
                       ) : (
                         messages.map((msg) => {

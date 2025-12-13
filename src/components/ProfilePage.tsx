@@ -500,8 +500,7 @@ export function ProfilePage() {
           const q1 = query(
             collection(db, "activityLogs"),
             where("admin", "==", userName),
-            orderBy("timestamp", "desc"),
-            limit(5)
+            orderBy("timestamp", "desc")
           );
           const snap1 = await getDocs(q1);
           snap1.docs.forEach(doc => {
@@ -536,8 +535,7 @@ export function ProfilePage() {
           const q2 = query(
             collection(db, "activityLogs"),
             where("actor", "==", userName),
-            orderBy("timestamp", "desc"),
-            limit(5)
+            orderBy("timestamp", "desc")
           );
           const snap2 = await getDocs(q2);
           snap2.docs.forEach(doc => {
@@ -567,14 +565,14 @@ export function ProfilePage() {
           }
         }
         
-        // Sort all logs by timestamp (descending) and limit to 5
+        // Sort all logs by timestamp (descending)
         allLogs.sort((a: any, b: any) => {
           const aTime = a.timestamp instanceof Date ? a.timestamp.getTime() : 0;
           const bTime = b.timestamp instanceof Date ? b.timestamp.getTime() : 0;
           return bTime - aTime; // desc order
         });
         
-        setActivityLogs(allLogs.slice(0, 5));
+        setActivityLogs(allLogs);
       } catch (error) {
         console.error("Error fetching activity logs:", error);
       } finally {
@@ -849,7 +847,7 @@ export function ProfilePage() {
         </div>
 
         {/* Two Column Layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 mt-12">
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 mt-12 items-stretch">
           {/* Left Column - Profile Info */}
           <div className="lg:col-span-2 flex flex-col">
             {/* User Name */}
@@ -859,7 +857,7 @@ export function ProfilePage() {
                     </div>
 
             {/* About Section */}
-            <Card className="flex-1 flex flex-col">
+            <Card className="flex-1 flex flex-col h-full">
               <CardHeader className="pb-2">
                 <CardTitle className="text-lg font-semibold">About</CardTitle>
               </CardHeader>

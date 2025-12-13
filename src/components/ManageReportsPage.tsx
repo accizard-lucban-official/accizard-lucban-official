@@ -431,10 +431,14 @@ export function ManageReportsPage() {
   
   // New report alert state (moved before useEffect to ensure availability)
   const [showNewReportAlert, setShowNewReportAlert] = useState(false);
-  const [newReportData, setNewReportData] = useState<any>(null);
+  const [newReportData, setNewReportData] = useState<any[]>([]); // Changed to array to hold all unviewed reports
   const previousReportCountRef = useRef<number>(0);
   const alarmIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const activeAudioRefs = useRef<HTMLAudioElement[]>([]); // Track all active audio instances
+  const activeAudioContextRefs = useRef<AudioContext[]>([]); // Track all active audio contexts
   const isInitialLoadRef = useRef<boolean>(true);
+  const broadcastChannelRef = useRef<BroadcastChannel | null>(null); // For cross-tab communication
+  const isBroadcastingRef = useRef<boolean>(false); // Flag to prevent handling our own broadcast messages
   
   // Sync viewed reports to localStorage and notify Layout component
   useEffect(() => {
@@ -442,13 +446,16 @@ export function ManageReportsPage() {
     // Dispatch custom event to notify Layout component to recalculate badge count
     window.dispatchEvent(new Event("viewedReportsUpdated"));
   }, [viewedReports]);
-  
+
   // Fallback function using Web Audio API (defined before useCallback dependencies)
   const playWebAudioAlarm = useCallback(() => {
     try {
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
       const oscillator = audioContext.createOscillator();
       const gainNode = audioContext.createGain();
+      
+      // Track this audio context
+      activeAudioContextRefs.current.push(audioContext);
       
       oscillator.connect(gainNode);
       gainNode.connect(audioContext.destination);
@@ -464,13 +471,22 @@ export function ManageReportsPage() {
       
       oscillator.start(audioContext.currentTime);
       oscillator.stop(audioContext.currentTime + 1.0);
+      
+      // Clean up when finished
+      oscillator.addEventListener('ended', () => {
+        activeAudioContextRefs.current = activeAudioContextRefs.current.filter(ctx => ctx !== audioContext);
+      });
     } catch (error) {
       console.log("Web Audio API also failed:", error);
       // Final fallback: try to play a simple beep using a data URL
       try {
         const fallbackAudio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIG2m98OScTgwOUarm7blmGgU7k9n1unEiBC13yO/eizEIHWq+8+OWT');
         fallbackAudio.volume = 0.3;
+        activeAudioRefs.current.push(fallbackAudio);
         fallbackAudio.play().catch(() => console.log("Final fallback audio also failed"));
+        fallbackAudio.addEventListener('ended', () => {
+          activeAudioRefs.current = activeAudioRefs.current.filter(a => a !== fallbackAudio);
+        });
       } catch (finalError) {
         console.log("All audio playback methods failed:", finalError);
       }
@@ -480,9 +496,38 @@ export function ManageReportsPage() {
   // Function to play a single alarm sound
   const playSingleAlarm = useCallback(() => {
     try {
+      // Stop any currently playing audio to prevent overlap
+      activeAudioRefs.current.forEach(audio => {
+        try {
+          audio.pause();
+          audio.currentTime = 0;
+        } catch (e) {
+          // Ignore errors when stopping audio
+        }
+      });
+      activeAudioRefs.current = [];
+      
+      // Stop any active audio contexts
+      activeAudioContextRefs.current.forEach(ctx => {
+        try {
+          ctx.close().catch(() => {});
+        } catch (e) {
+          // Ignore errors when closing audio context
+        }
+      });
+      activeAudioContextRefs.current = [];
+      
       // Play the custom alarm sound from the uploaded MP3 file
       const audio = new Audio('/accizard-uploads/alarmsoundfx.mp3');
       audio.volume = 0.8; // Increased volume for better attention
+      
+      // Track this audio instance
+      activeAudioRefs.current.push(audio);
+      
+      // Clean up when audio finishes
+      audio.addEventListener('ended', () => {
+        activeAudioRefs.current = activeAudioRefs.current.filter(a => a !== audio);
+      });
       
       // Set a timeout to fall back to Web Audio API if MP3 fails to load
       const fallbackTimeout = setTimeout(() => {
@@ -534,20 +579,107 @@ export function ManageReportsPage() {
 
   // Function to stop the alarm
   const stopAlarm = useCallback(() => {
+    // Clear the interval first
     if (alarmIntervalRef.current) {
       clearInterval(alarmIntervalRef.current);
       alarmIntervalRef.current = null;
-      console.log("Alarm stopped");
     }
+    
+    // Stop all currently playing audio instances
+    activeAudioRefs.current.forEach(audio => {
+      try {
+        audio.pause();
+        audio.currentTime = 0;
+      } catch (e) {
+        // Ignore errors when stopping audio
+      }
+    });
+    activeAudioRefs.current = [];
+    
+    // Stop all active audio contexts
+    activeAudioContextRefs.current.forEach(ctx => {
+      try {
+        ctx.close().catch(() => {});
+      } catch (e) {
+        // Ignore errors when closing audio context
+      }
+    });
+    activeAudioContextRefs.current = [];
+    
+    console.log("Alarm stopped");
   }, []);
 
-  // Cleanup alarm interval on component unmount
+  // Set up BroadcastChannel for cross-tab communication (after function definitions)
+  useEffect(() => {
+    // Create BroadcastChannel for alarm notifications
+    if (typeof BroadcastChannel !== 'undefined') {
+      broadcastChannelRef.current = new BroadcastChannel('alarm-notifications');
+      
+      // Listen for new report alerts from other tabs
+      broadcastChannelRef.current.onmessage = (event) => {
+        console.log('BroadcastChannel message received:', event.data);
+        
+        // Ignore messages we just sent ourselves
+        if (isBroadcastingRef.current) {
+          isBroadcastingRef.current = false;
+          return;
+        }
+        
+        if (event.data.type === 'NEW_REPORTS') {
+          const { reports } = event.data;
+          if (reports && reports.length > 0) {
+            console.log('Showing alarm modal in this tab with', reports.length, 'reports (from another tab)');
+            // Update the new report data
+            setNewReportData(reports);
+            // Show the modal in this tab
+            setShowNewReportAlert(true);
+            // Play alarm sound in this tab
+            playAlarmSound();
+          }
+        } else if (event.data.type === 'DISMISS_ALARM') {
+          console.log('Dismissing alarm in this tab (from another tab)');
+          // Another tab dismissed the alarm, stop alarm in this tab too
+          stopAlarm();
+          setShowNewReportAlert(false);
+        }
+      };
+    }
+
+    return () => {
+      if (broadcastChannelRef.current) {
+        broadcastChannelRef.current.close();
+      }
+    };
+  }, [playAlarmSound, stopAlarm]);
+
+  // Cleanup alarm interval and audio on component unmount
   useEffect(() => {
     return () => {
       if (alarmIntervalRef.current) {
         clearInterval(alarmIntervalRef.current);
         alarmIntervalRef.current = null;
       }
+      
+      // Stop all audio instances
+      activeAudioRefs.current.forEach(audio => {
+        try {
+          audio.pause();
+          audio.currentTime = 0;
+        } catch (e) {
+          // Ignore errors
+        }
+      });
+      activeAudioRefs.current = [];
+      
+      // Close all audio contexts
+      activeAudioContextRefs.current.forEach(ctx => {
+        try {
+          ctx.close().catch(() => {});
+        } catch (e) {
+          // Ignore errors
+        }
+      });
+      activeAudioContextRefs.current = [];
     };
   }, []);
 
@@ -664,6 +796,8 @@ export function ManageReportsPage() {
             id: data.reportId || doc.id,
             firestoreId: doc.id, // Store the actual Firestore document ID for deletion
             userId: data.userId || "",
+            firebaseUid: data.firebaseUid || data.userId || "", // Include firebaseUid for patient auto-population
+            isPatient: data.isPatient || false, // Include isPatient field from database
             type: data.reportType || "", // Map from Firestore reportType field
             reportedBy: data.reporterName || "", // Map from Firestore reporterName field
             barangay: "", // Not in your schema, will show empty
@@ -695,20 +829,37 @@ export function ManageReportsPage() {
         const viewedReportsData = localStorage.getItem("viewedReports");
         const currentViewedReports = viewedReportsData ? new Set(JSON.parse(viewedReportsData)) : new Set();
         
+        // Find all unviewed reports (reports that haven't been opened yet)
+        const unviewedReports = fetched.filter(report => !currentViewedReports.has(report.id));
+        
         if (isInitialLoad) {
           // On initial load (or when user logs in), check for unviewed reports
           isInitialLoadRef.current = false;
           
-          // Find the most recent unviewed report
-          const unviewedReport = fetched.find(report => !currentViewedReports.has(report.id));
-          
-          if (unviewedReport) {
-            // Set alert data and show modal
-            setNewReportData(unviewedReport);
+          if (unviewedReports.length > 0) {
+            console.log('Active tab: Showing alarm modal with', unviewedReports.length, 'unviewed reports');
+            // Set all unviewed reports and show modal in the ACTIVE tab
+            setNewReportData(unviewedReports);
             setShowNewReportAlert(true);
             
-            // Play alarm sound (continuous until dismissed)
+            // Play alarm sound in the active tab (continuous until dismissed)
             playAlarmSound();
+            
+            // Broadcast to other tabs (but not to ourselves)
+            if (broadcastChannelRef.current) {
+              console.log('Broadcasting NEW_REPORTS to other tabs:', unviewedReports.length, 'reports');
+              isBroadcastingRef.current = true; // Set flag to ignore our own message
+              broadcastChannelRef.current.postMessage({
+                type: 'NEW_REPORTS',
+                reports: unviewedReports
+              });
+              // Reset flag after a short delay (message is sent synchronously)
+              setTimeout(() => {
+                isBroadcastingRef.current = false;
+              }, 100);
+            } else {
+              console.warn('BroadcastChannel not ready yet, cannot notify other tabs');
+            }
           }
         } else if (fetched.length > previousCount) {
           // For subsequent updates, check if count increased (new report submitted)
@@ -716,20 +867,34 @@ export function ManageReportsPage() {
           // reports added after all were deleted (previousCount === 0)
           const newReportCount = fetched.length - previousCount;
           
-          if (newReportCount > 0) {
-            // Get the newest report (first in the array since we order by timestamp desc)
-            const latestNewReport = fetched[0];
-            
-            // Only trigger alarm if this report hasn't been viewed yet
-            if (!currentViewedReports.has(latestNewReport.id)) {
-            // Set alert data and show modal
-            setNewReportData(latestNewReport);
+          if (newReportCount > 0 && unviewedReports.length > 0) {
+            console.log('Active tab: Showing alarm modal with', unviewedReports.length, 'new unviewed reports');
+            // Set all unviewed reports and show modal in the ACTIVE tab
+            setNewReportData(unviewedReports);
             setShowNewReportAlert(true);
             
-            // Play alarm sound (continuous until dismissed)
+            // Play alarm sound in the active tab (continuous until dismissed)
             playAlarmSound();
+            
+            // Broadcast to other tabs (but not to ourselves)
+            if (broadcastChannelRef.current) {
+              console.log('Broadcasting NEW_REPORTS to other tabs:', unviewedReports.length, 'reports');
+              isBroadcastingRef.current = true; // Set flag to ignore our own message
+              broadcastChannelRef.current.postMessage({
+                type: 'NEW_REPORTS',
+                reports: unviewedReports
+              });
+              // Reset flag after a short delay (message is sent synchronously)
+              setTimeout(() => {
+                isBroadcastingRef.current = false;
+              }, 100);
+            } else {
+              console.warn('BroadcastChannel not ready yet, cannot notify other tabs');
             }
           }
+        } else if (unviewedReports.length > 0 && newReportData.length === 0) {
+          // If there are unviewed reports but modal isn't showing, update the list
+          setNewReportData(unviewedReports);
         }
         
         // Always update the reports state and ref (this handles deletions automatically)
@@ -741,6 +906,28 @@ export function ManageReportsPage() {
       console.error("Error subscribing to reports:", err);
     }
   }, [playAlarmSound]);
+
+  // Update newReportData when reports are viewed (to remove them from the alarm modal)
+  useEffect(() => {
+    setNewReportData(prev => {
+      if (prev.length === 0) return prev;
+      
+      // Filter out reports that have been viewed
+      const stillUnviewed = prev.filter(report => !viewedReports.has(report.id));
+      
+      if (stillUnviewed.length !== prev.length) {
+        // Update the list if any reports were viewed
+        if (stillUnviewed.length === 0) {
+          // All reports have been viewed, close the modal
+          setShowNewReportAlert(false);
+          stopAlarm();
+        }
+        return stillUnviewed;
+      }
+      
+      return prev;
+    });
+  }, [viewedReports, stopAlarm]);
 
   // Fetch pins to check which reports are pinned
   useEffect(() => {
@@ -1335,6 +1522,63 @@ useEffect(() => {
     setIsLocationMapSearchOpen(false);
     setLocationMapSearchQuery(address);
   };
+  // Function to open report preview (reusable)
+  const handleOpenReportPreview = async (report: any) => {
+    try {
+      console.log("Opening report preview for:", report);
+      setSelectedReport(report);
+      setShowPreviewModal(true);
+      setPreviewTab("details"); // Reset to details tab
+      
+      // Mark report as viewed (using report.id which is data.reportId || doc.id)
+      // This matches the ID format used in Layout.tsx for badge counting
+      setViewedReports(prev => new Set(prev).add(report.id));
+      
+      // Load existing dispatch data from database using Firestore document ID
+      const existingDispatchData = await loadDispatchDataFromDatabase(report.firestoreId);
+      
+      // Load existing patient data from database using Firestore document ID
+      await loadPatientDataFromDatabase(report.firestoreId);
+      
+      // Auto-populate patient data if reporter is the patient and patient data is empty
+      if (report.isPatient) {
+        // Small delay to ensure patient data from database is loaded first
+        setTimeout(async () => {
+          const loadedPatientData = await loadPatientDataFromDatabase(report.firestoreId, false);
+          const hasPatientData = loadedPatientData?.patients?.[0]?.name && loadedPatientData.patients[0].name.trim() !== "";
+          if (!hasPatientData) {
+            await autoPopulatePatientFromUser(report);
+          }
+        }, 300);
+      }
+      
+      // Only auto-populate if no existing dispatch data AND no receivedBy/timeCallReceived
+      if (!existingDispatchData || (!existingDispatchData.receivedBy && !existingDispatchData.timeCallReceived)) {
+        if (currentUser) {
+          const newDispatchData = {
+            receivedBy: currentUser.name,
+            timeCallReceived: getCurrentTime()
+          };
+          
+          // Set the data in state
+          setDispatchData(prev => ({
+            ...prev,
+            ...newDispatchData
+          }));
+          
+          // Immediately save to database to prevent other users from overwriting using Firestore document ID
+          await saveDispatchDataToDatabase(report.firestoreId, {
+            ...existingDispatchData,
+            ...newDispatchData
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Error opening report preview:", error);
+      toast.error("Failed to open report preview");
+    }
+  };
+
   const handleDeleteReport = (reportId: string) => {
     setReportToDelete(reportId);
     setShowDeleteDialog(true);
@@ -5961,10 +6205,23 @@ useEffect(() => {
       if (docSnap.exists()) {
         const currentData = docSnap.data();
         
+        // Convert patient data: PWD from "Yes"/"No" string to boolean true/false
+        const patientsToSave = (patientData.patients || patientData).map((patient: any) => {
+          const convertedPatient = { ...patient };
+          // Convert PWD from "Yes"/"No" to boolean
+          if (convertedPatient.pwd === "Yes") {
+            convertedPatient.pwd = true;
+          } else if (convertedPatient.pwd === "No") {
+            convertedPatient.pwd = false;
+          }
+          // If pwd is already boolean, keep it as is
+          return convertedPatient;
+        });
+        
         // Merge with existing patientInfo if it exists
         const mergedPatientInfo = {
           ...currentData.patientInfo,
-          patients: patientData.patients || patientData
+          patients: patientsToSave
         };
         
         await updateDoc(docRef, {
@@ -6009,11 +6266,22 @@ useEffect(() => {
         const data = docSnap.data();
         if (data.patientInfo && data.patientInfo.patients) {
           // Normalize patient data to ensure latitude and longitude are always present
-          const normalizedPatients = data.patientInfo.patients.map((patient: any) => ({
-            ...patient,
-            latitude: patient.latitude || "",
-            longitude: patient.longitude || ""
-          }));
+          // Also convert PWD from boolean to "Yes"/"No" string for UI display
+          const normalizedPatients = data.patientInfo.patients.map((patient: any) => {
+            const normalized = {
+              ...patient,
+              latitude: patient.latitude || "",
+              longitude: patient.longitude || ""
+            };
+            // Convert PWD from boolean to "Yes"/"No" string
+            if (normalized.pwd === true) {
+              normalized.pwd = "Yes";
+            } else if (normalized.pwd === false) {
+              normalized.pwd = "No";
+            }
+            // If pwd is already "Yes"/"No" string, keep it as is
+            return normalized;
+          });
           if (updateState) {
           setPatients(normalizedPatients);
           }
@@ -6025,6 +6293,7 @@ useEffect(() => {
     }
     return null;
   };
+
 
   // Team management functions
   const fetchTeamMembers = async () => {
@@ -6528,6 +6797,172 @@ useEffect(() => {
       index === currentPatientIndex ? { ...patient, ...updates } : patient
     ));
   };
+
+  // Helper function to calculate age from birthday
+  const calculateAge = (birthday: string): string => {
+    if (!birthday) return "";
+    try {
+      const birthDate = new Date(birthday);
+      const today = new Date();
+      let age = today.getFullYear() - birthDate.getFullYear();
+      const monthDiff = today.getMonth() - birthDate.getMonth();
+      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+        age--;
+      }
+      return age.toString();
+    } catch {
+      return "";
+    }
+  };
+
+  // Helper function to populate patient fields from user data
+  const populatePatientFields = (userData: any) => {
+    // Only populate if patient data is empty or first patient has no name (or empty string)
+    const hasExistingData = patients.length > 0 && patients[0]?.name && patients[0].name.trim() !== "";
+    if (hasExistingData) {
+      console.log("Patient data already exists, skipping auto-population. Current name:", patients[0].name);
+      return;
+    }
+    
+    console.log("Auto-populating patient fields from user data:", userData);
+    
+    // Build address from user fields
+    const addressParts = [
+      userData.houseNumberStreetSubdivision,
+      userData.barangay,
+      userData.cityTown,
+      userData.province
+    ].filter(Boolean);
+    const fullAddress = addressParts.join(", ");
+    
+    // Create patient object from user data
+    const patientData = {
+      id: 1,
+      name: userData.fullName || userData.name || "",
+      age: calculateAge(userData.birthday),
+      gender: userData.gender || "",
+      contactNumber: userData.phoneNumber || userData.mobileNumber || "",
+      address: fullAddress,
+      bloodType: userData.blood_type || userData.bloodType || "",
+      religion: userData.religion || "",
+      birthday: userData.birthday || "",
+      civilStatus: userData.civil_status || userData.civilStatus || "",
+      pwd: userData.pwd === true ? "Yes" : userData.pwd === false ? "No" : "",
+      ageGroup: "",
+      companionName: "",
+      companionContact: "",
+      latitude: "",
+      longitude: "",
+      gcs: {
+        eyes: "",
+        verbal: "",
+        motor: ""
+      },
+      pupil: "",
+      lungSounds: "",
+      perfusion: {
+        skin: "",
+        pulse: ""
+      },
+      vitalSigns: {
+        timeTaken: "",
+        temperature: "",
+        pulseRate: "",
+        respiratoryRate: "",
+        bloodPressure: "",
+        spo2: "",
+        spo2WithO2Support: false,
+        randomBloodSugar: "",
+        painScale: ""
+      }
+    };
+    
+    // Update patients state
+    setPatients([patientData]);
+    console.log("Auto-populated patient data from user registration:", patientData);
+  };
+
+  // Auto-populate patient data from user registration when isPatient is true
+  const autoPopulatePatientFromUser = async (report: any) => {
+    try {
+      console.log("🔍 Auto-populate check - Report:", { 
+        isPatient: report?.isPatient, 
+        firebaseUid: report?.firebaseUid, 
+        userId: report?.userId 
+      });
+      
+      if (!report || report.isPatient !== true) {
+        console.log("❌ Skipping auto-population - isPatient is not true");
+        return;
+      }
+      
+      // Get user identifier from report
+      const firebaseUid = report.firebaseUid || report.userId;
+      if (!firebaseUid) {
+        console.log("❌ No firebaseUid or userId found in report");
+        return;
+      }
+      
+      console.log("✅ Proceeding with auto-population for firebaseUid:", firebaseUid);
+      
+      // Fetch user data from users collection
+      const usersQuery = query(collection(db, "users"), where("firebaseUid", "==", firebaseUid));
+      const usersSnapshot = await getDocs(usersQuery);
+      
+      if (usersSnapshot.empty) {
+        // Try with userId field as fallback
+        const userIdQuery = query(collection(db, "users"), where("userId", "==", firebaseUid));
+        const userIdSnapshot = await getDocs(userIdQuery);
+        if (userIdSnapshot.empty) {
+          console.log("User not found in users collection");
+          return;
+        }
+        const userData = userIdSnapshot.docs[0].data();
+        populatePatientFields(userData);
+      } else {
+        const userData = usersSnapshot.docs[0].data();
+        populatePatientFields(userData);
+      }
+    } catch (error) {
+      console.error("Error auto-populating patient data from user:", error);
+    }
+  };
+
+  // Auto-populate patient data when report is selected and isPatient is true
+  useEffect(() => {
+    console.log("🔍 Auto-populate useEffect triggered - selectedReport:", {
+      hasReport: !!selectedReport,
+      isPatient: selectedReport?.isPatient,
+      firebaseUid: selectedReport?.firebaseUid,
+      patientsCount: patients.length,
+      firstPatientName: patients[0]?.name
+    });
+    
+    if (selectedReport && selectedReport.isPatient === true) {
+      // Auto-populate when report is selected, regardless of tab
+      // Only auto-populate if patient data is empty (no name means no data loaded)
+      // This ensures we don't overwrite existing patient data
+      const hasPatientData = patients.length > 0 && patients[0]?.name && patients[0].name.trim() !== "";
+      console.log("📋 Patient data check:", { hasPatientData, patientsLength: patients.length });
+      
+      if (!hasPatientData) {
+        // Small delay to ensure patient data from database is loaded first
+        const timer = setTimeout(() => {
+          const stillNoData = patients.length === 0 || (patients.length === 1 && (!patients[0].name || patients[0].name.trim() === ""));
+          console.log("⏰ Delayed check - stillNoData:", stillNoData);
+          if (stillNoData) {
+            console.log("🚀 Triggering auto-population");
+            autoPopulatePatientFromUser(selectedReport);
+          }
+        }, 500);
+        return () => clearTimeout(timer);
+      } else {
+        console.log("⏭️ Skipping auto-population - patient data already exists");
+      }
+    } else {
+      console.log("⏭️ Skipping auto-population - isPatient is not true or no report selected");
+    }
+  }, [selectedReport, patients]);
 
   const currentPatient = patients[currentPatientIndex] || patients[0];
   const currentPatientBirthdayDate = currentPatient?.birthday ? new Date(currentPatient.birthday) : null;
@@ -7432,8 +7867,26 @@ useEffect(() => {
                     </TableRow>
                   ) : (
                     paginatedReports.map(report => (
-                    <TableRow key={report.id}>
-                      <TableCell>
+                    <TableRow 
+                      key={report.id}
+                      className="cursor-pointer hover:bg-gray-50"
+                      onClick={(e) => {
+                        // Don't open preview if clicking on interactive elements
+                        const target = e.target as HTMLElement;
+                        if (
+                          target.closest('button') ||
+                          target.closest('[role="checkbox"]') ||
+                          target.closest('[role="combobox"]') ||
+                          target.closest('.select-trigger') ||
+                          target.closest('select') ||
+                          target.closest('a')
+                        ) {
+                          return;
+                        }
+                        handleOpenReportPreview(report);
+                      }}
+                    >
+                      <TableCell onClick={(e) => e.stopPropagation()}>
                         <Checkbox
                           checked={selectedReports.includes(report.firestoreId)}
                           onCheckedChange={() => handleCheckboxChange(report.firestoreId)}
@@ -7480,7 +7933,10 @@ useEffect(() => {
                             <button
                               type="button"
                               className="text-gray-900 hover:underline focus:outline-none flex items-start gap-1.5 group text-left w-fit max-w-full"
-                              onClick={() => navigate("/manage-users", { state: { tab: "residents", search: report.reportedBy } })}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate("/manage-users", { state: { tab: "residents", search: report.reportedBy } });
+                              }}
                               title="View Resident Account"
                             >
                               <span className="break-words">{report.reportedBy}</span>
@@ -7499,7 +7955,7 @@ useEffect(() => {
                         <br />
                         <span className="text-xs text-gray-500">{report.timeSubmitted}</span>
                       </TableCell>
-                      <TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
                         <Select 
                           value={report.status} 
                           onValueChange={(newStatus) => handleStatusChange(report.firestoreId, newStatus)}
@@ -7525,55 +7981,16 @@ useEffect(() => {
                           </SelectContent>
                         </Select>
                       </TableCell>
-                      <TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-2">
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={async () => {
-                                  try {
-                                    console.log("Opening report preview for:", report);
-                                    setSelectedReport(report);
-                                    setShowPreviewModal(true);
-                                    setPreviewTab("details"); // Reset to details tab
-                                    
-                                    // Mark report as viewed (using report.id which is data.reportId || doc.id)
-                                    // This matches the ID format used in Layout.tsx for badge counting
-                                    setViewedReports(prev => new Set(prev).add(report.id));
-                                    
-                                    // Load existing dispatch data from database using Firestore document ID
-                                    const existingDispatchData = await loadDispatchDataFromDatabase(report.firestoreId);
-                                    
-                                    // Load existing patient data from database using Firestore document ID
-                                    await loadPatientDataFromDatabase(report.firestoreId);
-                                    
-                                    // Only auto-populate if no existing dispatch data AND no receivedBy/timeCallReceived
-                                    if (!existingDispatchData || (!existingDispatchData.receivedBy && !existingDispatchData.timeCallReceived)) {
-                                      if (currentUser) {
-                                        const newDispatchData = {
-                                          receivedBy: currentUser.name,
-                                          timeCallReceived: getCurrentTime()
-                                        };
-                                        
-                                        // Set the data in state
-                                        setDispatchData(prev => ({
-                                          ...prev,
-                                          ...newDispatchData
-                                        }));
-                                        
-                                        // Immediately save to database to prevent other users from overwriting using Firestore document ID
-                                        await saveDispatchDataToDatabase(report.firestoreId, {
-                                          ...existingDispatchData,
-                                          ...newDispatchData
-                                        });
-                                      }
-                                    }
-                                  } catch (error) {
-                                    console.error("Error opening report preview:", error);
-                                    toast.error("Failed to open report preview");
-                                  }
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenReportPreview(report);
                                 }}
                               >
                                 <Eye className="h-4 w-4" />
@@ -7590,7 +8007,10 @@ useEffect(() => {
                                 <Button
                                   size="sm"
                                   variant={pinnedReports.has(report.id || report.reportId) ? "default" : "outline"}
-                                  onClick={() => handlePinOnMap(report)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handlePinOnMap(report);
+                                  }}
                                   className={pinnedReports.has(report.id || report.reportId) ? "bg-brand-orange hover:bg-brand-orange/90 text-white border-brand-orange" : ""}
                                 >
                                   <MapPin className="h-4 w-4" />
@@ -7625,7 +8045,8 @@ useEffect(() => {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={async () => {
+                                onClick={async (e) => {
+                                  e.stopPropagation();
                                   await handleGeneratePDF(report);
                                 }}
                               >
@@ -7643,7 +8064,10 @@ useEffect(() => {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => handleDeleteReport(report.firestoreId)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteReport(report.firestoreId);
+                                  }}
                                 >
                                   <Trash2 className="h-4 w-4 text-red-600" />
                                 </Button>
@@ -10511,6 +10935,18 @@ useEffect(() => {
                   </div>
                 </div>
                 
+                {/* Note indicating if reporter is patient */}
+                {selectedReport?.isPatient && (
+                  <div className="mb-4 rounded-lg border border-brand-orange bg-orange-50 p-3">
+                    <div className="flex items-center gap-2">
+                      <Info className="h-5 w-5 text-brand-orange flex-shrink-0" />
+                      <p className="text-sm text-gray-800">
+                        <span className="font-semibold">Note:</span> The reporter is the patient. Patient information has been auto-populated from the user's registration details.
+                      </p>
+                    </div>
+                  </div>
+                )}
+                
                 {/* Patient Management Header */}
                 <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
                   <div className="flex items-center justify-between mb-3">
@@ -10600,6 +11036,47 @@ useEffect(() => {
                   <div className="overflow-x-auto max-h-[300px] overflow-y-auto">
                     <Table className="w-full min-w-[600px]">
                       <TableBody>
+                      <TableRow>
+                        <TableCell className="text-sm font-medium text-gray-800 align-top w-1/3 min-w-[150px]">Is Reporter the Patient?</TableCell>
+                        <TableCell>
+                          {isPatientEditMode ? (
+                            <Select
+                              value={selectedReport?.isPatient === true ? "yes" : "no"}
+                              onValueChange={(value) => {
+                                // Update the report's isPatient field
+                                if (selectedReport?.firestoreId) {
+                                  updateDoc(doc(db, "reports", selectedReport.firestoreId), {
+                                    isPatient: value === "yes"
+                                  }).then(() => {
+                                    setSelectedReport(prev => prev ? { ...prev, isPatient: value === "yes" } : null);
+                                    // If set to yes and patient data is empty, auto-populate
+                                    if (value === "yes" && (!patients[0]?.name || patients[0].name.trim() === "")) {
+                                      setTimeout(() => {
+                                        autoPopulatePatientFromUser({ ...selectedReport, isPatient: true });
+                                      }, 100);
+                                    }
+                                  }).catch(error => {
+                                    console.error("Error updating isPatient field:", error);
+                                    toast.error("Failed to update patient status");
+                                  });
+                                }
+                              }}
+                            >
+                              <SelectTrigger className="border-gray-300 focus:border-black focus-visible:border-black focus:ring-0 focus-visible:ring-0">
+                                <SelectValue placeholder="Select" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="yes">Yes</SelectItem>
+                                <SelectItem value="no">No</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <span className="text-sm text-gray-800">
+                              {selectedReport?.isPatient ? "Yes" : "No"}
+                            </span>
+                          )}
+                        </TableCell>
+                      </TableRow>
                       <TableRow>
                         <TableCell className="text-sm font-medium text-gray-800 align-top w-1/3 min-w-[150px]">Name</TableCell>
                           <TableCell>
@@ -12061,94 +12538,103 @@ useEffect(() => {
         {/* New Report Alert Modal */}
         <Dialog open={showNewReportAlert} onOpenChange={(open) => {
           if (!open) {
+            // Stop alarm immediately
             stopAlarm();
+            
+            // Broadcast dismiss to other tabs
+            if (broadcastChannelRef.current) {
+              broadcastChannelRef.current.postMessage({
+                type: 'DISMISS_ALARM'
+              });
+            }
           }
           setShowNewReportAlert(open);
         }}>
-          <DialogContent className="max-w-md border-brand-red bg-red-50">
+          <DialogContent className="max-w-2xl border-brand-red bg-red-50 max-h-[80vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="text-xl font-bold text-brand-red flex items-center gap-2">
                 <div className="w-3 h-3 bg-brand-red rounded-full animate-pulse"></div>
-                🚨 NEW EMERGENCY REPORT
+                🚨 NEW EMERGENCY REPORTS ({newReportData.length})
               </DialogTitle>
             </DialogHeader>
-            {newReportData && (
+            {newReportData && newReportData.length > 0 && (
               <div className="space-y-4 py-4">
-                <div className="bg-white p-4 rounded-lg border border-red-200">
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <h4 className="font-semibold text-gray-800">Report ID: {newReportData.id}</h4>
-                        <p className="text-sm text-gray-600">Type: {newReportData.type}</p>
+                <div className="bg-white rounded-lg border border-red-200 overflow-hidden">
+                  <div className="divide-y divide-gray-200">
+                    {newReportData.map((report, index) => (
+                      <div
+                        key={report.id || index}
+                        onClick={async () => {
+                          try {
+                            stopAlarm();
+                            setShowNewReportAlert(false);
+                            
+                            // Open the report preview
+                            console.log("Opening report preview for:", report);
+                            setSelectedReport(report);
+                            setShowPreviewModal(true);
+                            setPreviewTab("details"); // Reset to details tab
+                            
+                            // Mark report as viewed
+                            setViewedReports(prev => new Set(prev).add(report.id));
+                            
+                            // Remove this report from the newReportData array
+                            setNewReportData(prev => prev.filter(r => r.id !== report.id));
+                            
+                            // Load existing dispatch data from database using Firestore document ID
+                            if (report.firestoreId) {
+                              await loadDispatchDataFromDatabase(report.firestoreId);
+                              
+                              // Load existing patient data from database using Firestore document ID
+                              await loadPatientDataFromDatabase(report.firestoreId);
+                            }
+                          } catch (error) {
+                            console.error("Error opening report preview:", error);
+                          }
+                        }}
+                        className="p-4 hover:bg-red-50 cursor-pointer transition-colors"
+                      >
+                        <div className="flex justify-between items-center">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3">
+                              <span className="font-semibold text-gray-800">RID: {report.id}</span>
+                              <span className="text-sm text-gray-600">Type: {report.type || 'N/A'}</span>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-medium text-gray-800">
+                              {report.dateSubmitted || 'N/A'}
+                              {report.timeSubmitted && ` ${report.timeSubmitted}`}
+                            </p>
+                          </div>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <p className="text-sm font-medium text-gray-800">{newReportData.dateSubmitted}</p>
-                        <p className="text-sm text-gray-600">{newReportData.timeSubmitted}</p>
-                      </div>
-                    </div>
-                    
-                    {newReportData.description && (
-                      <div>
-                        <p className="text-sm font-medium text-gray-700">Description:</p>
-                        <p className="text-sm text-gray-600 bg-gray-50 p-2 rounded">
-                          {newReportData.description.length > 100 
-                            ? `${newReportData.description.substring(0, 100)}...` 
-                            : newReportData.description}
-                        </p>
-                      </div>
-                    )}
-                    
-                    {newReportData.location && (
-                      <div>
-                        <p className="text-sm font-medium text-gray-700">Location:</p>
-                        <p className="text-sm text-gray-600">{newReportData.location}</p>
-                      </div>
-                    )}
+                    ))}
                   </div>
                 </div>
                 
                 <div className="flex gap-2">
                   <Button 
-                    onClick={async () => {
-                      try {
-                      stopAlarm();
-                      setShowNewReportAlert(false);
-                        
-                        // Open the report preview
-                        if (newReportData) {
-                          console.log("Opening report preview for:", newReportData);
-                          setSelectedReport(newReportData);
-                          setShowPreviewModal(true);
-                          setPreviewTab("details"); // Reset to details tab
-                          
-                          // Mark report as viewed
-                          setViewedReports(prev => new Set(prev).add(newReportData.id));
-                          
-                          // Load existing dispatch data from database using Firestore document ID
-                          if (newReportData.firestoreId) {
-                            await loadDispatchDataFromDatabase(newReportData.firestoreId);
-                            
-                            // Load existing patient data from database using Firestore document ID
-                            await loadPatientDataFromDatabase(newReportData.firestoreId);
-                          }
-                        }
-                      } catch (error) {
-                        console.error("Error opening report preview:", error);
-                      }
-                    }}
-                    className="flex-1 bg-brand-red hover:bg-brand-red-700 text-white"
-                  >
-                    View Report
-                  </Button>
-                  <Button 
                     variant="outline" 
                     onClick={() => {
+                      // Stop alarm immediately
                       stopAlarm();
+                      
+                      // Broadcast dismiss to other tabs
+                      if (broadcastChannelRef.current) {
+                        broadcastChannelRef.current.postMessage({
+                          type: 'DISMISS_ALARM'
+                        });
+                      }
+                      
+                      // Close modal but DO NOT mark reports as viewed
+                      // The "new" badge will remain until the report preview is opened
                       setShowNewReportAlert(false);
+                      // Keep newReportData so it can be shown again if needed
                     }}
                     className="flex-1 border-red-300 text-brand-red hover:bg-red-100"
                   >
-                    Dismiss
+                    Dismiss All
                   </Button>
                 </div>
               </div>
