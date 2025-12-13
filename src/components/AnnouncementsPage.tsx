@@ -286,6 +286,16 @@ export function AnnouncementsPage() {
     return sortOrder === 'desc' ? bTime - aTime : aTime - bTime;
   });
 
+  // Calculate IDs for announcements that don't have them (for backward compatibility)
+  // Sort all announcements by createdTime to get creation order
+  const allSortedByCreation = useMemo(() => {
+    return [...announcements].sort((a, b) => {
+      const aTime = a.createdTime || 0;
+      const bTime = b.createdTime || 0;
+      return aTime - bTime; // Ascending order (oldest first)
+    });
+  }, [announcements]);
+
   const pagedAnnouncements = sortedAnnouncements.slice((announcementPage - 1) * announcementRowsPerPage, announcementPage * announcementRowsPerPage);
   const announcementTotalPages = Math.ceil(filteredAnnouncements.length / announcementRowsPerPage);
   const getPriorityColor = (priority: string) => {
@@ -305,8 +315,16 @@ export function AnnouncementsPage() {
     setMediaUploadError(null);
     try {
       const selectedMediaCount = newAnnouncementMedia.length;
+      
+      // Calculate the next announcement ID
+      const maxAnnouncementId = announcements.length > 0
+        ? Math.max(...announcements.map(a => a.announcementId || 0))
+        : 0;
+      const nextAnnouncementId = maxAnnouncementId + 1;
+      
       const newAnnouncementWithDate = {
         ...newAnnouncement,
+        announcementId: nextAnnouncementId,
         date: new Date().toLocaleDateString('en-US', {
           month: '2-digit',
           day: '2-digit',
@@ -769,13 +787,17 @@ export function AnnouncementsPage() {
       return;
     }
 
-    const csvHeaders = ["Type", "Priority", "Description", "Created Date", "Created Time", "Created By", "Media URLs"];
+    const csvHeaders = ["ID", "Type", "Priority", "Description", "Created Date", "Created Time", "Created By", "Media URLs"];
     const csvRows = sortedAnnouncements.map(announcement => {
       const mediaUrls = Array.isArray(announcement.media)
         ? announcement.media.map((mediaItem: AnnouncementMedia) => mediaItem?.url).filter(Boolean).join(" | ")
         : "";
+      
+      const announcementId = announcement.announcementId || 
+        (allSortedByCreation.findIndex(a => a.id === announcement.id) + 1);
 
       return [
+        escapeCSVValue(`AID - ${announcementId}`),
         escapeCSVValue(announcement.type || ""),
         escapeCSVValue(announcement.priority || ""),
         escapeCSVValue(announcement.description || ""),
@@ -1053,6 +1075,7 @@ export function AnnouncementsPage() {
                         }}
                       />
                     </TableHead>
+                    <TableHead className="text-left">ID</TableHead>
                     <TableHead className="text-left">Announcement Type</TableHead>
                     <TableHead className="text-left">Description</TableHead>
                     <TableHead className="text-left">Priority</TableHead>
@@ -1075,6 +1098,7 @@ export function AnnouncementsPage() {
                     Array.from({ length: announcementRowsPerPage }).map((_, index) => (
                       <TableRow key={`loading-${index}`}>
                         <TableCell><div className="h-4 w-4 bg-gray-200 rounded animate-pulse"></div></TableCell>
+                        <TableCell><div className="h-4 w-24 bg-gray-200 rounded animate-pulse"></div></TableCell>
                         <TableCell><div className="h-4 w-32 bg-gray-200 rounded animate-pulse"></div></TableCell>
                         <TableCell><div className="h-4 w-48 bg-gray-200 rounded animate-pulse"></div></TableCell>
                         <TableCell><div className="h-4 w-20 bg-gray-200 rounded animate-pulse"></div></TableCell>
@@ -1084,12 +1108,17 @@ export function AnnouncementsPage() {
                     ))
                   ) : pagedAnnouncements.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center text-gray-500 py-8">
+                      <TableCell colSpan={7} className="text-center text-gray-500 py-8">
                         No announcements found.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    pagedAnnouncements.map(announcement => (
+                    pagedAnnouncements.map(announcement => {
+                      // Calculate announcement ID if not present (for backward compatibility)
+                      const announcementId = announcement.announcementId || 
+                        (allSortedByCreation.findIndex(a => a.id === announcement.id) + 1);
+                      
+                      return (
                       <TableRow 
                         key={announcement.id} 
                         className={`hover:bg-gray-50 ${selectedAnnouncements.has(announcement.id) ? 'bg-blue-50' : ''}`}
@@ -1100,6 +1129,7 @@ export function AnnouncementsPage() {
                             onCheckedChange={(checked) => handleSelectAnnouncement(announcement.id, checked as boolean)}
                           />
                         </TableCell>
+                        <TableCell className="font-medium">AID - {announcementId}</TableCell>
                         <TableCell>{announcement.type}</TableCell>
                         <TableCell>
                           <div className="max-w-xs">{truncateDescription(announcement.description)}</div>
@@ -1315,7 +1345,8 @@ export function AnnouncementsPage() {
                           </div>
                         </TableCell>
                       </TableRow>
-                    ))
+                    );
+                    })
                   )}
                 </TableBody>
               </Table>

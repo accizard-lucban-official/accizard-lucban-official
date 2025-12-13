@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { ChevronUp, ChevronDown, Search, Activity, Users, Clock, Trash2, Download, CheckSquare, ArrowUpRight } from "lucide-react";
+import { ChevronUp, ChevronDown, Search, Activity, Users, Clock, Trash2, Download, CheckSquare, ArrowUpRight, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import { Layout } from "./Layout";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -64,6 +64,7 @@ export function SystemLogsPage() {
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
   const [adminUsers, setAdminUsers] = useState<any[]>([]);
   const [superAdmins, setSuperAdmins] = useState<any[]>([]);
+  const [activitySortField, setActivitySortField] = useState<'logId' | 'timestamp'>('timestamp');
   const [activitySortDirection, setActivitySortDirection] = useState<'asc' | 'desc'>('desc');
   const [selectedLogs, setSelectedLogs] = useState<string[]>([]);
   const [deletingLogId, setDeletingLogId] = useState<string | null>(null);
@@ -298,6 +299,14 @@ export function SystemLogsPage() {
   
   // Sort activity logs
   const sortedActivityLogs = [...filteredActivityLogs].sort((a, b) => {
+    // Handle Log ID sorting
+    if (activitySortField === 'logId') {
+      // Sort by Firestore document ID (alphabetically)
+      const comparison = a.id.localeCompare(b.id);
+      return activitySortDirection === 'asc' ? comparison : -comparison;
+    }
+    
+    // Handle timestamp sorting (Created Date)
     const getTimestamp = (timestamp: any): number => {
       if (timestamp instanceof Date) {
         return timestamp.getTime();
@@ -327,8 +336,13 @@ export function SystemLogsPage() {
   const activityTotalPages = Math.ceil(filteredActivityLogs.length / activityRowsPerPage);
 
   // Handler for sorting
-  const handleActivitySort = () => {
-    setActivitySortDirection(activitySortDirection === 'asc' ? 'desc' : 'asc');
+  const handleActivitySort = (field: 'logId' | 'timestamp') => {
+    if (activitySortField === field) {
+      setActivitySortDirection(activitySortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setActivitySortField(field);
+      setActivitySortDirection('desc'); // Default to descending for new field
+    }
   };
 
   // Handler for selecting/deselecting logs
@@ -776,14 +790,39 @@ export function SystemLogsPage() {
                         />
                       )}
                     </TableHead>
-                    <TableHead className="text-left">Log ID</TableHead>
+                    <TableHead className="text-left">
+                      <button
+                        type="button"
+                        className="flex items-center gap-2 hover:text-brand-orange transition-colors"
+                        onClick={() => handleActivitySort('logId')}
+                      >
+                        Log ID
+                        {activitySortField === 'logId' && activitySortDirection === 'asc' ? (
+                          <ArrowUp className="h-4 w-4 text-brand-orange" />
+                        ) : activitySortField === 'logId' && activitySortDirection === 'desc' ? (
+                          <ArrowDown className="h-4 w-4 text-brand-orange" />
+                        ) : (
+                          <ArrowUpDown className="h-4 w-4" />
+                        )}
+                      </button>
+                    </TableHead>
                     <TableHead className="text-left">User</TableHead>
                     <TableHead className="text-left">Role</TableHead>
-                    <TableHead className="cursor-pointer hover:bg-gray-50 text-left" onClick={handleActivitySort}>
-                      <div className="flex items-center gap-1">
+                    <TableHead className="text-left">
+                      <button
+                        type="button"
+                        className="flex items-center gap-2 hover:text-brand-orange transition-colors"
+                        onClick={() => handleActivitySort('timestamp')}
+                      >
                         Created Date
-                        {activitySortDirection === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                      </div>
+                        {activitySortField === 'timestamp' && activitySortDirection === 'asc' ? (
+                          <ArrowUp className="h-4 w-4 text-brand-orange" />
+                        ) : activitySortField === 'timestamp' && activitySortDirection === 'desc' ? (
+                          <ArrowDown className="h-4 w-4 text-brand-orange" />
+                        ) : (
+                          <ArrowUpDown className="h-4 w-4" />
+                        )}
+                      </button>
                     </TableHead>
                     <TableHead className="w-[200px] max-w-[200px] text-left">Log Message</TableHead>
                     {isSuperAdmin() && <TableHead className="text-left">Actions</TableHead>}

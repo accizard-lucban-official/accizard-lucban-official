@@ -430,8 +430,8 @@ export function ManageUsersPage() {
   const [adminSortDirection, setAdminSortDirection] = useState<'asc' | 'desc'>('asc');
 
   // Add sorting state for resident table
-  const [residentSortField, setResidentSortField] = useState<string>('');
-  const [residentSortDirection, setResidentSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [residentSortField, setResidentSortField] = useState<string>('userId');
+  const [residentSortDirection, setResidentSortDirection] = useState<'asc' | 'desc'>('desc');
 
   // Add pagination state
   const [adminPage, setAdminPage] = useState(1);
@@ -579,6 +579,31 @@ export function ManageUsersPage() {
     if (!adminSortField) return 0;
     let aValue = a[adminSortField as keyof typeof a];
     let bValue = b[adminSortField as keyof typeof b];
+    
+    // Handle userId sorting - parse numeric part from AID-XXX format
+    if (adminSortField === 'userId') {
+      const parseUserId = (userId: string | undefined): number => {
+        if (!userId) return 0;
+        const str = String(userId).toUpperCase();
+        if (str.startsWith('AID-')) {
+          const num = parseInt(str.replace(/^AID-/, ''), 10);
+          return isNaN(num) ? 0 : num;
+        }
+        // Fallback: try to parse as number
+        const num = parseInt(str, 10);
+        return isNaN(num) ? 0 : num;
+      };
+      
+      const aNum = parseUserId(aValue as string);
+      const bNum = parseUserId(bValue as string);
+      
+      if (adminSortDirection === 'asc') {
+        return aNum - bNum;
+      } else {
+        return bNum - aNum;
+      }
+    }
+    
     // Handle date sorting
     if (adminSortField === 'createdDate') {
       // Prefer createdTime if it's a number (timestamp)
@@ -627,6 +652,30 @@ export function ManageUsersPage() {
     
     let aValue = a[residentSortField as keyof typeof a];
     let bValue = b[residentSortField as keyof typeof b];
+    
+    // Handle userId sorting - parse numeric part from RID-XXX format
+    if (residentSortField === 'userId') {
+      const parseUserId = (userId: string | undefined): number => {
+        if (!userId) return 0;
+        const str = String(userId).toUpperCase();
+        if (str.startsWith('RID-')) {
+          const num = parseInt(str.replace(/^RID-/, ''), 10);
+          return isNaN(num) ? 0 : num;
+        }
+        // Fallback: try to parse as number
+        const num = parseInt(str, 10);
+        return isNaN(num) ? 0 : num;
+      };
+      
+      const aNum = parseUserId(aValue as string);
+      const bNum = parseUserId(bValue as string);
+      
+      if (residentSortDirection === 'asc') {
+        return aNum - bNum;
+      } else {
+        return bNum - aNum;
+      }
+    }
     
     // Handle date sorting
     if (residentSortField === 'createdDate') {
@@ -1424,6 +1473,126 @@ export function ManageUsersPage() {
     setConfirmBatchAction(null);
   };
 
+  // Renumber all residents based on chronological order (date + time created)
+  const renumberResidentsByDate = async () => {
+    try {
+      console.log("🔄 Starting resident renumbering based on date and time...");
+      
+      // Fetch all residents
+      const querySnapshot = await getDocs(collection(db, "users"));
+      console.log(`📊 Found ${querySnapshot.size} residents to renumber`);
+      
+      // Parse date and time from existing residents
+      const parseDateTime = (createdDate: any, createdTime: any): number => {
+        let timestamp = 0;
+        
+        // If createdTime is a number (timestamp), use it directly
+        if (typeof createdTime === 'number') {
+          timestamp = createdTime;
+        }
+        // If createdTime is a string, try to parse it with createdDate
+        else if (createdDate && createdTime) {
+          try {
+            const dateStr = String(createdDate);
+            const timeStr = String(createdTime);
+            timestamp = new Date(`${dateStr} ${timeStr}`).getTime();
+          } catch (e) {
+            // Fallback to just date
+            timestamp = new Date(createdDate).getTime();
+          }
+        }
+        // If only createdDate exists
+        else if (createdDate) {
+          timestamp = new Date(createdDate).getTime();
+        }
+        
+        return isNaN(timestamp) ? 0 : timestamp;
+      };
+      
+      // Get all residents with their creation timestamps
+      const residentsToRenumber = querySnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          docId: doc.id,
+          userId: data.userId,
+          createdDate: data.createdDate,
+          createdTime: data.createdTime,
+          timestamp: parseDateTime(data.createdDate, data.createdTime),
+          fullName: data.fullName || data.name || 'Unknown'
+        };
+      });
+      
+      // Sort by timestamp (chronological order - oldest first)
+      residentsToRenumber.sort((a, b) => {
+        // If timestamps are equal, sort by document ID as tiebreaker
+        if (a.timestamp === b.timestamp) {
+          return a.docId.localeCompare(b.docId);
+        }
+        return a.timestamp - b.timestamp;
+      });
+      
+      console.log(`✅ Sorted ${residentsToRenumber.length} residents chronologically`);
+      
+      // Renumber sequentially starting from 1
+      let updateCount = 0;
+      let skipCount = 0;
+      
+      for (let i = 0; i < residentsToRenumber.length; i++) {
+        const resident = residentsToRenumber[i];
+        const newUserId = `RID-${i + 1}`;
+        
+        // Only update if the ID has changed
+        if (resident.userId !== newUserId) {
+          try {
+            await updateDoc(doc(db, "users", resident.docId), {
+              userId: newUserId
+            });
+            updateCount++;
+            console.log(`✅ Updated ${resident.fullName}: ${resident.userId} → ${newUserId}`);
+          } catch (error) {
+            console.error(`❌ Failed to update ${resident.fullName} (${resident.docId}):`, error);
+          }
+        } else {
+          skipCount++;
+        }
+      }
+      
+      console.log(`🎯 Renumbering complete: ${updateCount} updated, ${skipCount} already correct`);
+      
+      toast({
+        title: 'Renumbering Complete',
+        description: `Updated ${updateCount} resident ID(s). ${skipCount} were already correctly numbered.`
+      });
+      
+      // Refresh the residents list
+      const refreshedSnapshot = await getDocs(collection(db, "users"));
+      const refreshed = refreshedSnapshot.docs.map(docSnap => {
+        const data = docSnap.data();
+        let userId = data.userId;
+        if (typeof userId === 'number') {
+          userId = `RID-${userId}`;
+        } else if (typeof userId === 'string' && !userId.startsWith('RID-')) {
+          const num = parseInt(userId);
+          if (!isNaN(num)) userId = `RID-${num}`;
+        }
+        return {
+          id: docSnap.id,
+          ...data,
+          userId: userId || `RID-${docSnap.id.slice(-6)}`
+        };
+      });
+      setResidents(refreshed);
+      
+    } catch (error) {
+      console.error("❌ Error renumbering residents:", error);
+      toast({
+        title: 'Error',
+        description: 'Failed to renumber residents. Please try again.',
+        variant: 'destructive'
+      });
+    }
+  };
+
   // Add resident with auto-incremented userId
   const handleAddResident = async (newResident: any) => {
     setIsAddingResident(true);
@@ -1463,22 +1632,73 @@ export function ManageUsersPage() {
         throw authError; // Stop execution if Auth fails
       }
 
-      // Step 3: Fetch all userIds and find the max number
+      // Step 3: Fetch all users and generate ID based on chronological order (date + time)
       const querySnapshot = await getDocs(collection(db, "users"));
-      // Extract the number from userId if it matches 'RID-[Number]'
-      const userIds = querySnapshot.docs.map(doc => {
-        const raw = doc.data().userId;
-        if (typeof raw === 'string' && raw.startsWith('RID-')) {
-          const num = parseInt(raw.replace('RID-', ''));
-          return isNaN(num) ? 0 : num;
+      const now = new Date();
+      
+      // Parse date and time from existing residents
+      const parseDateTime = (createdDate: any, createdTime: any): number => {
+        let timestamp = 0;
+        
+        // If createdTime is a number (timestamp), use it directly
+        if (typeof createdTime === 'number') {
+          timestamp = createdTime;
+        }
+        // If createdTime is a string, try to parse it with createdDate
+        else if (createdDate && createdTime) {
+          try {
+            const dateStr = String(createdDate);
+            const timeStr = String(createdTime);
+            timestamp = new Date(`${dateStr} ${timeStr}`).getTime();
+          } catch (e) {
+            // Fallback to just date
+            timestamp = new Date(createdDate).getTime();
+          }
+        }
+        // If only createdDate exists
+        else if (createdDate) {
+          timestamp = new Date(createdDate).getTime();
+        }
+        
+        return isNaN(timestamp) ? 0 : timestamp;
+      };
+      
+      // Get all existing residents with their creation timestamps
+      const existingResidents = querySnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          docId: doc.id,
+          userId: data.userId,
+          createdDate: data.createdDate,
+          createdTime: data.createdTime,
+          timestamp: parseDateTime(data.createdDate, data.createdTime)
+        };
+      });
+      
+      // Sort by timestamp (chronological order - oldest first)
+      existingResidents.sort((a, b) => a.timestamp - b.timestamp);
+      
+      // Find the maximum existing ID number
+      const userIds: number[] = [];
+      existingResidents.forEach(resident => {
+        const raw = resident.userId;
+        if (typeof raw === 'string' && raw.toUpperCase().startsWith('RID-')) {
+          const num = parseInt(raw.replace(/^RID-/i, ''), 10);
+          if (!isNaN(num) && num > 0) {
+            userIds.push(num);
+          }
         }
         // fallback for legacy userIds
-        return Number(raw) || 0;
+        else if (typeof raw === 'number' && raw > 0) {
+          userIds.push(raw);
+        }
       });
+      
       const maxUserId = userIds.length > 0 ? Math.max(...userIds) : 0;
       const nextUserId = maxUserId + 1;
       const formattedUserId = `RID-${nextUserId}`;
-      const now = new Date();
+      
+      console.log(`Generating resident ID: Total residents: ${existingResidents.length}, Max RID: ${maxUserId}, Next RID: ${nextUserId}, Current time: ${now.getTime()}`);
       
       // Step 4: Map form fields to Firestore field names
       const fullName = `${newResident.firstName.trim()} ${newResident.lastName.trim()}`.trim();

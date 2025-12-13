@@ -104,6 +104,7 @@ export function Layout({ children }: LayoutProps) {
   const alarmIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const activeAudioRefs = useRef<HTMLAudioElement[]>([]);
   const activeAudioContextRefs = useRef<AudioContext[]>([]);
+  const alarmTimeoutRefs = useRef<NodeJS.Timeout[]>([]); // Track all alarm timeouts
   const isInitialLoadRef = useRef<boolean>(true);
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
   const isBroadcastingRef = useRef<boolean>(false);
@@ -192,6 +193,10 @@ export function Layout({ children }: LayoutProps) {
 
   const playSingleAlarm = useCallback(() => {
     try {
+      // Clear all pending timeouts first
+      alarmTimeoutRefs.current.forEach(timeout => clearTimeout(timeout));
+      alarmTimeoutRefs.current = [];
+      
       activeAudioRefs.current.forEach(audio => {
         try {
           audio.pause();
@@ -209,30 +214,40 @@ export function Layout({ children }: LayoutProps) {
       
       const audio = new Audio('/accizard-uploads/accizard_alarm.wav');
       audio.volume = 0.8;
+      
+      // Track this audio instance immediately
       activeAudioRefs.current.push(audio);
       
-      audio.addEventListener('ended', () => {
+      const endedHandler = () => {
         activeAudioRefs.current = activeAudioRefs.current.filter(a => a !== audio);
-      });
+      };
+      audio.addEventListener('ended', endedHandler);
       
       const fallbackTimeout = setTimeout(() => {
         console.log("MP3 loading too slow, falling back to Web Audio API");
         playWebAudioAlarm();
       }, 1500);
       
-      audio.addEventListener('canplaythrough', () => {
+      // Track the timeout
+      alarmTimeoutRefs.current.push(fallbackTimeout);
+      
+      const canPlayHandler = () => {
         clearTimeout(fallbackTimeout);
+        alarmTimeoutRefs.current = alarmTimeoutRefs.current.filter(t => t !== fallbackTimeout);
         audio.play().catch((error) => {
           console.log("MP3 playback failed, using fallback:", error);
           playWebAudioAlarm();
         });
-      });
+      };
+      audio.addEventListener('canplaythrough', canPlayHandler);
       
-      audio.addEventListener('error', () => {
+      const errorHandler = () => {
         clearTimeout(fallbackTimeout);
+        alarmTimeoutRefs.current = alarmTimeoutRefs.current.filter(t => t !== fallbackTimeout);
         console.log("MP3 file error, using fallback");
         playWebAudioAlarm();
-      });
+      };
+      audio.addEventListener('error', errorHandler);
       
       audio.load();
     } catch (error) {
@@ -242,18 +257,14 @@ export function Layout({ children }: LayoutProps) {
   }, [playWebAudioAlarm]);
 
   const playAlarmSound = useCallback(() => {
+    // Clear any existing alarm interval (in case it was set before)
     if (alarmIntervalRef.current) {
       clearInterval(alarmIntervalRef.current);
       alarmIntervalRef.current = null;
     }
     
+    // Play alarm once
     playSingleAlarm();
-    
-    const interval = setInterval(() => {
-      playSingleAlarm();
-    }, 3000);
-    
-    alarmIntervalRef.current = interval;
   }, [playSingleAlarm]);
 
   const stopAlarm = useCallback(() => {
@@ -262,16 +273,34 @@ export function Layout({ children }: LayoutProps) {
       alarmIntervalRef.current = null;
     }
     
+    // Clear all pending timeouts
+    alarmTimeoutRefs.current.forEach(timeout => clearTimeout(timeout));
+    alarmTimeoutRefs.current = [];
+    
+    // Stop all currently playing audio instances instantly
     activeAudioRefs.current.forEach(audio => {
       try {
+        // Pause immediately
         audio.pause();
+        // Reset playback position
         audio.currentTime = 0;
+        // Clear the source to completely stop the audio
+        audio.src = '';
+        audio.removeAttribute('src');
+        // Reset the audio element
+        audio.load();
       } catch (e) {}
     });
     activeAudioRefs.current = [];
     
+    // Stop all active audio contexts instantly
     activeAudioContextRefs.current.forEach(ctx => {
       try {
+        // Suspend the context first to stop all audio immediately
+        if (ctx.state !== 'closed') {
+          ctx.suspend().catch(() => {});
+        }
+        // Then close it
         ctx.close().catch(() => {});
       } catch (e) {}
     });
@@ -488,6 +517,11 @@ export function Layout({ children }: LayoutProps) {
         clearInterval(alarmIntervalRef.current);
         alarmIntervalRef.current = null;
       }
+      
+      // Clear all pending timeouts
+      alarmTimeoutRefs.current.forEach(timeout => clearTimeout(timeout));
+      alarmTimeoutRefs.current = [];
+      
       activeAudioRefs.current.forEach(audio => {
         try {
           audio.pause();

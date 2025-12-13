@@ -426,8 +426,8 @@ export function ManageReportsPage() {
   // Sort state for Date Submitted column
   const [dateSort, setDateSort] = useState<'asc' | 'desc' | null>('desc'); // Default to descending (newest first)
   
-  // Sort state for Report ID column
-  const [idSort, setIdSort] = useState<'asc' | 'desc' | null>(null);
+  // Sort state for Report ID column (default to descending order)
+  const [idSort, setIdSort] = useState<'asc' | 'desc' | null>('desc');
   
   // New report alert state (moved before useEffect to ensure availability)
   const [showNewReportAlert, setShowNewReportAlert] = useState(false);
@@ -436,6 +436,7 @@ export function ManageReportsPage() {
   const alarmIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const activeAudioRefs = useRef<HTMLAudioElement[]>([]); // Track all active audio instances
   const activeAudioContextRefs = useRef<AudioContext[]>([]); // Track all active audio contexts
+  const alarmTimeoutRefs = useRef<NodeJS.Timeout[]>([]); // Track all alarm timeouts
   const isInitialLoadRef = useRef<boolean>(true);
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null); // For cross-tab communication
   const isBroadcastingRef = useRef<boolean>(false); // Flag to prevent handling our own broadcast messages
@@ -496,6 +497,10 @@ export function ManageReportsPage() {
   // Function to play a single alarm sound
   const playSingleAlarm = useCallback(() => {
     try {
+      // Clear all pending timeouts first
+      alarmTimeoutRefs.current.forEach(timeout => clearTimeout(timeout));
+      alarmTimeoutRefs.current = [];
+      
       // Stop any currently playing audio to prevent overlap
       activeAudioRefs.current.forEach(audio => {
         try {
@@ -521,13 +526,14 @@ export function ManageReportsPage() {
       const audio = new Audio('/accizard-uploads/alarmsoundfx.mp3');
       audio.volume = 0.8; // Increased volume for better attention
       
-      // Track this audio instance
+      // Track this audio instance immediately
       activeAudioRefs.current.push(audio);
       
       // Clean up when audio finishes
-      audio.addEventListener('ended', () => {
+      const endedHandler = () => {
         activeAudioRefs.current = activeAudioRefs.current.filter(a => a !== audio);
-      });
+      };
+      audio.addEventListener('ended', endedHandler);
       
       // Set a timeout to fall back to Web Audio API if MP3 fails to load
       const fallbackTimeout = setTimeout(() => {
@@ -535,19 +541,26 @@ export function ManageReportsPage() {
         playWebAudioAlarm();
       }, 1500); // Reduced timeout for faster fallback
       
-      audio.addEventListener('canplaythrough', () => {
-        clearTimeout(fallbackTimeout); // Cancel fallback if MP3 loads successfully
+      // Track the timeout
+      alarmTimeoutRefs.current.push(fallbackTimeout);
+      
+      const canPlayHandler = () => {
+        clearTimeout(fallbackTimeout);
+        alarmTimeoutRefs.current = alarmTimeoutRefs.current.filter(t => t !== fallbackTimeout);
         audio.play().catch((error) => {
           console.log("MP3 playback failed, using fallback:", error);
           playWebAudioAlarm();
         });
-      });
+      };
+      audio.addEventListener('canplaythrough', canPlayHandler);
       
-      audio.addEventListener('error', () => {
+      const errorHandler = () => {
         clearTimeout(fallbackTimeout);
+        alarmTimeoutRefs.current = alarmTimeoutRefs.current.filter(t => t !== fallbackTimeout);
         console.log("MP3 file error, using fallback");
         playWebAudioAlarm();
-      });
+      };
+      audio.addEventListener('error', errorHandler);
       
       // Start loading the audio
       audio.load();
@@ -558,23 +571,16 @@ export function ManageReportsPage() {
     }
   }, [playWebAudioAlarm]);
 
-  // Function to play alarming sound for new reports (continuous until dismissed)
+  // Function to play alarming sound for new reports (plays once)
   const playAlarmSound = useCallback(() => {
-    // Clear any existing alarm interval
+    // Clear any existing alarm interval (in case it was set before)
     if (alarmIntervalRef.current) {
       clearInterval(alarmIntervalRef.current);
       alarmIntervalRef.current = null;
     }
     
-    // Play alarm immediately
+    // Play alarm once
     playSingleAlarm();
-    
-    // Set up continuous alarm every 3 seconds
-    const interval = setInterval(() => {
-      playSingleAlarm();
-    }, 3000);
-    
-    alarmIntervalRef.current = interval;
   }, [playSingleAlarm]);
 
   // Function to stop the alarm
@@ -585,20 +591,36 @@ export function ManageReportsPage() {
       alarmIntervalRef.current = null;
     }
     
-    // Stop all currently playing audio instances
+    // Clear all pending timeouts
+    alarmTimeoutRefs.current.forEach(timeout => clearTimeout(timeout));
+    alarmTimeoutRefs.current = [];
+    
+    // Stop all currently playing audio instances instantly
     activeAudioRefs.current.forEach(audio => {
       try {
+        // Pause immediately
         audio.pause();
+        // Reset playback position
         audio.currentTime = 0;
+        // Clear the source to completely stop the audio
+        audio.src = '';
+        audio.removeAttribute('src');
+        // Reset the audio element
+        audio.load();
       } catch (e) {
         // Ignore errors when stopping audio
       }
     });
     activeAudioRefs.current = [];
     
-    // Stop all active audio contexts
+    // Stop all active audio contexts instantly
     activeAudioContextRefs.current.forEach(ctx => {
       try {
+        // Suspend the context first to stop all audio immediately
+        if (ctx.state !== 'closed') {
+          ctx.suspend().catch(() => {});
+        }
+        // Then close it
         ctx.close().catch(() => {});
       } catch (e) {
         // Ignore errors when closing audio context
@@ -659,6 +681,10 @@ export function ManageReportsPage() {
         clearInterval(alarmIntervalRef.current);
         alarmIntervalRef.current = null;
       }
+      
+      // Clear all pending timeouts
+      alarmTimeoutRefs.current.forEach(timeout => clearTimeout(timeout));
+      alarmTimeoutRefs.current = [];
       
       // Stop all audio instances
       activeAudioRefs.current.forEach(audio => {
@@ -1065,41 +1091,80 @@ export function ManageReportsPage() {
       
       // Validate required fields
       if (!formData.type) {
+        console.log("❌ Validation failed: No report type selected");
         toast.error("Please select a report type");
         setIsAddingReport(false);
         return;
       }
       
       if (!formData.location || !formData.latitude || !formData.longitude) {
+        console.log("❌ Validation failed: No location selected");
         toast.error("Please select a location on the map");
         setIsAddingReport(false);
         return;
       }
 
-      // Generate report ID with incremented value (RID-[Incremented value])
-      // Fetch all existing reports to find the maximum RID number
-      // This ensures that even if reports are deleted, new RIDs continue from the highest existing RID
-      const reportsQuery = query(collection(db, "reports"));
-      const reportsSnapshot = await getDocs(reportsQuery);
+      // Generate report ID using the same pattern as admin ID generation
+      console.log("🚀 ========== STARTING REPORT ID GENERATION ==========");
+      console.log("🚀 Starting report ID generation...");
       
-      // Extract the number from reportId if it matches 'RID-[Number]'
-      // Only consider valid RID numbers (ignore legacy formats or invalid values)
+      // Query Firestore to get all existing reportIds
+      let reportsSnapshot;
+      try {
+        const reportsQuery = query(collection(db, "reports"));
+        console.log("📡 Querying Firestore for reports...");
+        reportsSnapshot = await getDocs(reportsQuery);
+        console.log("✅ Firestore query completed. Documents found:", reportsSnapshot.size);
+      } catch (queryError) {
+        console.error("❌ ERROR querying Firestore:", queryError);
+        throw queryError; // Re-throw to be caught by outer catch
+      }
+      
       const reportIds: number[] = [];
-      reportsSnapshot.docs.forEach(doc => {
-        const raw = doc.data().reportId;
-        if (typeof raw === 'string' && raw.startsWith('RID-')) {
-          const num = parseInt(raw.replace('RID-', ''), 10);
+      const foundReportIds: string[] = []; // For debugging
+
+      console.log(`🔍 Checking ${reportsSnapshot.size} reports in Firestore for reportId values...`);
+
+      reportsSnapshot.docs.forEach((doc, index) => {
+        const data = doc.data();
+        const raw = data.reportId;
+        
+        // Log all reportId values found (for debugging)
+        if (raw) {
+          foundReportIds.push(`${doc.id}: ${JSON.stringify(raw)} (type: ${typeof raw})`);
+        }
+        
+        if (typeof raw === 'string' && raw.toUpperCase().startsWith('RID-')) {
+          // Use replace to remove prefix (more robust than substring)
+          const num = parseInt(raw.replace(/^RID-/i, ''), 10);
           if (!isNaN(num) && num > 0) {
             reportIds.push(num);
+            console.log(`✅ Found valid RID: ${raw} -> ${num}`);
+          } else {
+            console.log(`⚠️ Invalid RID format (non-numeric): ${raw}`);
           }
         }
+        // Fallback: try to parse as number if it's not in RID- format
+        else if (typeof raw === 'number') {
+          if (raw > 0) {
+            reportIds.push(raw);
+            console.log(`✅ Found numeric reportId: ${raw}`);
+          }
+        }
+        else if (raw) {
+          console.log(`⚠️ Unexpected reportId format: ${raw} (type: ${typeof raw})`);
+        }
       });
-      
-      // Find the highest existing RID number, or default to 0 if no reports exist
+
+      console.log(`📊 Summary: ${foundReportIds.length} reports with reportId field, ${reportIds.length} valid numeric IDs`);
+      console.log(`📋 All reportIds found:`, foundReportIds);
+      console.log(`🔢 Valid numeric IDs:`, reportIds);
+
       const maxReportId = reportIds.length > 0 ? Math.max(...reportIds) : 0;
-      // Assign the next RID as 1 higher than the highest existing RID
       const nextReportId = maxReportId + 1;
       const reportId = `RID-${nextReportId}`;
+
+      console.log(`🎯 Generating new report ID: Total reports in DB: ${reportsSnapshot.size}, Valid RID reports: ${reportIds.length}, Max RID: ${maxReportId}, Next RID: ${nextReportId}`);
       
       // Get current user ID
       const userId = currentUser?.id || auth.currentUser?.uid || "admin";
@@ -3220,25 +3285,54 @@ useEffect(() => {
       return idSort === 'asc' ? comparison : -comparison;
     }
     
-    // Date sorting
+    // Date sorting - considers both date and time fields
     if (dateSort) {
       try {
-        // Parse date format: MM/DD/YY
-        const parseDate = (dateStr: string) => {
+        // Helper function to parse date and time into a Date object
+        const parseDateTime = (report: any) => {
+          // Try createdDate and createdTime first (if they exist)
+          let dateStr = report.createdDate || report.dateSubmitted || '';
+          let timeStr = report.createdTime || report.timeSubmitted || '';
+          
+          if (!dateStr) return new Date(0); // Return epoch if no date
+          
+          // Parse date format: MM/DD/YY
           const [month, day, year] = dateStr.split('/');
-          const fullYear = 2000 + parseInt(year);
-          return new Date(fullYear, parseInt(month) - 1, parseInt(day));
+          const fullYear = year.length === 2 ? 2000 + parseInt(year) : parseInt(year);
+          const date = new Date(fullYear, parseInt(month) - 1, parseInt(day));
+          
+          // Parse time format: h:mm AM/PM or HH:mm
+          if (timeStr) {
+            const timeMatch = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+            if (timeMatch) {
+              let hours = parseInt(timeMatch[1]);
+              const minutes = parseInt(timeMatch[2]);
+              const ampm = timeMatch[3]?.toUpperCase();
+              
+              // Convert to 24-hour format if AM/PM is present
+              if (ampm === 'PM' && hours !== 12) {
+                hours += 12;
+              } else if (ampm === 'AM' && hours === 12) {
+                hours = 0;
+              }
+              
+              date.setHours(hours, minutes, 0, 0);
+            }
+          }
+          
+          return date;
         };
         
-        const dateA = parseDate(a.dateSubmitted);
-        const dateB = parseDate(b.dateSubmitted);
+        const dateTimeA = parseDateTime(a);
+        const dateTimeB = parseDateTime(b);
         
         if (dateSort === 'asc') {
-          return dateA.getTime() - dateB.getTime();
+          return dateTimeA.getTime() - dateTimeB.getTime();
         } else {
-          return dateB.getTime() - dateA.getTime();
+          return dateTimeB.getTime() - dateTimeA.getTime();
         }
       } catch (error) {
+        console.error("Error sorting by date:", error);
         return 0;
       }
     }
