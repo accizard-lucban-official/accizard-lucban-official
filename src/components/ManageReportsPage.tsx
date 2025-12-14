@@ -842,7 +842,7 @@ export function ManageReportsPage() {
             isPatient: data.isPatient || false, // Include isPatient field from database
             type: data.reportType || "", // Map from Firestore reportType field
             reportedBy: data.reporterName || "", // Map from Firestore reporterName field
-            barangay: "", // Not in your schema, will show empty
+            barangay: data.barangay || "", // Read barangay from Firestore
             description: data.description || "",
             responders: "", // Not in your schema, will show empty
             location: data.locationName || data.location || "", // Use locationName from Firestore, fallback to location
@@ -7464,10 +7464,12 @@ useEffect(() => {
         changes.mobileNumber = { from: selectedReport.mobileNumber || '', to: previewEditData.mobileNumber || '' };
       }
 
-      // Update barangay if changed
-      if (previewEditData.barangay !== selectedReport.barangay) {
-        updateData.barangay = previewEditData.barangay;
-        changes.barangay = { from: selectedReport.barangay || '', to: previewEditData.barangay || '' };
+      // Update barangay if changed (handle empty strings and undefined)
+      const currentBarangay = selectedReport.barangay || '';
+      const newBarangay = previewEditData.barangay || '';
+      if (newBarangay !== currentBarangay) {
+        updateData.barangay = newBarangay;
+        changes.barangay = { from: currentBarangay, to: newBarangay };
       }
 
       // Update description if changed

@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, PieChart, Pie, Cell, LineChart, Line } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, PieChart, Pie, Cell, LineChart, Line, LabelList } from "recharts";
 import { AlertTriangle, Users, FileText, MapPin, CloudRain, Clock, TrendingUp, PieChart as PieChartIcon, Building2, Calendar, Download, Maximize2, FileImage, FileType, Facebook, PhoneCall, Wind, Droplets, CloudRain as Precipitation, Car, Layers, Flame, Activity, Sun, Cloud, CloudLightning, CloudSnow, CloudDrizzle, CloudFog, RefreshCw, AlertCircle, UserCheck, Navigation, Waves, Satellite } from "lucide-react";
 import { ResponsiveBar } from '@nivo/bar';
 import { ResponsiveCalendar } from '@nivo/calendar';
@@ -364,6 +364,12 @@ export function DashboardStats() {
       });
   }, [users, usersBarangayBarangayFilter, officialBarangays]);
 
+  // Calculate top 3 barangays with most users
+  const top3UsersBarangays = useMemo(() => {
+    if (!usersPerBarangay || usersPerBarangay.length === 0) return [];
+    return usersPerBarangay.slice(0, 3);
+  }, [usersPerBarangay]);
+
   // Helper function to normalize category values to match expected type names
   // Maps kebab-case values (like 'road-crash') to Title Case (like 'Road Crash')
   function normalizeCategoryToType(category: string | undefined | null): string {
@@ -714,7 +720,7 @@ export function DashboardStats() {
     return reportTypeData.reduce((sum, item) => sum + item.count, 0);
   }, [reportTypeData]);
 
-  // Peak hours data - calculated from real Firestore data using createdTime field
+  // Peak hours data - calculated from real Firestore data using timestamp field
   const peakHoursData = useMemo(() => {
     console.log('=== Peak Hours Calculation START ===');
     console.log('Total reports available:', reports.length);
@@ -728,12 +734,12 @@ export function DashboardStats() {
     if (filteredReports.length > 0) {
       console.log('Sample reports (first 3):', filteredReports.slice(0, 3).map(r => ({
         id: r.id,
-        hasCreatedTime: !!r.createdTime,
-        createdTime: r.createdTime,
-        createdTimeType: typeof r.createdTime,
         hasTimestamp: !!r.timestamp,
         timestamp: r.timestamp,
-        timestampType: typeof r.timestamp
+        timestampType: typeof r.timestamp,
+        timestampIsDate: r.timestamp instanceof Date,
+        hasCreatedTime: !!r.createdTime,
+        createdTime: r.createdTime
       })));
     }
     
@@ -753,41 +759,22 @@ export function DashboardStats() {
     let processedCount = 0;
     let skippedCount = 0;
     const dateSourceCounts: Record<string, number> = {
-      'createdTime (Date)': 0,
-      'createdTime (Firestore Timestamp)': 0,
-      'createdTime (string/number)': 0,
       'timestamp (Date)': 0,
       'timestamp (Firestore Timestamp)': 0,
       'timestamp (string/number)': 0,
+      'createdTime (Date)': 0,
+      'createdTime (Firestore Timestamp)': 0,
+      'createdTime (string/number)': 0,
       'none': 0
     };
     
-    // Count reports by hour using createdTime field
+    // Count reports by hour using timestamp field (primary), fallback to createdTime
     filteredReports.forEach((report, index) => {
-      // Try to get createdTime field first, then fall back to timestamp
       let reportDate: Date | null = null;
       let dateSource = 'none';
       
-      // Check for createdTime field (primary source)
-      if (report.createdTime) {
-        try {
-          if (report.createdTime instanceof Date) {
-            reportDate = report.createdTime;
-            dateSource = 'createdTime (Date)';
-          } else if (report.createdTime?.toDate && typeof report.createdTime.toDate === 'function') {
-            reportDate = report.createdTime.toDate();
-            dateSource = 'createdTime (Firestore Timestamp)';
-          } else if (typeof report.createdTime === 'string' || typeof report.createdTime === 'number') {
-            reportDate = new Date(report.createdTime);
-            dateSource = 'createdTime (string/number)';
-          }
-        } catch (error) {
-          console.warn(`Error parsing createdTime for report ${report.id}:`, error);
-        }
-      }
-      
-      // Fall back to timestamp if createdTime is not available
-      if (!reportDate && report.timestamp) {
+      // Use timestamp field as primary source (this is what's consistently available)
+      if (report.timestamp) {
         try {
           if (report.timestamp instanceof Date) {
             reportDate = report.timestamp;
@@ -804,19 +791,50 @@ export function DashboardStats() {
         }
       }
       
+      // Fall back to createdTime if timestamp is not available
+      if (!reportDate && report.createdTime) {
+        try {
+          if (report.createdTime instanceof Date) {
+            reportDate = report.createdTime;
+            dateSource = 'createdTime (Date)';
+          } else if (report.createdTime?.toDate && typeof report.createdTime.toDate === 'function') {
+            reportDate = report.createdTime.toDate();
+            dateSource = 'createdTime (Firestore Timestamp)';
+          } else if (typeof report.createdTime === 'string' || typeof report.createdTime === 'number') {
+            reportDate = new Date(report.createdTime);
+            dateSource = 'createdTime (string/number)';
+          }
+        } catch (error) {
+          console.warn(`Error parsing createdTime for report ${report.id}:`, error);
+        }
+      }
+      
       dateSourceCounts[dateSource] = (dateSourceCounts[dateSource] || 0) + 1;
       
       // Skip reports without valid timestamps
       if (!reportDate || isNaN(reportDate.getTime())) {
         skippedCount++;
         if (index < 5) { // Only log first 5 skipped reports to avoid spam
-          console.warn(`Report ${report.id} missing valid createdTime or timestamp. createdTime:`, report.createdTime, 'timestamp:', report.timestamp);
+          console.warn(`Report ${report.id} missing valid timestamp or createdTime. timestamp:`, report.timestamp, 'createdTime:', report.createdTime);
         }
         return;
       }
       
       processedCount++;
+      
+      // Get hour in local timezone (getHours() returns local time)
       const hour = reportDate.getHours();
+      
+      // Log first few reports to verify hour extraction
+      if (index < 5) {
+        console.log(`Report ${report.id}:`, {
+          timestamp: report.timestamp,
+          parsedDate: reportDate,
+          hour24: hour,
+          dateString: reportDate.toLocaleString(),
+          timeString: reportDate.toLocaleTimeString()
+        });
+      }
       
       // Convert 24-hour to 12-hour format with AM/PM
       let hourLabel: string;
@@ -1379,7 +1397,20 @@ export function DashboardStats() {
             category: data.category,
             barangay: data.barangay || data.locationName || 'Unknown', // Use barangay or locationName
             locationName: data.locationName || data.location || data.barangay || 'Unknown',
-            timestamp: data.timestamp?.toDate ? data.timestamp.toDate() : (data.timestamp instanceof Date ? data.timestamp : new Date()),
+            timestamp: (() => {
+              // Properly parse timestamp from Firestore
+              if (data.timestamp) {
+                if (data.timestamp?.toDate && typeof data.timestamp.toDate === 'function') {
+                  return data.timestamp.toDate();
+                } else if (data.timestamp instanceof Date) {
+                  return data.timestamp;
+                } else if (typeof data.timestamp === 'string' || typeof data.timestamp === 'number') {
+                  return new Date(data.timestamp);
+                }
+              }
+              // Return null if no valid timestamp, don't use current date as fallback
+              return null;
+            })(),
             // Include createdTime field for peak hours calculation
             createdTime: createdTime
           };
@@ -2323,28 +2354,21 @@ export function DashboardStats() {
     exportChart(chartId, 'reports-over-time', 'pdf');
   };
 
-  // Export entire dashboard as printable HTML
+  // Export entire dashboard as PDF
   const exportDashboardAsHTML = async () => {
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      toast.error('Unable to open print window. Please allow popups.');
-      return;
-    }
+    toast.success('Generating PDF report with chart screenshots...');
 
-    toast.success('Generating report with chart screenshots...');
-
-    // Get current date and time
+    // Get current date and time (formatted like ManageReportsPage: MM/dd/yy at h:mm AM/PM)
     const now = new Date();
-    const dateString = now.toLocaleDateString('en-PH', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    });
-    const timeString = now.toLocaleTimeString('en-PH', {
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    const mm = String(now.getMonth() + 1).padStart(2, "0");
+    const dd = String(now.getDate()).padStart(2, "0");
+    const yy = String(now.getFullYear()).slice(-2);
+    const hours12 = now.getHours() % 12 || 12;
+    const minutes = String(now.getMinutes()).padStart(2, "0");
+    const ampm = now.getHours() >= 12 ? "PM" : "AM";
+    const formattedDateTime = `${mm}/${dd}/${yy} at ${hours12}:${minutes} ${ampm}`;
+    const dateString = formattedDateTime.split(' at ')[0];
+    const timeString = formattedDateTime.split(' at ')[1];
 
     // Get statistics
     const totalReports = getTotalReports();
@@ -2358,15 +2382,32 @@ export function DashboardStats() {
           return;
         }
         
-        html2canvas(element as HTMLElement, {
-          backgroundColor: '#ffffff',
-          logging: false,
-          useCORS: true
-        } as any).then(canvas => {
-          resolve(canvas.toDataURL('image/png'));
-        }).catch(() => {
-          resolve('');
-        });
+        // Wait a bit for Nivo charts to fully render, especially users chart
+        const delay = selector === '#users-chart' ? 2000 : 500;
+        setTimeout(() => {
+          html2canvas(element as HTMLElement, {
+            backgroundColor: '#ffffff',
+            logging: false,
+            useCORS: true,
+            scale: 2,
+            allowTaint: true,
+            onclone: (clonedDoc) => {
+              // Ensure the chart container is visible in the cloned document
+              const clonedElement = clonedDoc.querySelector(selector);
+              if (clonedElement) {
+                (clonedElement as HTMLElement).style.visibility = 'visible';
+                (clonedElement as HTMLElement).style.display = 'block';
+                // Force reflow for Nivo charts
+                (clonedElement as HTMLElement).offsetHeight;
+              }
+            }
+          } as any).then(canvas => {
+            resolve(canvas.toDataURL('image/png'));
+          }).catch((error) => {
+            console.error('Error capturing chart:', selector, error);
+            resolve('');
+          });
+        }, delay);
       });
     };
 
@@ -2432,61 +2473,100 @@ export function DashboardStats() {
     }
     
     .header {
-      border-bottom: 2px solid #f97316;
-      padding-bottom: 12px;
-      margin-bottom: 15px;
-    }
-    
-    .header h1 {
-      color: #f97316;
-      font-size: 24px;
-      font-weight: 700;
-      margin-bottom: 8px;
-    }
-    
-    .header-info {
       display: flex;
+      align-items: flex-start;
       justify-content: space-between;
-      flex-wrap: wrap;
-      gap: 15px;
-      font-size: 12px;
-      color: #6b7280;
+      margin: 0;
+      padding: 0;
+      margin-bottom: 15px;
+      position: relative;
+      z-index: 1;
     }
     
-    .stats-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 12px;
-      margin-bottom: 20px;
+    .header-left-logo {
+      width: 90px;
+      height: 90px;
+      object-fit: contain;
+      flex-shrink: 0;
     }
     
-    .stat-card {
-      border: 1px solid #e5e7eb;
-      border-radius: 6px;
-      padding: 12px;
-      background: #fff;
-      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    .header-right-logo {
+      width: 90px;
+      height: 90px;
+      object-fit: contain;
+      flex-shrink: 0;
     }
     
-    .stat-label {
-      font-size: 10px;
-      font-weight: 600;
-      color: #6b7280;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 4px;
+    .header-center {
+      flex: 1;
+      text-align: center;
+      padding: 0 15px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
     }
     
-    .stat-value {
-      font-size: 24px;
+    .header-org {
+      font-size: 9px;
+      color: #000;
+      margin: 1px 0;
+      line-height: 1.3;
+    }
+    
+    .header-org strong {
+      color: #0066cc;
       font-weight: 700;
-      color: #111827;
     }
     
-    .stat-description {
+    .header-province {
+      font-size: 9px;
+      color: #000;
+      margin: 1px 0;
+      line-height: 1.3;
+    }
+    
+    .header-province strong {
+      color: #0066cc;
+      font-weight: 700;
+    }
+    
+    .header-municipality {
+      font-size: 15px;
+      font-weight: 700;
+      color: #0066cc;
+      margin: 3px 0;
+      line-height: 1.3;
+    }
+    
+    .header-office {
+      font-size: 12px;
+      font-weight: 700;
+      color: #000;
+      margin: 5px 0 2px;
+      line-height: 1.3;
+      text-transform: uppercase;
+    }
+    
+    .header-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #0066cc;
+      margin: 8px 0 15px;
+      letter-spacing: 0.5px;
+      line-height: 1.4;
+      text-transform: uppercase;
+      text-align: center;
+      width: 100%;
+    }
+    
+    .header-date-time {
       font-size: 10px;
-      color: #f97316;
-      margin-top: 2px;
+      color: #000;
+      margin-top: 0;
+      margin-bottom: 20px;
+      text-align: left;
+      width: 100%;
+      font-weight: bold;
     }
     
     .section {
@@ -2568,10 +2648,6 @@ export function DashboardStats() {
         page-break-inside: avoid;
       }
       
-      .stat-card {
-        page-break-inside: avoid;
-      }
-      
       .header {
         page-break-after: avoid;
       }
@@ -2580,60 +2656,68 @@ export function DashboardStats() {
 </head>
 <body>
   <div class="header">
-    <h1>AcciZard Dashboard Report</h1>
-    <div class="header-info">
-      <div>
-        <strong>Generated:</strong> ${dateString} at ${timeString}
-      </div>
-      <div>
-        <strong>Location:</strong> Lucban, Quezon, Philippines
-      </div>
+    <img src="/accizard-uploads/lucban-logo.png" alt="Lucban Logo" class="header-left-logo" />
+    <div class="header-center">
+      <div class="header-org">Republic of the <strong>PHILIPPINES</strong></div>
+      <div class="header-province">Province of <strong>QUEZON</strong></div>
+      <div class="header-municipality"><strong>MUNICIPALITY OF LUCBAN</strong></div>
+      <div class="header-office">MUNICIPAL DISASTER RISK REDUCTION AND MANAGEMENT OFFICE</div>
     </div>
+    <img src="/accizard-uploads/logo-ldrrmo-png.png" alt="LDRRMO Logo" class="header-right-logo" />
   </div>
-
-  <div class="stats-grid">
-    <div class="stat-card">
-      <div class="stat-label">Most Common Type</div>
-      <div class="stat-value">${mostCommonType.count}</div>
-      <div class="stat-description">${mostCommonType.type} - ${mostCommonType.percentage}%</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">This Week</div>
-      <div class="stat-value">${weeklyReports}</div>
-      <div class="stat-description">Last 7 days</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Active Users</div>
-      <div class="stat-value">${activeUsers.toLocaleString()}</div>
-      <div class="stat-description">Registered</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Avg Response Time</div>
-      <div class="stat-value">8.5</div>
-      <div class="stat-description">minutes</div>
-    </div>
-  </div>
+  <div class="header-title">DASHBOARD STATISTICS REPORT</div>
+  <div class="header-date-time">DATE/TIME: ${dateString} at ${timeString}</div>
 
 ${reportsOverTimeChart || pieChart ? `
   <div class="charts-container">
 ${reportsOverTimeChart ? `
     <div class="chart-item">
       <div class="section-title">Reports Over Time</div>
-      <div class="section-content">Chart showing report trends across different time periods</div>
       <div style="margin-bottom: 8px; padding: 8px; background: #f9fafb; border-radius: 4px; font-size: 11px;">
-        <strong>Filter:</strong> ${reportTypeFilter}
+        <strong>Filter:</strong> ${reportsOverTimeFilter}
       </div>
       <img src="${reportsOverTimeChart}" alt="Reports Over Time Chart" style="border: 1px solid #e5e7eb; border-radius: 8px; width: 100%;" />
+      ${top3MostActiveDates.length > 0 ? `
+        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5e7eb;">
+          <div style="font-size: 11px; font-weight: 600; color: #374151; margin-bottom: 8px; text-align: center;">Top 3 Most Active Dates</div>
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            ${top3MostActiveDates.map((item, index) => `
+              <div style="display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; background: #f9fafb; border-radius: 4px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="font-size: 10px; font-weight: 700; color: #f97316;">#${index + 1}</span>
+                  <span style="font-size: 10px; font-weight: 500; color: #374151;">${item.formattedDate}</span>
+                </div>
+                <span style="font-size: 10px; font-weight: 600; color: #111827;">${item.count} reports</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
     </div>
 ` : ''}
 ${pieChart ? `
     <div class="chart-item">
       <div class="section-title">Report Type Distribution</div>
-      <div class="section-content">Breakdown of reports by type</div>
       <div style="margin-bottom: 8px; padding: 8px; background: #f9fafb; border-radius: 4px; font-size: 11px;">
         <strong>Filter:</strong> ${reportTypeFilter}
       </div>
       <img src="${pieChart}" alt="Report Type Distribution" style="border: 1px solid #e5e7eb; border-radius: 8px; width: 100%;" />
+      ${top3ReportTypes.length > 0 ? `
+        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5e7eb;">
+          <div style="font-size: 11px; font-weight: 600; color: #374151; margin-bottom: 8px; text-align: center;">Top 3 Most Common Types</div>
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            ${top3ReportTypes.map((item, index) => `
+              <div style="display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; background: #f9fafb; border-radius: 4px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="font-size: 10px; font-weight: 700; color: #f97316;">#${index + 1}</span>
+                  <span style="font-size: 10px; font-weight: 500; color: #374151;">${item.name}</span>
+                </div>
+                <span style="font-size: 10px; font-weight: 600; color: #111827;">${item.count} reports (${item.value}%)</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
     </div>
 ` : ''}
   </div>
@@ -2644,11 +2728,26 @@ ${barangayChart && (usersChart || peakHoursChart) ? `
     ${barangayChart ? `
       <div class="chart-item" style="grid-column: 1;">
         <div class="section-title">Reports per Barangay</div>
-        <div class="section-content">Geographic distribution of reports across barangays</div>
         <div style="margin-bottom: 8px; padding: 8px; background: #f9fafb; border-radius: 4px; font-size: 11px;">
           <strong>Filter:</strong> ${barangayReportsFilter}
         </div>
         <img src="${barangayChart}" alt="Barangay Reports Chart" style="border: 1px solid #e5e7eb; border-radius: 8px; width: 100%;" />
+        ${top3Barangays.length > 0 ? `
+          <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5e7eb;">
+            <div style="font-size: 11px; font-weight: 600; color: #374151; margin-bottom: 8px; text-align: center;">Top 3 Most Active Barangays</div>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              ${top3Barangays.map((item, index) => `
+                <div style="display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; background: #f9fafb; border-radius: 4px;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 10px; font-weight: 700; color: #f97316;">#${index + 1}</span>
+                    <span style="font-size: 10px; font-weight: 500; color: #374151;">${item.name}</span>
+                  </div>
+                  <span style="font-size: 10px; font-weight: 600; color: #111827;">${item.reports} reports</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
       </div>
     ` : ''}
     ${usersChart || peakHoursChart ? `
@@ -2656,7 +2755,6 @@ ${barangayChart && (usersChart || peakHoursChart) ? `
 ${usersChart ? `
         <div class="chart-item">
           <div class="section-title">Active Users per Barangay</div>
-          <div class="section-content">User distribution across different barangays</div>
           <div style="margin-bottom: 8px; padding: 8px; background: #f9fafb; border-radius: 4px; font-size: 11px;">
             <strong>Filter:</strong> ${usersBarangayFilter}
           </div>
@@ -2666,7 +2764,6 @@ ${usersChart ? `
 ${peakHoursChart ? `
         <div class="chart-item">
           <div class="section-title">Peak Reporting Hours</div>
-          <div class="section-content">Time-based analysis of report submission patterns</div>
           <div style="margin-bottom: 8px; padding: 8px; background: #f9fafb; border-radius: 4px; font-size: 11px;">
             <strong>Filter:</strong> ${peakHoursFilter}
           </div>
@@ -2681,11 +2778,26 @@ ${peakHoursChart ? `
 ${barangayChart && !usersChart && !peakHoursChart ? `
   <div class="chart-item" style="width: 100%; margin-bottom: 30px;">
     <div class="section-title">Reports per Barangay</div>
-    <div class="section-content">Geographic distribution of reports across barangays</div>
     <div style="margin-bottom: 8px; padding: 8px; background: #f9fafb; border-radius: 4px; font-size: 11px;">
       <strong>Filter:</strong> ${barangayReportsFilter}
     </div>
     <img src="${barangayChart}" alt="Barangay Reports Chart" style="border: 1px solid #e5e7eb; border-radius: 8px; width: 100%;" />
+    ${top3Barangays.length > 0 ? `
+      <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5e7eb;">
+        <div style="font-size: 11px; font-weight: 600; color: #374151; margin-bottom: 8px; text-align: center;">Top 3 Most Active Barangays</div>
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          ${top3Barangays.map((item, index) => `
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; background: #f9fafb; border-radius: 4px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 10px; font-weight: 700; color: #f97316;">#${index + 1}</span>
+                <span style="font-size: 10px; font-weight: 500; color: #374151;">${item.name}</span>
+              </div>
+              <span style="font-size: 10px; font-weight: 600; color: #111827;">${item.reports} reports</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    ` : ''}
   </div>
 ` : ''}
 ${(!barangayChart || (!usersChart && !peakHoursChart)) && (usersChart || peakHoursChart) ? `
@@ -2693,7 +2805,6 @@ ${(!barangayChart || (!usersChart && !peakHoursChart)) && (usersChart || peakHou
 ${usersChart ? `
     <div class="chart-item" style="width: 100%; margin-bottom: 15px;">
       <div class="section-title">Active Users per Barangay</div>
-      <div class="section-content">User distribution across different barangays</div>
       <div style="margin-bottom: 8px; padding: 8px; background: #f9fafb; border-radius: 4px; font-size: 11px;">
         <strong>Filter:</strong> ${usersBarangayFilter}
       </div>
@@ -2703,7 +2814,6 @@ ${usersChart ? `
 ${peakHoursChart ? `
     <div class="chart-item" style="width: 100%;">
       <div class="section-title">Peak Reporting Hours</div>
-      <div class="section-content">Time-based analysis of report submission patterns</div>
       <div style="margin-bottom: 8px; padding: 8px; background: #f9fafb; border-radius: 4px; font-size: 11px;">
         <strong>Filter:</strong> ${peakHoursFilter}
       </div>
@@ -2716,15 +2826,9 @@ ${peakHoursChart ? `
 ${calendarChart ? `
   <div class="chart-item" style="width: 100%; margin-bottom: 30px;">
     <div class="section-title">Report Activity Calendar</div>
-    <div class="section-content">Daily report activity heatmap for 2025</div>
     <img src="${calendarChart}" alt="Calendar Heatmap" style="border: 1px solid #e5e7eb; border-radius: 8px; width: 100%;" />
   </div>
 ` : ''}
-
-  <div style="margin-top: 50px; padding-top: 20px; border-top: 2px solid #e5e7eb; text-align: center; font-size: 12px; color: #6b7280;">
-    <p>AcciZard - Lucban Disaster Risk Reduction and Management Office</p>
-    <p>This report was generated automatically on ${dateString} at ${timeString}</p>
-  </div>
 
   <script>
     window.onload = function() {
@@ -2737,11 +2841,158 @@ ${calendarChart ? `
 </html>
     `;
 
-      // Write and print
-      printWindow.document.write(htmlContent);
-      printWindow.document.close();
-      
-      toast.success('Dashboard exported as printable HTML. The print dialog will open shortly.');
+      // Create a temporary div element with the HTML content
+      const pdfContent = document.createElement('div');
+      pdfContent.innerHTML = htmlContent;
+      pdfContent.style.position = 'absolute';
+      pdfContent.style.left = '-9999px';
+      pdfContent.style.width = '210mm'; // A4 width
+      document.body.appendChild(pdfContent);
+
+      try {
+        // Ensure DM Sans font is loaded
+        let fontLoaded = false;
+        if (document.fonts && document.fonts.check) {
+          fontLoaded = document.fonts.check("1em 'DM Sans'");
+        }
+
+        if (!fontLoaded) {
+          const existingFontLink = document.head.querySelector('link[href*="DM+Sans"]');
+          if (!existingFontLink) {
+            const fontLink = document.createElement('link');
+            fontLink.rel = 'stylesheet';
+            fontLink.href = 'https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&display=swap';
+            document.head.appendChild(fontLink);
+            
+            await new Promise((resolve) => {
+              fontLink.onload = resolve;
+              fontLink.onerror = resolve;
+              setTimeout(resolve, 2000);
+            });
+          }
+        }
+
+        if (document.fonts && document.fonts.ready) {
+          await document.fonts.ready;
+        }
+
+        // Wait a bit for images to load
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // Capture the HTML content as canvas
+        const canvas = await html2canvas(pdfContent, {
+          allowTaint: true,
+          logging: false,
+          useCORS: true,
+          scale: 2,
+          fontEmbedCSS: true,
+          onclone: (clonedDoc) => {
+            const clonedHead = clonedDoc.head;
+            const clonedBody = clonedDoc.body;
+            
+            if (clonedHead) {
+              const existingLink = clonedHead.querySelector('link[href*="DM+Sans"]');
+              if (!existingLink) {
+                const fontLink = clonedDoc.createElement('link');
+                fontLink.rel = 'stylesheet';
+                fontLink.href = 'https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&display=swap';
+                clonedHead.appendChild(fontLink);
+              }
+            }
+            
+            if (clonedBody) {
+              clonedBody.style.fontFamily = "'DM Sans', sans-serif";
+              const allClonedElements = clonedBody.querySelectorAll('*');
+              allClonedElements.forEach((el: any) => {
+                if (el.style) {
+                  el.style.fontFamily = "'DM Sans', sans-serif";
+                }
+              });
+            }
+          }
+        } as any);
+
+        // Import jsPDF dynamically
+        const { default: jsPDF } = await import('jspdf');
+        const pdf = new jsPDF('p', 'mm', 'a4');
+        
+        // 0.5 inch = 12.7mm margins
+        const margin = 12.7;
+        const contentWidth = 210 - (margin * 2); // 184.6mm
+        const pageHeight = 297;
+        const contentHeight = pageHeight - (margin * 2); // 271.6mm per page
+        const imgWidth = contentWidth;
+        const imgHeight = (canvas.height * imgWidth) / canvas.width;
+        
+        // Calculate pixels per mm for height
+        const pixelsPerMm = canvas.height / imgHeight;
+        const contentHeightPx = contentHeight * pixelsPerMm;
+        
+        // Estimate header height - approximately 100px at scale 2
+        const headerHeightPx = 100 * 2;
+        const headerHeightMm = headerHeightPx / pixelsPerMm;
+        const contentAreaHeightPx = contentHeightPx - headerHeightPx;
+        
+        // Extract header portion from canvas
+        const headerCanvas = document.createElement('canvas');
+        headerCanvas.width = canvas.width;
+        headerCanvas.height = Math.min(headerHeightPx, canvas.height);
+        const headerCtx = headerCanvas.getContext('2d');
+        if (headerCtx) {
+          headerCtx.drawImage(canvas, 0, 0, canvas.width, headerCanvas.height, 0, 0, canvas.width, headerCanvas.height);
+        }
+        
+        // First page - extract and add top portion (includes header)
+        const firstPageCanvas = document.createElement('canvas');
+        firstPageCanvas.width = canvas.width;
+        firstPageCanvas.height = Math.min(canvas.height, contentHeightPx);
+        const firstPageCtx = firstPageCanvas.getContext('2d');
+        if (firstPageCtx) {
+          firstPageCtx.drawImage(canvas, 0, 0, canvas.width, firstPageCanvas.height, 0, 0, canvas.width, firstPageCanvas.height);
+          const firstPageImgData = firstPageCanvas.toDataURL('image/png');
+          pdf.addImage(firstPageImgData, 'PNG', margin, margin, imgWidth, firstPageCanvas.height / pixelsPerMm);
+        }
+        
+        // Additional pages - combine header with content portions
+        let yOffset = firstPageCanvas.height;
+        while (yOffset < canvas.height) {
+          const pageCanvas = document.createElement('canvas');
+          const contentPortionHeight = Math.min(contentAreaHeightPx, canvas.height - yOffset);
+          pageCanvas.width = canvas.width;
+          pageCanvas.height = headerHeightPx + contentPortionHeight;
+          const pageCtx = pageCanvas.getContext('2d');
+          if (pageCtx) {
+            // Draw header at top
+            pageCtx.drawImage(headerCanvas, 0, 0, canvas.width, headerCanvas.height, 0, 0, canvas.width, headerCanvas.height);
+            // Draw content portion below header
+            pageCtx.drawImage(canvas, 0, yOffset, canvas.width, contentPortionHeight, 0, headerCanvas.height, canvas.width, contentPortionHeight);
+            const pageImgData = pageCanvas.toDataURL('image/png');
+            pdf.addPage();
+            pdf.addImage(pageImgData, 'PNG', margin, margin, imgWidth, (headerHeightPx + contentPortionHeight) / pixelsPerMm);
+          }
+          yOffset += contentPortionHeight;
+        }
+        
+        // Generate filename with timestamp
+        const now = new Date();
+        const timestamp = now.getTime();
+        const filename = `AcciZard_Dashboard_Report_${timestamp}.pdf`;
+        
+        // Download the PDF
+        pdf.save(filename);
+        
+        // Clean up
+        document.body.removeChild(pdfContent);
+        
+        toast.success('PDF generated and downloaded successfully');
+      } catch (error) {
+        console.error('Error generating PDF:', error);
+        toast.error('Failed to generate PDF. Please try again.');
+        // Clean up on error
+        if (pdfContent.parentNode) {
+          document.body.removeChild(pdfContent);
+        }
+      }
     } catch (error) {
       console.error('Error generating report:', error);
       toast.error('Failed to generate report. Please try again.');
@@ -3049,7 +3300,8 @@ ${calendarChart ? `
           axisLeft={axisLeftConfig}
           labelSkipWidth={12}
           labelSkipHeight={12}
-          labelTextColor={{ from: 'color', modifiers: [['darker', 1.6]] }}
+          labelTextColor="#ffffff"
+          enableLabel={true}
           legends={[]}
           animate={true}
           tooltip={({ id, value, indexValue, color }) => (
@@ -3128,7 +3380,8 @@ ${calendarChart ? `
           axisLeft={axisLeftConfig}
           labelSkipWidth={12}
           labelSkipHeight={12}
-          labelTextColor={{ from: 'color', modifiers: [['darker', 1.6]] }}
+          labelTextColor="#ffffff"
+          enableLabel={true}
           legends={[]}
           animate={true}
           tooltip={({ id, value, indexValue, color }) => (
@@ -3199,7 +3452,7 @@ ${calendarChart ? `
             .sort((a, b) => b.users - a.users)}
           keys={['users']}
           indexBy="barangay"
-          margin={{ top: 20, right: 40, bottom: 40, left: 50 }}
+          margin={{ top: 20, right: 40, bottom: 80, left: 50 }}
           padding={0.2}
           valueScale={{ type: 'linear' }}
           indexScale={{ type: 'band', round: true }}
@@ -3209,13 +3462,12 @@ ${calendarChart ? `
           axisTop={null}
           axisRight={null}
           axisBottom={{
-            tickSize: 0,
-            tickPadding: 0,
-            tickRotation: 0,
-            legend: '',
+            tickSize: 5,
+            tickPadding: 5,
+            tickRotation: -45,
+            legend: 'Barangay',
             legendPosition: 'middle',
-            legendOffset: 0,
-            format: () => '' // Hide all tick labels
+            legendOffset: 50
           }}
           axisLeft={{
             tickSize: 5,
@@ -3227,7 +3479,8 @@ ${calendarChart ? `
           }}
           labelSkipWidth={12}
           labelSkipHeight={12}
-          labelTextColor={{ from: 'color', modifiers: [['darker', 1.6]] }}
+          labelTextColor="#ffffff"
+          enableLabel={true}
           animate={true}
           tooltip={({ id, value, indexValue, color }) => (
             <div style={{
@@ -3324,7 +3577,8 @@ ${calendarChart ? `
           }}
           labelSkipWidth={12}
           labelSkipHeight={12}
-          labelTextColor={{ from: 'color', modifiers: [['darker', 1.6]] }}
+          labelTextColor="#ffffff"
+          enableLabel={true}
           animate={true}
           tooltip={({ id, value, indexValue, color }) => (
             <div style={{
@@ -3395,7 +3649,7 @@ ${calendarChart ? `
           }]}
           margin={{ top: 20, right: 40, bottom: 60, left: 50 }}
           xScale={{ type: 'point' }}
-          yScale={{ type: 'linear', min: 'auto', max: 'auto' }}
+          yScale={{ type: 'linear', min: 0, max: 'auto' }}
           theme={nivoTheme}
           axisTop={null}
           axisRight={null}
@@ -3494,7 +3748,7 @@ ${calendarChart ? `
           }]}
           margin={{ top: 50, right: 130, bottom: 100, left: 60 }}
           xScale={{ type: 'point' }}
-          yScale={{ type: 'linear', min: 'auto', max: 'auto' }}
+          yScale={{ type: 'linear', min: 0, max: 'auto' }}
           theme={nivoTheme}
           axisTop={null}
           axisRight={null}
@@ -4394,7 +4648,7 @@ ${calendarChart ? `
                 size="lg"
               >
                 <Download className="h-5 w-5 mr-2" />
-                Export
+                Export as PDF
               </Button>
             </div>
           </div>
@@ -4610,6 +4864,31 @@ ${calendarChart ? `
                     outerRadius={105} 
                     paddingAngle={5} 
                     dataKey="count"
+                    label={({ count, percent, cx, cy, midAngle, innerRadius, outerRadius }) => {
+                      // Only show label if slice is large enough (more than 5% of total)
+                      if (percent < 0.05) return null;
+                      
+                      const RADIAN = Math.PI / 180;
+                      const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+                      const x = cx + radius * Math.cos(-midAngle * RADIAN);
+                      const y = cy + radius * Math.sin(-midAngle * RADIAN);
+                      
+                      return (
+                        <text 
+                          x={x} 
+                          y={y} 
+                          fill="#ffffff" 
+                          textAnchor={x > cx ? 'start' : 'end'} 
+                          dominantBaseline="central"
+                          fontSize={12}
+                          fontWeight="bold"
+                          style={{ textShadow: '1px 1px 2px rgba(0,0,0,0.7)' }}
+                        >
+                          {count}
+                        </text>
+                      );
+                    }}
+                    labelLine={false}
                   >
                     {reportTypeData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
                   </Pie>
@@ -4850,6 +5129,7 @@ ${calendarChart ? `
               <div className="h-40">
                 <UsersPerBarangayChart height="100%" chartId="users-chart" />
               </div>
+              
             </CardContent>
           </Card>
 
@@ -5072,6 +5352,7 @@ ${calendarChart ? `
           <div className="flex-1 min-h-0 mt-4">
             <UsersPerBarangayChartModal height="calc(90vh - 140px)" chartId="users-chart-modal" />
           </div>
+          
         </DialogContent>
       </Dialog>
 
@@ -5136,6 +5417,31 @@ ${calendarChart ? `
                   outerRadius={220} 
                   paddingAngle={5} 
                   dataKey="count"
+                  label={({ count, percent, cx, cy, midAngle, innerRadius, outerRadius }) => {
+                    // Only show label if slice is large enough (more than 3% of total)
+                    if (percent < 0.03) return null;
+                    
+                    const RADIAN = Math.PI / 180;
+                    const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+                    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+                    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+                    
+                    return (
+                      <text 
+                        x={x} 
+                        y={y} 
+                        fill="#ffffff" 
+                        textAnchor={x > cx ? 'start' : 'end'} 
+                        dominantBaseline="central"
+                        fontSize={16}
+                        fontWeight="bold"
+                        style={{ textShadow: '1px 1px 2px rgba(0,0,0,0.7)' }}
+                      >
+                        {count}
+                      </text>
+                    );
+                  }}
+                  labelLine={false}
                 >
                   {reportTypeData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
                 </Pie>
