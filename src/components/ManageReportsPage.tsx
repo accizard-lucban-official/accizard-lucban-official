@@ -9452,8 +9452,8 @@ useEffect(() => {
                                         Uploading files...
                                       </p>
                                     </div>
-                                  </div>
-                                )}
+                                              </div>
+                                            )}
                               </div>
                             ) : (
                               // View Mode: Show read-only admin media

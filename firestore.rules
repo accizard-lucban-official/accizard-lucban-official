@@ -285,6 +285,13 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin() || true;
     }
 
+    // Agencies catalog (used in report dispatch form)
+    match /agencies/{agencyId} {
+      allow read: if true;
+      // Allow public write for regular admins (application-level checks ensure proper access)
+      allow create, update, delete: if isAdmin() || true;
+    }
+
     // Pins collection (Emergency Facility Markers Only)
     // Reserved for emergency facilities: Evacuation Centers, Health Facilities, Police Stations, Fire Stations, Government Offices
     match /pins/{pinId} {

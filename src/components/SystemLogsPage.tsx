@@ -300,7 +300,7 @@ export function SystemLogsPage() {
     }
     
     return matchesSearch && matchesUser && matchesActionType && matchesDateRange;
-    });
+  });
   }, [activityLogs, searchTerm, userFilter, actionTypeFilter, dateRange, adminUsers, superAdmins]);
 
   // Additional effect to ensure custom IDs are fetched for filtered logs

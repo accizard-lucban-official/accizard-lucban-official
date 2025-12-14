@@ -869,19 +869,14 @@ export function ManageUsersPage() {
       const wasGranted = !confirmPermissionChange.hasEditPermission;
       
       // Define all edit permissions that should be granted/revoked
-      // Include manage permissions so admins can add/edit items
+      // Note: Regular admins can only add/edit, not delete
       const editPermissions = [
-        'manage_admins',        // Required for canManageAdmins() - allows adding/editing admins
-        'manage_residents',     // Required for canManageResidents() - allows adding/editing residents
         'edit_reports',
         'edit_residents',
         'edit_announcements',
         'edit_pins',
-        'delete_reports',
-        'delete_residents',
-        'delete_announcements',
-        'delete_pins',
         'add_report_to_map',
+        'add_placemark',
         'change_resident_status'
       ];
       
@@ -905,14 +900,19 @@ export function ManageUsersPage() {
         updatedPermissions = currentPermissions.filter(perm => !editPermissions.includes(perm));
       }
       
+      // Remove any delete permissions that might exist (regular admins can't delete)
+      const cleanedPermissions = updatedPermissions.filter(perm => 
+        !perm.startsWith('delete_')
+      );
+      
       await updateDoc(doc(db, "admins", confirmPermissionChange.id), {
         hasEditPermission: wasGranted,
-        permissions: updatedPermissions
+        permissions: cleanedPermissions
       });
       setAdminUsers(adminUsers.map(admin => admin.id === confirmPermissionChange.id ? {
         ...admin,
         hasEditPermission: wasGranted,
-        permissions: updatedPermissions
+        permissions: cleanedPermissions
       } : admin));
       
       // Log activity
@@ -1448,77 +1448,77 @@ export function ManageUsersPage() {
           const updatedAdmins = adminUsers.filter(admin => items.includes(admin.id));
           
           // Define all edit permissions that should be granted/revoked
-          // Include manage permissions so admins can add/edit items
+          // Note: Regular admins can only add/edit, not delete
           const editPermissions = [
-            'manage_admins',        // Required for canManageAdmins() - allows adding/editing admins
-            'manage_residents',     // Required for canManageResidents() - allows adding/editing residents
             'edit_reports',
             'edit_residents',
             'edit_announcements',
             'edit_pins',
-            'delete_reports',
-            'delete_residents',
-            'delete_announcements',
-            'delete_pins',
             'add_report_to_map',
+            'add_placemark',
             'change_resident_status'
           ];
           
           for (const adminId of items) {
             const admin = adminUsers.find(a => a.id === adminId);
-            if (!admin) continue;
-            
-            // Get current permissions array
-            const currentPermissions = Array.isArray(admin.permissions) 
-              ? [...admin.permissions] 
-              : [];
-            
-            // Update permissions array based on grant/revoke
-            let updatedPermissions: string[];
-            if (value) {
-              // Add permissions that aren't already in the array
-              updatedPermissions = [...currentPermissions];
-              editPermissions.forEach(perm => {
-                if (!updatedPermissions.includes(perm)) {
-                  updatedPermissions.push(perm);
-                }
+            if (admin) {
+              // Get current permissions array
+              const currentPermissions = Array.isArray(admin.permissions) 
+                ? [...admin.permissions] 
+                : [];
+              
+              // Update permissions array based on grant/revoke
+              let updatedPermissions: string[];
+              if (value) {
+                // Add permissions that aren't already in the array
+                updatedPermissions = [...currentPermissions];
+                editPermissions.forEach(perm => {
+                  if (!updatedPermissions.includes(perm)) {
+                    updatedPermissions.push(perm);
+                  }
+                });
+              } else {
+                // Remove edit permissions from the array
+                updatedPermissions = currentPermissions.filter(perm => !editPermissions.includes(perm));
+              }
+              
+              // Remove any delete permissions that might exist (regular admins can't delete)
+              const cleanedPermissions = updatedPermissions.filter(perm => 
+                !perm.startsWith('delete_')
+              );
+              
+              await updateDoc(doc(db, "admins", adminId), {
+                hasEditPermission: value,
+                permissions: cleanedPermissions
               });
-            } else {
-              // Remove edit permissions from the array
-              updatedPermissions = currentPermissions.filter(perm => !editPermissions.includes(perm));
             }
-            
-            await updateDoc(doc(db, "admins", adminId), {
-              hasEditPermission: value,
-              permissions: updatedPermissions
-            });
           }
-          
           setAdminUsers(prev => prev.map(admin => {
-            if (!items.includes(admin.id)) return admin;
-            
-            // Calculate updated permissions for this admin
-            const currentPermissions = Array.isArray(admin.permissions) 
-              ? [...admin.permissions] 
-              : [];
-            
-            let updatedPermissions: string[];
-            if (value) {
-              updatedPermissions = [...currentPermissions];
-              editPermissions.forEach(perm => {
-                if (!updatedPermissions.includes(perm)) {
-                  updatedPermissions.push(perm);
-                }
-              });
-            } else {
-              updatedPermissions = currentPermissions.filter(perm => !editPermissions.includes(perm));
+            if (items.includes(admin.id)) {
+              const currentPermissions = Array.isArray(admin.permissions) 
+                ? [...admin.permissions] 
+                : [];
+              
+              let updatedPermissions: string[];
+              if (value) {
+                updatedPermissions = [...currentPermissions];
+                editPermissions.forEach(perm => {
+                  if (!updatedPermissions.includes(perm)) {
+                    updatedPermissions.push(perm);
+                  }
+                });
+              } else {
+                updatedPermissions = currentPermissions.filter(perm => !editPermissions.includes(perm));
+              }
+              
+              // Remove any delete permissions (regular admins can't delete)
+              const cleanedPermissions = updatedPermissions.filter(perm => 
+                !perm.startsWith('delete_')
+              );
+              
+              return { ...admin, hasEditPermission: value, permissions: cleanedPermissions };
             }
-            
-            return {
-              ...admin,
-              hasEditPermission: value,
-              permissions: updatedPermissions
-            };
+            return admin;
           }));
           setSelectedAdmins([]);
           

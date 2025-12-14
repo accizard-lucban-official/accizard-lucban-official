@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db, auth } from '@/lib/firebase';
+import { SessionManager } from '@/lib/sessionManager';
 
 export interface UserRole {
   id: string;
@@ -22,14 +23,50 @@ export function useUserRole() {
   const fetchUserRole = async () => {
     try {
       setLoading(true);
-      const adminLoggedIn = localStorage.getItem("adminLoggedIn") === "true";
+      console.log('[useUserRole] Starting fetchUserRole...');
       
-      if (adminLoggedIn) {
+      // Check new session format first, then fall back to old format
+      const session = SessionManager.getSession();
+      const adminLoggedIn = session?.isLoggedIn && session?.userType === 'admin';
+      const username = session?.username || localStorage.getItem("adminUsername");
+      
+      // Also check old format for backward compatibility
+      const oldAdminLoggedIn = localStorage.getItem("adminLoggedIn") === "true";
+      const oldUsername = localStorage.getItem("adminUsername");
+      
+      // Use new session if available, otherwise fall back to old format
+      const isAdminLoggedIn = adminLoggedIn || oldAdminLoggedIn;
+      const adminUsername = username || oldUsername;
+      
+      console.log('[useUserRole] Session check:', {
+        session: session,
+        adminLoggedIn: isAdminLoggedIn,
+        username: adminUsername,
+        newFormat: {
+          hasSession: !!session,
+          isLoggedIn: session?.isLoggedIn,
+          userType: session?.userType,
+          username: session?.username
+        },
+        oldFormat: {
+          adminLoggedIn: oldAdminLoggedIn,
+          username: oldUsername
+        }
+      });
+      
+      if (isAdminLoggedIn) {
         // Admin user - fetch from admins collection using username
-        const username = localStorage.getItem("adminUsername");
-        if (username) {
-          const q = query(collection(db, "admins"), where("username", "==", username));
+        if (adminUsername) {
+          console.log('[useUserRole] Querying admins collection for username:', adminUsername);
+          const q = query(collection(db, "admins"), where("username", "==", adminUsername));
           const querySnapshot = await getDocs(q);
+          
+          console.log('[useUserRole] Query result:', {
+            empty: querySnapshot.empty,
+            size: querySnapshot.size,
+            docs: querySnapshot.docs.map(doc => ({ id: doc.id, data: doc.data() }))
+          });
+          
           if (!querySnapshot.empty) {
             const data = querySnapshot.docs[0].data();
             
@@ -37,22 +74,23 @@ export function useUserRole() {
             let permissions: string[] = Array.isArray(data.permissions) ? [...data.permissions] : [];
             
             // If hasEditPermission is true, add all edit permissions
-            // Include manage permissions so admins can add/edit items
-            if (data.hasEditPermission === true) {
+            // Note: Regular admins can only add/edit, not delete
+            // Handle both boolean true and string "true" (common Firestore issue)
+            const hasEditPerm = data.hasEditPermission === true || data.hasEditPermission === "true";
+            if (hasEditPerm) {
               const editPermissions = [
-                'manage_admins',        // Required for canManageAdmins() - allows adding/editing admins
-                'manage_residents',     // Required for canManageResidents() - allows adding/editing residents
                 'edit_reports',
                 'edit_residents',
                 'edit_announcements',
                 'edit_pins',
-                'delete_reports',
-                'delete_residents',
-                'delete_announcements',
-                'delete_pins',
                 'add_report_to_map',
+                'add_placemark',
                 'change_resident_status'
               ];
+              
+              // Debug logging
+              console.log('[useUserRole] Admin has edit permission, adding permissions:', editPermissions);
+              console.log('[useUserRole] Current permissions array before merge:', permissions);
               
               // Add permissions that aren't already in the array
               editPermissions.forEach(perm => {
@@ -62,24 +100,42 @@ export function useUserRole() {
               });
             }
             
-            setUserRole({
+            const finalUserRole = {
               id: querySnapshot.docs[0].id,
-              username: data.username || username,
-              name: data.name || data.fullName || username,
-              userType: "admin",
+              username: data.username || adminUsername,
+              name: data.name || data.fullName || adminUsername,
+              userType: "admin" as const,
               email: data.email || "",
               position: data.position || "",
               idNumber: data.idNumber || "",
               profilePicture: data.profilePicture || "/accizard-uploads/login-signup-cover.png",
               coverImage: data.coverImage || "",
               permissions: permissions
+            };
+            
+            // Debug logging
+            console.log('[useUserRole] Admin data from Firestore:', {
+              id: querySnapshot.docs[0].id,
+              username: data.username,
+              hasEditPermission: data.hasEditPermission,
+              permissionsFromFirestore: data.permissions,
+              finalPermissions: permissions
             });
+            console.log('[useUserRole] Setting userRole:', finalUserRole);
+            
+            setUserRole(finalUserRole);
             setLoading(false);
+            console.log('[useUserRole] Successfully set userRole for admin');
             return;
+          } else {
+            console.warn('[useUserRole] Admin query returned empty - admin not found in Firestore');
           }
+        } else {
+          console.warn('[useUserRole] No username found in localStorage');
         }
       } else {
         // Super admin user - fetch from superAdmin collection using email
+        console.log('[useUserRole] Not an admin login, checking for super admin...');
         const authUser = auth.currentUser;
         if (authUser && authUser.email) {
           const q = query(collection(db, "superAdmin"), where("email", "==", authUser.email));
@@ -114,11 +170,21 @@ export function useUserRole() {
             coverImage: "",
             permissions: []
           });
+          setLoading(false);
+          return;
         }
       }
+      
+      console.warn('[useUserRole] No userRole set - userRole will be null');
+      setUserRole(null);
       setLoading(false);
     } catch (error) {
-      console.error("Error fetching user role:", error);
+      console.error("[useUserRole] Error fetching user role:", error);
+      console.error("[useUserRole] Error details:", {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      setUserRole(null);
       setLoading(false);
     }
   };
@@ -131,8 +197,19 @@ export function useUserRole() {
   const isSuperAdmin = () => userRole?.userType === 'superadmin';
   const isAdmin = () => userRole?.userType === 'admin';
   const hasPermission = (permission: string) => {
-    if (!userRole) return false;
-    return userRole.permissions?.includes('all') || userRole.permissions?.includes(permission);
+    if (!userRole) {
+      console.log('[hasPermission] No userRole, returning false for:', permission);
+      return false;
+    }
+    const hasPerm = userRole.permissions?.includes('all') || userRole.permissions?.includes(permission);
+    if (!hasPerm) {
+      console.log('[hasPermission] Permission check failed:', {
+        permission,
+        userRolePermissions: userRole.permissions,
+        userType: userRole.userType
+      });
+    }
+    return hasPerm;
   };
 
   // Specific permission checks
@@ -142,23 +219,43 @@ export function useUserRole() {
   const canManageResidents = () => hasPermission('manage_residents') || isSuperAdmin();
   
   // Report permissions
-  const canEditReports = () => hasPermission('edit_reports') || isSuperAdmin();
+  const canEditReports = () => {
+    const result = hasPermission('edit_reports') || isSuperAdmin();
+    console.log('[canEditReports]', { result, isSuperAdmin: isSuperAdmin(), hasPermission: hasPermission('edit_reports') });
+    return result;
+  };
   const canDeleteReports = () => hasPermission('delete_reports') || isSuperAdmin();
-  const canAddReportToMap = () => hasPermission('add_report_to_map') || isSuperAdmin();
+  const canAddReportToMap = () => {
+    const result = hasPermission('add_report_to_map') || isSuperAdmin();
+    console.log('[canAddReportToMap]', { result, isSuperAdmin: isSuperAdmin(), hasPermission: hasPermission('add_report_to_map') });
+    return result;
+  };
   
   // Map/Pin permissions
-  const canAddPlacemark = () => hasPermission('add_placemark') || isSuperAdmin();
+  const canAddPlacemark = () => {
+    const result = hasPermission('add_placemark') || isSuperAdmin();
+    console.log('[canAddPlacemark]', { result, isSuperAdmin: isSuperAdmin(), hasPermission: hasPermission('add_placemark') });
+    return result;
+  };
   const canEditPins = () => hasPermission('edit_pins') || isSuperAdmin();
   const canDeletePins = () => hasPermission('delete_pins') || isSuperAdmin();
   
   // Announcement permissions
-  const canEditAnnouncements = () => hasPermission('edit_announcements') || isSuperAdmin();
+  const canEditAnnouncements = () => {
+    const result = hasPermission('edit_announcements') || isSuperAdmin();
+    console.log('[canEditAnnouncements]', { result, isSuperAdmin: isSuperAdmin(), hasPermission: hasPermission('edit_announcements') });
+    return result;
+  };
   const canDeleteAnnouncements = () => hasPermission('delete_announcements') || isSuperAdmin();
   
   // Resident permissions
   const canEditResidents = () => hasPermission('edit_residents') || isSuperAdmin();
   const canDeleteResidents = () => hasPermission('delete_residents') || isSuperAdmin();
-  const canChangeResidentStatus = () => hasPermission('change_resident_status') || isSuperAdmin();
+  const canChangeResidentStatus = () => {
+    const result = hasPermission('change_resident_status') || isSuperAdmin();
+    console.log('[canChangeResidentStatus]', { result, isSuperAdmin: isSuperAdmin(), hasPermission: hasPermission('change_resident_status') });
+    return result;
+  };
 
   return {
     userRole,
