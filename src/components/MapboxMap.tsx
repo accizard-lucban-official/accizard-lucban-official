@@ -1955,16 +1955,26 @@ export function MapboxMap({
       }
     };
 
-    // Toggle barangay boundaries - toggle both regular and satellite layers together
+    // Toggle barangay boundaries - show when barangay filter is enabled OR when satellite view is enabled
     // Note: lucban-boundary stays visible (not controlled by these toggles)
     const barangayVisible = layerFilters.barangay ?? false;
-    // Toggle both layers together - the appropriate one will show based on style
-    toggleLayer('lucban-brgys', barangayVisible);
-    toggleLayer('lucban-brgys-satellite', barangayVisible);
-    toggleLayer('lucban-fill', barangayVisible); // Toggle fill layer together with boundaries
+    const shouldShowBarangay = barangayVisible || isSatellite;
+    
+    // Toggle barangay layers based on satellite mode
+    if (isSatellite) {
+      // In satellite mode, always show lucban-brgys layer along with satellite-specific layer
+      toggleLayer('lucban-brgys', true); // Always show in satellite mode
+      toggleLayer('lucban-brgys-satellite', shouldShowBarangay); // Show satellite-specific layer based on filter
+    } else {
+      // In street mode, use regular boundaries based on filter state
+      toggleLayer('lucban-brgys', shouldShowBarangay);
+      toggleLayer('lucban-brgys-satellite', false); // Hide satellite layer in street mode
+    }
+    
+    toggleLayer('lucban-fill', shouldShowBarangay); // Toggle fill layer together with boundaries
 
-    // Toggle barangay labels (lucban-brgy-names) - use barangay filter instead of barangayLabel
-    toggleLayer('lucban-brgy-names', barangayVisible);
+    // Toggle barangay labels (lucban-brgy-names) - show when barangay filter is enabled OR when satellite view is enabled
+    toggleLayer('lucban-brgy-names', shouldShowBarangay);
 
     // Toggle waterways - use different layers based on satellite mode
     if (isSatellite) {

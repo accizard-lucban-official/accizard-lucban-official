@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Calendar as DatePickerCalendar } from "@/components/ui/calendar";
-import { Eye, Edit, Trash2, Plus, FileText, Calendar as CalendarIcon, Clock, MapPin, Upload, FileIcon, Image, Printer, Download, X, Search, FileDown, Car, Flame, Ambulance, Waves, Mountain, CircleAlert, Users, ShieldAlert, Activity, ArrowUpRight, ArrowUpDown, ArrowUp, ArrowDown, Layers, ZoomIn, ZoomOut, LocateFixed, Wrench, AlertTriangle, Zap, Leaf, Check, ChevronDown, Info, CheckSquare, Heart } from "lucide-react";
+import { Eye, Edit, Trash2, Plus, FileText, Calendar as CalendarIcon, Clock, MapPin, Upload, FileIcon, Image, Printer, Download, X, Search, FileDown, Car, Flame, Ambulance, Waves, Mountain, CircleAlert, Users, ShieldAlert, Activity, ArrowUpRight, ArrowUpDown, ArrowUp, ArrowDown, Layers, ZoomIn, ZoomOut, LocateFixed, Wrench, AlertTriangle, Zap, Leaf, Check, ChevronDown, Info, CheckSquare, Heart, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -121,6 +121,8 @@ type DispatchDataState = {
   timeCallReceived: string;
   timeOfDispatch: string;
   timeOfArrival: string;
+  responseTime?: string | null;
+  responseTimeMinutes?: number | null;
   hospitalArrival: string;
   returnedToOpcen: string;
   disasterRelated: string;
@@ -1111,7 +1113,7 @@ export function ManageReportsPage() {
       // Query Firestore to get all existing reportIds
       let reportsSnapshot;
       try {
-        const reportsQuery = query(collection(db, "reports"));
+      const reportsQuery = query(collection(db, "reports"));
         console.log("📡 Querying Firestore for reports...");
         reportsSnapshot = await getDocs(reportsQuery);
         console.log("✅ Firestore query completed. Documents found:", reportsSnapshot.size);
@@ -3296,7 +3298,7 @@ useEffect(() => {
           
           if (!dateStr) return new Date(0); // Return epoch if no date
           
-          // Parse date format: MM/DD/YY
+        // Parse date format: MM/DD/YY
           const [month, day, year] = dateStr.split('/');
           const fullYear = year.length === 2 ? 2000 + parseInt(year) : parseInt(year);
           const date = new Date(fullYear, parseInt(month) - 1, parseInt(day));
@@ -7181,11 +7183,27 @@ useEffect(() => {
   };
 
   // Function to handle file selection
-  const handleFileSelection = (files: FileList | null) => {
+  const handleFileSelection = async (files: FileList | null) => {
     if (!files) return;
     
     const fileArray = Array.from(files);
-    setSelectedFiles(prev => [...prev, ...fileArray]);
+    
+    // Validate file sizes (25 MB limit)
+    const maxSize = 25 * 1024 * 1024; // 25 MB in bytes
+    const oversizedFiles = fileArray.filter(file => file.size > maxSize);
+    
+    if (oversizedFiles.length > 0) {
+      toast.error(`Some files exceed 25 MB limit: ${oversizedFiles.map(f => f.name).join(', ')}`);
+      // Only keep files that are within size limit
+      const validFiles = fileArray.filter(file => file.size <= maxSize);
+      if (validFiles.length === 0) return;
+      // Upload only valid files
+      await handleMediaUpload(validFiles);
+      return;
+    }
+    
+    // Automatically upload files when selected
+    await handleMediaUpload(fileArray);
   };
 
   // Function to remove selected file
@@ -9425,90 +9443,14 @@ useEffect(() => {
                                   return null;
                                 })()}
                                 
-                                {/* Show selected files */}
-                                {selectedFiles.length > 0 && (
-                                  <div className="mt-4 space-y-2">
-                                    <div className="flex items-center justify-between">
-                                      <p className="text-sm font-medium text-gray-700">
-                                        Selected Files ({selectedFiles.length})
+                                {/* Show uploading status */}
+                                {uploadingMedia && (
+                                  <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                    <div className="flex items-center gap-2">
+                                      <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+                                      <p className="text-sm text-blue-700 font-medium">
+                                        Uploading files...
                                       </p>
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={clearSelectedFiles}
-                                        className="text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
-                                      >
-                                        Clear All
-                                      </Button>
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto">
-                                      {selectedFiles.map((file, index) => {
-                                        const isImage = file.type.startsWith('image/');
-                                        const isVideo = file.type.startsWith('video/');
-                                        const fileUrl = filePreviewUrls[index];
-                                        
-                                        return (
-                                          <div key={`${file.name}-${file.size}-${index}`} className="relative border border-gray-200 rounded-lg p-2 bg-gray-50">
-                                            {isImage && (
-                                              <img 
-                                                src={fileUrl} 
-                                                alt={file.name}
-                                                className="w-full h-20 object-cover rounded cursor-pointer hover:opacity-80 transition-opacity"
-                                                onClick={() => {
-                                                  setPreviewImageUrl(fileUrl);
-                                                  setPreviewImageName(file.name);
-                                                  setShowImagePreview(true);
-                                                }}
-                                              />
-                                            )}
-                                            {isVideo && (
-                                              <div className="w-full h-20 bg-gray-200 rounded flex items-center justify-center">
-                                                <FileIcon className="h-8 w-8 text-gray-400" />
-                                              </div>
-                                            )}
-                                            {!isImage && !isVideo && (
-                                              <div className="w-full h-20 bg-gray-200 rounded flex items-center justify-center">
-                                                <FileIcon className="h-8 w-8 text-gray-400" />
-                                              </div>
-                                            )}
-                                            <div className="mt-1">
-                                              <p className="text-xs text-gray-600 truncate" title={file.name}>
-                                                {file.name}
-                                              </p>
-                                              <p className="text-xs text-gray-400">
-                                                {(file.size / 1024 / 1024).toFixed(2)} MB
-                                              </p>
-                                            </div>
-                                            <Button
-                                              type="button"
-                                              variant="ghost"
-                                              size="icon"
-                                              className="absolute top-1 right-1 h-6 w-6 bg-white hover:bg-red-100"
-                                              onClick={() => removeSelectedFile(index)}
-                                            >
-                                              <X className="h-3 w-3 text-red-600" />
-                                            </Button>
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                    <div className="flex gap-2 justify-center pt-2">
-                                      <Button
-                                        type="button"
-                                        onClick={() => handleMediaUpload()}
-                                        disabled={uploadingMedia}
-                                        className="bg-brand-orange hover:bg-brand-orange-400 text-white"
-                                      >
-                                        {uploadingMedia ? (
-                                          <>
-                                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                                            Uploading...
-                                          </>
-                                        ) : (
-                                          "Upload Files"
-                                        )}
-                                      </Button>
                                     </div>
                                   </div>
                                 )}
@@ -9959,12 +9901,12 @@ useEffect(() => {
                                 // Calculate on the fly if both times are present but response time not saved
                                 return (
                                   <span className="text-black">
-                                    {calculateResponseTime(dispatchData.timeOfDispatch, dispatchData.timeOfArrival)}
-                                  </span>
+                                  {calculateResponseTime(dispatchData.timeOfDispatch, dispatchData.timeOfArrival)}
+                                </span>
                                 );
                               } else {
                                 return (
-                                  <span className="text-gray-500">Calculate after entering dispatch and arrival times</span>
+                              <span className="text-gray-500">Calculate after entering dispatch and arrival times</span>
                                 );
                               }
                             })()}

@@ -487,41 +487,8 @@ export function ProfilePage() {
     const loadProfileData = async () => {
       const adminLoggedIn = localStorage.getItem("adminLoggedIn") === "true";
       
-      // If userRole is loaded, use it
-      if (userRole && !roleLoading) {
-        setProfile(prev => {
-          const newProfile = {
-            name: userRole.name || "",
-            position: userRole.position || "",
-            idNumber: userRole.idNumber || "",
-            username: userRole.username || "",
-            email: userRole.email || "",
-            profilePicture: userRole.profilePicture || "/accizard-uploads/login-signup-cover.png",
-            coverImage: userRole.coverImage || ""
-          };
-          // Only update if values actually changed (prevents overwriting during save)
-          const hasChanges = 
-            prev.name !== newProfile.name ||
-            prev.position !== newProfile.position ||
-            prev.idNumber !== newProfile.idNumber ||
-            prev.username !== newProfile.username ||
-            prev.email !== newProfile.email ||
-            prev.profilePicture !== newProfile.profilePicture ||
-            prev.coverImage !== newProfile.coverImage;
-          
-          if (hasChanges && !editingField) {
-            return newProfile;
-          }
-          return prev;
-        });
-        // Clear any pending changes when userRole changes (only when not editing)
-        if (!editingField) {
-          setPendingProfilePicture(null);
-          setPendingCoverImage(null);
-        }
-      } 
-      // If userRole is not loaded yet and user is admin, fetch directly from Firestore
-      else if (adminLoggedIn && !userRole && !roleLoading) {
+      if (adminLoggedIn) {
+        // For admins, always fetch directly from Firestore to ensure we get the latest data
         const username = localStorage.getItem("adminUsername");
         if (username) {
           try {
@@ -539,7 +506,41 @@ export function ProfilePage() {
                   profilePicture: data.profilePicture || "/accizard-uploads/login-signup-cover.png",
                   coverImage: data.coverImage || ""
                 };
-                // Only update if values actually changed
+                // Only update if values actually changed (prevents overwriting during save)
+                const hasChanges = 
+                  prev.name !== newProfile.name ||
+                  prev.position !== newProfile.position ||
+                  prev.idNumber !== newProfile.idNumber ||
+                  prev.username !== newProfile.username ||
+                  prev.email !== newProfile.email ||
+                  prev.profilePicture !== newProfile.profilePicture ||
+                  prev.coverImage !== newProfile.coverImage;
+                
+                if (hasChanges && !editingField) {
+                  return newProfile;
+                }
+                return prev;
+              });
+              // Clear any pending changes when profile data is refreshed (only when not editing)
+              if (!editingField) {
+                setPendingProfilePicture(null);
+                setPendingCoverImage(null);
+              }
+            }
+          } catch (error) {
+            console.error("Error fetching admin profile:", error);
+            // Fallback to userRole if Firestore fetch fails
+            if (userRole && !roleLoading) {
+              setProfile(prev => {
+                const newProfile = {
+                  name: userRole.name || "",
+                  position: userRole.position || "",
+                  idNumber: userRole.idNumber || "",
+                  username: userRole.username || "",
+                  email: userRole.email || "",
+                  profilePicture: userRole.profilePicture || "/accizard-uploads/login-signup-cover.png",
+                  coverImage: userRole.coverImage || ""
+                };
                 const hasChanges = 
                   prev.name !== newProfile.name ||
                   prev.position !== newProfile.position ||
@@ -555,8 +556,40 @@ export function ProfilePage() {
                 return prev;
               });
             }
-          } catch (error) {
-            console.error("Error fetching admin profile:", error);
+          }
+        }
+      } else {
+        // For super admins, use userRole if available
+        if (userRole && !roleLoading) {
+          setProfile(prev => {
+            const newProfile = {
+              name: userRole.name || "",
+              position: userRole.position || "",
+              idNumber: userRole.idNumber || "",
+              username: userRole.username || "",
+              email: userRole.email || "",
+              profilePicture: userRole.profilePicture || "/accizard-uploads/login-signup-cover.png",
+              coverImage: userRole.coverImage || ""
+            };
+            // Only update if values actually changed (prevents overwriting during save)
+            const hasChanges = 
+              prev.name !== newProfile.name ||
+              prev.position !== newProfile.position ||
+              prev.idNumber !== newProfile.idNumber ||
+              prev.username !== newProfile.username ||
+              prev.email !== newProfile.email ||
+              prev.profilePicture !== newProfile.profilePicture ||
+              prev.coverImage !== newProfile.coverImage;
+            
+            if (hasChanges && !editingField) {
+              return newProfile;
+            }
+            return prev;
+          });
+          // Clear any pending changes when userRole changes (only when not editing)
+          if (!editingField) {
+            setPendingProfilePicture(null);
+            setPendingCoverImage(null);
           }
         }
       }

@@ -104,6 +104,8 @@ export function RiskMapPage() {
   // Add Placemark Mode State
   const [isAddPlacemarkMode, setIsAddPlacemarkMode] = useState(false);
 
+  const [showAllAccidents, setShowAllAccidents] = useState(false); // Track "All" selection for accidents
+  const [showAllFacilities, setShowAllFacilities] = useState(false); // Track "All" selection for facilities
   const [accidentFilters, setAccidentFilters] = useState({
     roadCrash: false,
     fire: false,
@@ -131,6 +133,10 @@ export function RiskMapPage() {
     governmentOffices: false
   });
 
+  // Custom pin types loaded from localStorage
+  const [customPinTypes, setCustomPinTypes] = useState<string[]>([]);
+  const [customPinFilters, setCustomPinFilters] = useState<Record<string, boolean>>({});
+
   const [layerFilters, setLayerFilters] = useState({
     barangay: false, // Hidden by default (lucban-boundary stays visible)
     barangayLabel: false, // Hidden by default
@@ -155,6 +161,51 @@ export function RiskMapPage() {
 
   // Combined pin types (for backward compatibility)
   const pinTypes = [...accidentHazardTypes, ...emergencyFacilityTypes];
+
+  // Function to load custom pin types from localStorage
+  const loadCustomPinTypes = useCallback(() => {
+    const stored = localStorage.getItem("customPinTypes");
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        setCustomPinTypes(parsed);
+        // Initialize filter state for custom pin types
+        const initialFilters: Record<string, boolean> = {};
+        parsed.forEach((type: string) => {
+          // Create a key from the type name (convert to camelCase-like key)
+          const key = type.toLowerCase().replace(/\s+/g, '');
+          initialFilters[key] = false;
+        });
+        setCustomPinFilters(prev => {
+          // Preserve existing checked states
+          const newFilters: Record<string, boolean> = {};
+          parsed.forEach((type: string) => {
+            const key = type.toLowerCase().replace(/\s+/g, '');
+            newFilters[key] = prev[key] ?? false;
+          });
+          return newFilters;
+        });
+      } catch (e) {
+        console.error("Failed to parse custom pin types:", e);
+      }
+    } else {
+      setCustomPinTypes([]);
+      setCustomPinFilters({});
+    }
+  }, []);
+
+  // Load custom pin types from localStorage on mount
+  useEffect(() => {
+    loadCustomPinTypes();
+  }, [loadCustomPinTypes]);
+
+  // Reload custom pin types when filter panel opens (in case they were added elsewhere)
+  useEffect(() => {
+    if (isFiltersOpen) {
+      loadCustomPinTypes();
+    }
+  }, [isFiltersOpen, loadCustomPinTypes]);
+
 
   // Function to reverse geocode coordinates to get location name
   const reverseGeocode = async (lat: string, lng: string) => {
@@ -301,7 +352,15 @@ export function RiskMapPage() {
       return;
     }
     
-    // If checking an accident/hazard filter, turn off all emergency facility filters
+    // If checking an accident/hazard filter, turn off "All" mode, custom pins, and emergency facility filters
+    setShowAllAccidents(false);
+    setShowAllFacilities(false);
+    // Clear all custom pin filters
+    const clearedCustomFilters: Record<string, boolean> = {};
+    Object.keys(customPinFilters).forEach(key => {
+      clearedCustomFilters[key] = false;
+    });
+    setCustomPinFilters(clearedCustomFilters);
     setFacilityFilters({
       evacuationCenters: false,
       healthFacilities: false,
@@ -334,16 +393,98 @@ export function RiskMapPage() {
     setAccidentFilters(newFilters);
   };
 
-  const handleFacilityFilterChange = (key: keyof typeof facilityFilters) => {
-    const isCurrentlyChecked = facilityFilters[key];
+  const handleToggleAllAccidents = (checked: boolean) => {
+    setShowAllAccidents(checked);
+    
+    // If checking "All", uncheck all individual filters, custom pins, and facility filters
+    if (checked) {
+      setAccidentFilters({
+        roadCrash: false,
+        fire: false,
+        medicalEmergency: false,
+        flooding: false,
+        volcanicActivity: false,
+        landslide: false,
+        earthquake: false,
+        civilDisturbance: false,
+        armedConflict: false,
+        infectiousDisease: false,
+        poorInfrastructure: false,
+        obstructions: false,
+        electricalHazard: false,
+        environmentalHazard: false,
+        animalConcern: false,
+        others: false
+      });
+      // Clear all custom pin filters
+      const clearedCustomFilters: Record<string, boolean> = {};
+      Object.keys(customPinFilters).forEach(key => {
+        clearedCustomFilters[key] = false;
+      });
+      setCustomPinFilters(clearedCustomFilters);
+      setShowAllFacilities(false);
+      setFacilityFilters({
+        evacuationCenters: false,
+        healthFacilities: false,
+        policeStations: false,
+        fireStations: false,
+        governmentOffices: false
+      });
+    }
+  };
+
+  const handleToggleAllFacilities = (checked: boolean) => {
+    setShowAllFacilities(checked);
+    
+    // If checking "All", uncheck all individual filters, custom pins, and accident filters
+    if (checked) {
+      setFacilityFilters({
+        evacuationCenters: false,
+        healthFacilities: false,
+        policeStations: false,
+        fireStations: false,
+        governmentOffices: false
+      });
+      // Clear all custom pin filters
+      const clearedCustomFilters: Record<string, boolean> = {};
+      Object.keys(customPinFilters).forEach(key => {
+        clearedCustomFilters[key] = false;
+      });
+      setCustomPinFilters(clearedCustomFilters);
+      setShowAllAccidents(false);
+      setAccidentFilters({
+        roadCrash: false,
+        fire: false,
+        medicalEmergency: false,
+        flooding: false,
+        volcanicActivity: false,
+        landslide: false,
+        earthquake: false,
+        civilDisturbance: false,
+        armedConflict: false,
+        infectiousDisease: false,
+        poorInfrastructure: false,
+        obstructions: false,
+        electricalHazard: false,
+        environmentalHazard: false,
+        animalConcern: false,
+        others: false
+      });
+    }
+  };
+
+  const handleCustomPinFilterChange = (customType: string) => {
+    const key = customType.toLowerCase().replace(/\s+/g, '');
+    const isCurrentlyChecked = customPinFilters[key] ?? false;
     
     // If unchecking, allow it
     if (isCurrentlyChecked) {
-      setFacilityFilters(prev => ({ ...prev, [key]: false }));
+      setCustomPinFilters(prev => ({ ...prev, [key]: false }));
       return;
     }
     
-    // If checking a facility filter, turn off all accident/hazard filters
+    // If checking a custom pin filter, turn off all other filters
+    setShowAllAccidents(false);
     setAccidentFilters({
       roadCrash: false,
       fire: false,
@@ -362,6 +503,58 @@ export function RiskMapPage() {
       animalConcern: false,
       others: false
     });
+    setFacilityFilters({
+      evacuationCenters: false,
+      healthFacilities: false,
+      policeStations: false,
+      fireStations: false,
+      governmentOffices: false
+    });
+    
+    // Uncheck all other custom pins and check this one
+    const newCustomFilters: Record<string, boolean> = {};
+    customPinTypes.forEach(type => {
+      const typeKey = type.toLowerCase().replace(/\s+/g, '');
+      newCustomFilters[typeKey] = typeKey === key;
+    });
+    setCustomPinFilters(newCustomFilters);
+  };
+
+  const handleFacilityFilterChange = (key: keyof typeof facilityFilters) => {
+    const isCurrentlyChecked = facilityFilters[key];
+    
+    // If unchecking, allow it
+    if (isCurrentlyChecked) {
+      setFacilityFilters(prev => ({ ...prev, [key]: false }));
+      return;
+    }
+    
+    // If checking a facility filter, turn off all accident/hazard filters, custom pins, and "All" mode
+    setShowAllAccidents(false);
+    setAccidentFilters({
+      roadCrash: false,
+      fire: false,
+      medicalEmergency: false,
+      flooding: false,
+      volcanicActivity: false,
+      landslide: false,
+      earthquake: false,
+      civilDisturbance: false,
+      armedConflict: false,
+      infectiousDisease: false,
+      poorInfrastructure: false,
+      obstructions: false,
+      electricalHazard: false,
+      environmentalHazard: false,
+      animalConcern: false,
+      others: false
+    });
+    // Clear all custom pin filters
+    const clearedCustomFilters: Record<string, boolean> = {};
+    Object.keys(customPinFilters).forEach(key => {
+      clearedCustomFilters[key] = false;
+    });
+    setCustomPinFilters(clearedCustomFilters);
     
     // If checking, count total active filters
     const totalActive = Object.values(accidentFilters).filter(Boolean).length + 
@@ -405,39 +598,6 @@ export function RiskMapPage() {
     setDate({ from: start, to: end });
   };
 
-  const handleSelectAllAccidents = (checked: boolean) => {
-    if (checked) {
-      // Count total if we select all accidents
-      const accidentCount = Object.keys(accidentFilters).length;
-      const facilityActiveCount = Object.values(facilityFilters).filter(Boolean).length;
-      const totalWouldBe = accidentCount + facilityActiveCount;
-      
-      if (totalWouldBe > 10) {
-        toast.error('Cannot select all: Maximum 10 filter types allowed. Please unselect some facility filters first.');
-        return;
-      }
-    }
-    
-    const newFilters = {
-      roadCrash: checked,
-      fire: checked,
-      medicalEmergency: checked,
-      flooding: checked,
-      volcanicActivity: checked,
-      landslide: checked,
-      earthquake: checked,
-      civilDisturbance: checked,
-      armedConflict: checked,
-      infectiousDisease: checked,
-      poorInfrastructure: checked,
-      obstructions: checked,
-      electricalHazard: checked,
-      environmentalHazard: checked,
-      animalConcern: checked,
-      others: checked
-    };
-    setAccidentFilters(newFilters);
-  };
 
   const handleSelectAllFacilities = (checked: boolean) => {
     if (checked) {
@@ -775,23 +935,46 @@ ${placemarks}
 
   // Get active filters for the map
   const getActiveFilters = () => {
-    const activeAccidentTypes = Object.entries(accidentFilters)
-      .filter(([_, isActive]) => isActive)
-      .map(([key]) => convertFilterKeyToType(key));
+    // If "All" is selected, return empty array to indicate all types
+    const activeAccidentTypes = showAllAccidents 
+      ? [] 
+      : Object.entries(accidentFilters)
+          .filter(([_, isActive]) => isActive)
+          .map(([key]) => convertFilterKeyToType(key));
 
-    const activeFacilityTypes = Object.entries(facilityFilters)
+    const activeFacilityTypes = showAllFacilities
+      ? []
+      : Object.entries(facilityFilters)
+          .filter(([_, isActive]) => isActive)
+          .map(([key]) => convertFilterKeyToType(key));
+
+    const activeCustomTypes = Object.entries(customPinFilters)
       .filter(([_, isActive]) => isActive)
-      .map(([key]) => convertFilterKeyToType(key));
+      .map(([key]) => {
+        const customType = customPinTypes.find(type => 
+          type.toLowerCase().replace(/\s+/g, '') === key
+        );
+        return customType || '';
+      })
+      .filter(Boolean);
 
     return {
       accidentTypes: activeAccidentTypes,
       facilityTypes: activeFacilityTypes,
-      layerFilters: layerFilters
+      customTypes: activeCustomTypes,
+      layerFilters: layerFilters,
+      showAllAccidents: showAllAccidents,
+      showAllFacilities: showAllFacilities
     };
   };
 
   // Get active filter types as PinType array
   const getActiveFilterTypes = (): PinType[] => {
+    // If "All" is selected for accidents or facilities, return empty array to fetch all pins
+    if (showAllAccidents || showAllFacilities) {
+      return []; // Empty array means fetch all pins of the selected category
+    }
+    
     const activeTypes: PinType[] = [];
     
     Object.entries(accidentFilters).forEach(([key, isActive]) => {
@@ -808,6 +991,19 @@ ${placemarks}
       }
     });
     
+    // Add custom pin types that are active
+    Object.entries(customPinFilters).forEach(([key, isActive]) => {
+      if (isActive) {
+        // Find the custom type name from the key
+        const customType = customPinTypes.find(type => 
+          type.toLowerCase().replace(/\s+/g, '') === key
+        );
+        if (customType) {
+          activeTypes.push(customType as PinType);
+        }
+      }
+    });
+    
     return activeTypes;
   };
 
@@ -821,8 +1017,25 @@ ${placemarks}
       .filter(([_, isActive]) => isActive)
       .map(([key]) => convertFilterKeyToType(key));
     
-    // If no filters are active, clear pins and don't subscribe
-    if (activeTypes.length === 0) {
+    // Get active custom pin types
+    const activeCustomTypes = Object.entries(customPinFilters)
+      .filter(([_, isActive]) => isActive)
+      .map(([key]) => {
+        const customType = customPinTypes.find(type => 
+          type.toLowerCase().replace(/\s+/g, '') === key
+        );
+        return customType || '';
+      })
+      .filter(Boolean);
+
+    // Get active facility types
+    const activeFacilityTypes = Object.entries(facilityFilters)
+      .filter(([_, isActive]) => isActive)
+      .map(([key]) => convertFilterKeyToType(key));
+
+    // If no filters are active (including "All"), clear pins and don't subscribe
+    if (activeTypes.length === 0 && !showAllAccidents && !showAllFacilities && activeAccidentTypes.length === 0 && 
+        activeFacilityTypes.length === 0 && activeCustomTypes.length === 0) {
       setPins([]);
       return () => {}; // Return empty cleanup function
     }
@@ -832,14 +1045,19 @@ ${placemarks}
       searchQuery: searchQuery
     };
 
-    // Since we enforce a 10-item limit, we can safely use Firestore filtering
-    if (activeTypes.length > 0) {
+    // If "All" is selected for accidents or facilities, fetch all pins without type filter
+    if (showAllAccidents) {
+      filters.categories = ['accident']; // Only fetch from reportPins collection
+    } else if (showAllFacilities) {
+      filters.categories = ['facility']; // Only fetch from pins collection
+    } else if (activeTypes.length > 0) {
+      // Otherwise, apply type filters (with 10-item limit)
       filters.types = activeTypes;
     }
 
-    // Add date range filters only if accident/hazard types are selected
+    // Add date range filters only if accident/hazard types are selected, "All" is selected, or custom pins are selected
     // Date filters should not apply to emergency support facilities
-    if (activeAccidentTypes.length > 0) {
+    if (activeAccidentTypes.length > 0 || showAllAccidents || activeCustomTypes.length > 0) {
       if (date?.from) {
         const fromDate = new Date(date.from);
         fromDate.setHours(0, 0, 0, 0);
@@ -854,7 +1072,11 @@ ${placemarks}
 
     // Create a unique key for the current filter state
     const currentFilterKey = JSON.stringify({
+      showAllAccidents: showAllAccidents,
+      showAllFacilities: showAllFacilities,
       types: activeAccidentTypes.sort(),
+      facilityTypes: activeFacilityTypes.sort(),
+      customTypes: activeCustomTypes.sort(),
       dateFrom: date?.from?.toISOString(),
       dateTo: date?.to?.toISOString()
     });
@@ -874,20 +1096,56 @@ ${placemarks}
         setPins(fetchedPins);
         
         // Show message only once when filters change
-        if (activeAccidentTypes.length > 0 && !hasShownToastRef.current) {
+        if ((activeAccidentTypes.length > 0 || showAllAccidents || activeFacilityTypes.length > 0 || showAllFacilities || activeCustomTypes.length > 0) && !hasShownToastRef.current) {
           if (fetchedPins.length === 0) {
             // No pins found
-            const firstActiveType = activeAccidentTypes[0];
-            toast.info(`No reports for ${firstActiveType}`, {
-              duration: 3000
-            });
+            if (showAllAccidents) {
+              toast.info('No reports found', {
+                duration: 3000
+              });
+            } else if (showAllFacilities) {
+              toast.info('No facilities found', {
+                duration: 3000
+              });
+            } else if (activeCustomTypes.length > 0) {
+              toast.info(`No reports for ${activeCustomTypes[0]}`, {
+                duration: 3000
+              });
+            } else if (activeFacilityTypes.length > 0) {
+              toast.info(`No facilities for ${activeFacilityTypes[0]}`, {
+                duration: 3000
+              });
+            } else {
+              const firstActiveType = activeAccidentTypes[0];
+              toast.info(`No reports for ${firstActiveType}`, {
+                duration: 3000
+              });
+            }
           } else {
-            // Pins found - show count and type
-            const firstActiveType = activeAccidentTypes[0];
+            // Pins found - show count
             const count = fetchedPins.length;
-            toast.info(`${count} ${count === 1 ? 'report' : 'reports'} for ${firstActiveType}`, {
-              duration: 3000
-            });
+            if (showAllAccidents) {
+              toast.info(`Showing ${count} ${count === 1 ? 'report' : 'reports'}`, {
+                duration: 3000
+              });
+            } else if (showAllFacilities) {
+              toast.info(`Showing ${count} ${count === 1 ? 'facility' : 'facilities'}`, {
+                duration: 3000
+              });
+            } else if (activeCustomTypes.length > 0) {
+              toast.info(`${count} ${count === 1 ? 'report' : 'reports'} for ${activeCustomTypes[0]}`, {
+                duration: 3000
+              });
+            } else if (activeFacilityTypes.length > 0) {
+              toast.info(`${count} ${count === 1 ? 'facility' : 'facilities'} for ${activeFacilityTypes[0]}`, {
+                duration: 3000
+              });
+            } else {
+              const firstActiveType = activeAccidentTypes[0];
+              toast.info(`${count} ${count === 1 ? 'report' : 'reports'} for ${firstActiveType}`, {
+                duration: 3000
+              });
+            }
           }
           hasShownToastRef.current = true;
         }
@@ -906,7 +1164,7 @@ ${placemarks}
     return () => {
       unsubscribe();
     };
-  }, [accidentFilters, facilityFilters, date, searchQuery, subscribeToPins]);
+  }, [accidentFilters, facilityFilters, customPinFilters, date, searchQuery, subscribeToPins, showAllAccidents, showAllFacilities, customPinTypes]);
 
   return (
     <Layout>
@@ -1366,7 +1624,7 @@ ${placemarks}
                     scrollbarColor: '#cbd5e1 #f1f5f9'
                   }}
                 >
-                  <Accordion type="multiple" defaultValue={["layers", "accidents", "facilities"]} className="space-y-2">
+                  <Accordion type="multiple" defaultValue={["layers", "accidents", "facilities", "custom"]} className="space-y-2">
 
                     {/* Map Layers */}
                     <AccordionItem value="layers" className="mb-0 border-b-0 bg-white rounded-xl overflow-hidden">
@@ -1439,7 +1697,13 @@ ${placemarks}
                                 const newSatelliteValue = !prev.satellite;
                                 // Update map style when satellite is toggled
                                 setMapLayerStyle(newSatelliteValue ? 'satellite' : 'streets');
-                                return { ...prev, satellite: newSatelliteValue };
+                                // When enabling satellite view, also enable barangay boundaries and labels
+                                return { 
+                                  ...prev, 
+                                  satellite: newSatelliteValue,
+                                  barangay: newSatelliteValue ? true : prev.barangay, // Enable barangay when satellite is enabled, keep current state when disabled
+                                  barangayLabel: newSatelliteValue ? true : prev.barangayLabel // Enable labels when satellite is enabled, keep current state when disabled
+                                };
                               });
                             }}
                             className={cn(
@@ -1511,6 +1775,20 @@ ${placemarks}
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-2.5">
+                          {/* "All" button for accidents */}
+                          <button
+                            onClick={() => handleToggleAllAccidents(!showAllAccidents)}
+                            className={cn(
+                              "flex items-center gap-2 px-4 py-2.5 text-xs font-medium rounded-lg transition-all border-2 group",
+                              showAllAccidents 
+                                ? "bg-gradient-to-r from-brand-orange to-orange-500 text-white border-brand-orange" 
+                                : "bg-white text-gray-700 border-gray-200 hover:border-orange-300 hover:bg-orange-50 hover:text-brand-orange"
+                            )}
+                          >
+                            <CircleAlert className={cn("h-4 w-4 transition-colors", showAllAccidents ? "text-white" : "text-gray-600 group-hover:text-brand-orange")} />
+                            All Accidents/Hazards
+                          </button>
+                          
                           {Object.entries(accidentFilters).map(([key, checked]) => {
                             const displayName = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
                             const Icon = pinTypeIcons[displayName] || MapPin;
@@ -1544,6 +1822,20 @@ ${placemarks}
                       </AccordionTrigger>
                       <AccordionContent className="pt-3 pb-3 px-4">
                         <div className="flex flex-wrap gap-2.5">
+                          {/* "All" button for facilities */}
+                          <button
+                            onClick={() => handleToggleAllFacilities(!showAllFacilities)}
+                            className={cn(
+                              "flex items-center gap-2 px-4 py-2.5 text-xs font-medium rounded-lg transition-all border-2 group",
+                              showAllFacilities 
+                                ? "bg-gradient-to-r from-brand-orange to-orange-500 text-white border-brand-orange" 
+                                : "bg-white text-gray-700 border-gray-200 hover:border-orange-300 hover:bg-orange-50 hover:text-brand-orange"
+                            )}
+                          >
+                            <Building2 className={cn("h-4 w-4 transition-colors", showAllFacilities ? "text-white" : "text-gray-600 group-hover:text-brand-orange")} />
+                            All Facilities
+                          </button>
+                          
                           {Object.entries(facilityFilters).map(([key, checked]) => {
                             const displayName = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
                             const Icon = facilityIcons[key] || MapPin;
@@ -1566,6 +1858,41 @@ ${placemarks}
                         </div>
                       </AccordionContent>
                     </AccordionItem>
+
+                    {/* Custom Pin Types */}
+                    {customPinTypes.length > 0 && (
+                      <AccordionItem value="custom" className="mb-0 border-b-0 bg-white rounded-xl overflow-hidden">
+                        <AccordionTrigger className="py-3 px-4 text-sm font-semibold hover:no-underline bg-gradient-to-r from-orange-50 to-orange-100/50 text-orange-700 hover:from-orange-100 hover:to-orange-200/50 transition-all">
+                          <div className="flex items-center gap-2.5">
+                            <MapPin className="h-4 w-4 text-brand-orange" />
+                            <span className="text-sm text-brand-orange">Custom Pin Types</span>
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent className="pt-3 pb-3 px-4">
+                          <div className="flex flex-wrap gap-2.5">
+                            {customPinTypes.map((customType) => {
+                              const key = customType.toLowerCase().replace(/\s+/g, '');
+                              const isChecked = customPinFilters[key] ?? false;
+                              return (
+                                <button
+                                  key={customType}
+                                  onClick={() => handleCustomPinFilterChange(customType)}
+                                  className={cn(
+                                    "flex items-center gap-2 px-4 py-2.5 text-xs font-medium rounded-lg transition-all border-2 group",
+                                    isChecked 
+                                      ? "bg-gradient-to-r from-brand-orange to-orange-500 text-white border-brand-orange" 
+                                      : "bg-white text-gray-700 border-gray-200 hover:border-orange-300 hover:bg-orange-50 hover:text-brand-orange"
+                                  )}
+                                >
+                                  <MapPin className={cn("h-4 w-4 transition-colors", isChecked ? "text-white" : "text-gray-600 group-hover:text-brand-orange")} />
+                                  {customType}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </AccordionContent>
+                      </AccordionItem>
+                    )}
                   </Accordion>
                 </div>
               </div>

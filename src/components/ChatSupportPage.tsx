@@ -1330,14 +1330,14 @@ export function ChatSupportPage() {
         }
       }
 
-      // Send message with text (if any)
-      if (message.trim() || uploadedFiles.length === 0) {
+      // Send message with text (only if there's actual text content)
+      if (message.trim()) {
         const messageData: any = {
           userId: targetUserId,
           userID: targetUserId, // Also set userID for mobile app compatibility
           senderId: adminId,
           senderName: adminName,
-          message: message.trim() || "Message",
+          message: message.trim(),
           timestamp: serverTimestamp(),
           isRead: false
         };
@@ -1345,19 +1345,14 @@ export function ChatSupportPage() {
         await addDoc(collection(db, "chat_messages"), messageData);
       }
 
-      // Send each attachment as a separate message
+      // Send each attachment as a separate message (without text)
       for (const file of uploadedFiles) {
-        let attachmentType = 'file';
-        if (file.isImage) attachmentType = 'photo';
-        else if (file.isVideo) attachmentType = 'video';
-        else if (file.isAudio) attachmentType = 'audio';
-        
         const messageData: any = {
           userId: targetUserId,
           userID: targetUserId, // Also set userID for mobile app compatibility
           senderId: adminId,
           senderName: adminName,
-          message: message.trim() || `Sent a ${attachmentType}`,
+          message: message.trim() || "", // Only include text if user typed something, otherwise empty
           timestamp: serverTimestamp(),
           isRead: false,
           fileName: file.fileName,

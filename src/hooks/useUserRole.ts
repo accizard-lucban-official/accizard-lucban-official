@@ -37,8 +37,11 @@ export function useUserRole() {
             let permissions: string[] = Array.isArray(data.permissions) ? [...data.permissions] : [];
             
             // If hasEditPermission is true, add all edit permissions
+            // Include manage permissions so admins can add/edit items
             if (data.hasEditPermission === true) {
               const editPermissions = [
+                'manage_admins',        // Required for canManageAdmins() - allows adding/editing admins
+                'manage_residents',     // Required for canManageResidents() - allows adding/editing residents
                 'edit_reports',
                 'edit_residents',
                 'edit_announcements',

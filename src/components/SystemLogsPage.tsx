@@ -237,43 +237,9 @@ export function SystemLogsPage() {
     return () => clearInterval(interval);
   }, [fetchCustomId]);
 
-  // Additional effect to ensure custom IDs are fetched for filtered logs
-  // This runs when filtered logs change to catch any IDs that weren't fetched initially
-  useEffect(() => {
-    const fetchMissingCustomIds = async () => {
-      // Use a Set to track which IDs we've already fetched in this batch
-      const fetchedInBatch = new Set<string>();
-      
-      const logsNeedingIds = filteredActivityLogs.filter((log: any) => {
-        if (!log.entityType || !log.entityId) return false;
-        const cacheKey = `${log.entityType}:${log.entityId}`;
-        // Check both cache and batch set to avoid duplicate fetches
-        if (customIdCache.has(cacheKey) || fetchedInBatch.has(cacheKey)) {
-          return false;
-        }
-        fetchedInBatch.add(cacheKey);
-        return true;
-      });
-
-      if (logsNeedingIds.length > 0) {
-        const fetchPromises = logsNeedingIds.map((log: any) =>
-          fetchCustomId(log.entityType, log.entityId).catch(err => {
-            console.warn(`Failed to fetch custom ID for ${log.entityType}:${log.entityId}:`, err);
-            return null;
-          })
-        );
-        await Promise.all(fetchPromises);
-      }
-    };
-
-    // Only fetch if we have logs and the cache is not empty (to avoid fetching on initial render)
-    if (filteredActivityLogs.length > 0) {
-      fetchMissingCustomIds();
-    }
-  }, [filteredActivityLogs, fetchCustomId]);
-
   // Filter activity logs based on search and filters
-  const filteredActivityLogs = activityLogs.filter(log => {
+  const filteredActivityLogs = useMemo(() => {
+    return activityLogs.filter(log => {
     const search = searchTerm.toLowerCase();
     const admin = adminUsers.find(a => a.name === log.admin || a.name === log.actor);
     const adminName = log.admin || log.actor || "";
@@ -334,7 +300,43 @@ export function SystemLogsPage() {
     }
     
     return matchesSearch && matchesUser && matchesActionType && matchesDateRange;
-  });
+    });
+  }, [activityLogs, searchTerm, userFilter, actionTypeFilter, dateRange, adminUsers, superAdmins]);
+
+  // Additional effect to ensure custom IDs are fetched for filtered logs
+  // This runs when filtered logs change to catch any IDs that weren't fetched initially
+  useEffect(() => {
+    const fetchMissingCustomIds = async () => {
+      // Use a Set to track which IDs we've already fetched in this batch
+      const fetchedInBatch = new Set<string>();
+      
+      const logsNeedingIds = filteredActivityLogs.filter((log: any) => {
+        if (!log.entityType || !log.entityId) return false;
+        const cacheKey = `${log.entityType}:${log.entityId}`;
+        // Check both cache and batch set to avoid duplicate fetches
+        if (customIdCache.has(cacheKey) || fetchedInBatch.has(cacheKey)) {
+          return false;
+        }
+        fetchedInBatch.add(cacheKey);
+        return true;
+      });
+
+      if (logsNeedingIds.length > 0) {
+        const fetchPromises = logsNeedingIds.map((log: any) =>
+          fetchCustomId(log.entityType, log.entityId).catch(err => {
+            console.warn(`Failed to fetch custom ID for ${log.entityType}:${log.entityId}:`, err);
+            return null;
+          })
+        );
+        await Promise.all(fetchPromises);
+      }
+    };
+
+    // Only fetch if we have logs and the cache is not empty (to avoid fetching on initial render)
+    if (filteredActivityLogs.length > 0) {
+      fetchMissingCustomIds();
+    }
+  }, [filteredActivityLogs, fetchCustomId, customIdCache]);
   
   // Sort activity logs
   const sortedActivityLogs = [...filteredActivityLogs].sort((a, b) => {
@@ -377,7 +379,7 @@ export function SystemLogsPage() {
   // Handler for sorting
   const handleActivitySort = (field: 'logId' | 'timestamp') => {
     if (activitySortField === field) {
-      setActivitySortDirection(activitySortDirection === 'asc' ? 'desc' : 'asc');
+    setActivitySortDirection(activitySortDirection === 'asc' ? 'desc' : 'asc');
     } else {
       setActivitySortField(field);
       setActivitySortDirection('desc'); // Default to descending for new field
