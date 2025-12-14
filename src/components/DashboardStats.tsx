@@ -2378,35 +2378,80 @@ export function DashboardStats() {
       return new Promise((resolve) => {
         const element = document.querySelector(selector);
         if (!element) {
+          console.warn('Chart element not found:', selector);
           resolve('');
           return;
         }
         
-        // Wait a bit for Nivo charts to fully render, especially users chart
-        const delay = selector === '#users-chart' ? 2000 : 500;
+        // Wait longer for Nivo charts to fully render
+        // Reports Over Time is a complex line chart with SVG, needs more time
+        // Users chart is a bar chart, also needs extra time
+        const delay = selector === '#reports-over-time-chart' ? 3000 : selector === '#users-chart' ? 2000 : 500;
+        
         setTimeout(() => {
-          html2canvas(element as HTMLElement, {
-            backgroundColor: '#ffffff',
-            logging: false,
-            useCORS: true,
-            scale: 2,
-            allowTaint: true,
-            onclone: (clonedDoc) => {
-              // Ensure the chart container is visible in the cloned document
-              const clonedElement = clonedDoc.querySelector(selector);
-              if (clonedElement) {
-                (clonedElement as HTMLElement).style.visibility = 'visible';
-                (clonedElement as HTMLElement).style.display = 'block';
-                // Force reflow for Nivo charts
-                (clonedElement as HTMLElement).offsetHeight;
+          // Scroll element into view to ensure it's rendered
+          element.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
+          
+          // Additional wait for reports over time chart to ensure SVG is fully rendered
+          const additionalDelay = selector === '#reports-over-time-chart' ? 1000 : 0;
+          
+          setTimeout(() => {
+            html2canvas(element as HTMLElement, {
+              backgroundColor: '#ffffff',
+              logging: false,
+              useCORS: true,
+              scale: 2,
+              allowTaint: true,
+              onclone: (clonedDoc) => {
+                // Ensure the chart container is visible in the cloned document
+                const clonedElement = clonedDoc.querySelector(selector);
+                if (clonedElement) {
+                  const clonedEl = clonedElement as HTMLElement;
+                  clonedEl.style.visibility = 'visible';
+                  clonedEl.style.display = 'block';
+                  clonedEl.style.opacity = '1';
+                  clonedEl.style.position = 'relative';
+                  // Force reflow for Nivo charts
+                  clonedEl.offsetHeight;
+                  
+                  // For Nivo line charts (Reports Over Time), ensure SVG is visible and properly sized
+                  if (selector === '#reports-over-time-chart') {
+                    const svg = clonedElement.querySelector('svg');
+                    if (svg) {
+                      const svgEl = svg as SVGElement;
+                      svgEl.style.visibility = 'visible';
+                      svgEl.style.display = 'block';
+                      svgEl.style.opacity = '1';
+                      
+                      // Ensure all SVG elements are visible
+                      const allSvgElements = clonedElement.querySelectorAll('svg *');
+                      allSvgElements.forEach((el) => {
+                        const svgChild = el as SVGElement;
+                        svgChild.style.visibility = 'visible';
+                        svgChild.style.display = '';
+                        svgChild.style.opacity = '1';
+                      });
+                      
+                      // Force SVG reflow
+                      (svgEl as any).offsetHeight;
+                    }
+                  }
+                }
               }
-            }
-          } as any).then(canvas => {
-            resolve(canvas.toDataURL('image/png'));
-          }).catch((error) => {
-            console.error('Error capturing chart:', selector, error);
-            resolve('');
-          });
+            } as any).then(canvas => {
+              const dataUrl = canvas.toDataURL('image/png');
+              if (!dataUrl || dataUrl === 'data:,') {
+                console.error('Empty canvas data for:', selector);
+                resolve('');
+              } else {
+                console.log('Successfully captured chart:', selector);
+                resolve(dataUrl);
+              }
+            }).catch((error) => {
+              console.error('Error capturing chart:', selector, error);
+              resolve('');
+            });
+          }, additionalDelay);
         }, delay);
       });
     };
