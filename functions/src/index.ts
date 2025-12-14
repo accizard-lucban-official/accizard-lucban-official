@@ -285,12 +285,13 @@ export const sendChatNotification = onDocumentCreated(
         }
         
         // Get all web users (users with webFcmToken)
-        // Check both users collection and superAdmin collection
+        // Check users, superAdmin, and admins collections
         const usersSnapshot = await admin.firestore().collection("users").get();
         const superAdminSnapshot = await admin.firestore().collection("superAdmin").get();
+        const adminsSnapshot = await admin.firestore().collection("admins").get();
         
         const webUsers = [
-          // Regular users and admins from users collection
+          // Regular users from users collection
           ...usersSnapshot.docs
             .map(doc => ({
               userId: doc.id,
@@ -299,6 +300,13 @@ export const sendChatNotification = onDocumentCreated(
             .filter(user => user.webFcmToken),
           // Super admins from superAdmin collection
           ...superAdminSnapshot.docs
+            .map(doc => ({
+              userId: doc.id,
+              webFcmToken: doc.data().webFcmToken
+            }))
+            .filter(user => user.webFcmToken),
+          // Regular admins from admins collection
+          ...adminsSnapshot.docs
             .map(doc => ({
               userId: doc.id,
               webFcmToken: doc.data().webFcmToken
@@ -418,6 +426,13 @@ export const sendChatNotification = onDocumentCreated(
                 webFcmToken: admin.firestore.FieldValue.delete()
               });
             }
+            // If not found in superAdmin, try admins collection
+            const adminDoc = await admin.firestore().collection("admins").doc(userId).get();
+            if (adminDoc.exists) {
+              return admin.firestore().collection("admins").doc(userId).update({
+                webFcmToken: admin.firestore.FieldValue.delete()
+              });
+            }
             return Promise.resolve();
           });
           
@@ -434,10 +449,22 @@ export const sendChatNotification = onDocumentCreated(
       if (error.code === "messaging/invalid-registration-token" || 
           error.code === "messaging/registration-token-not-registered") {
         logger.info(`Removing invalid FCM token for user ${userId}`);
-        await admin.firestore().collection("users").doc(userId).update({
-          fcmToken: admin.firestore.FieldValue.delete(),
-          webFcmToken: admin.firestore.FieldValue.delete()
-        });
+        // Try to remove from users collection first
+        const userDoc = await admin.firestore().collection("users").doc(userId).get();
+        if (userDoc.exists) {
+          await admin.firestore().collection("users").doc(userId).update({
+            fcmToken: admin.firestore.FieldValue.delete(),
+            webFcmToken: admin.firestore.FieldValue.delete()
+          });
+        } else {
+          // If not found in users, try admins collection
+          const adminDoc = await admin.firestore().collection("admins").doc(userId).get();
+          if (adminDoc.exists) {
+            await admin.firestore().collection("admins").doc(userId).update({
+              webFcmToken: admin.firestore.FieldValue.delete()
+            });
+          }
+        }
       }
     }
   }
@@ -479,12 +506,13 @@ export const sendReportCreatedNotification = onDocumentCreated(
       }
 
       // Get all web users (users with webFcmToken)
-      // Check both users collection and superAdmin collection
+      // Check users, superAdmin, and admins collections
       const usersSnapshot = await admin.firestore().collection("users").get();
       const superAdminSnapshot = await admin.firestore().collection("superAdmin").get();
+      const adminsSnapshot = await admin.firestore().collection("admins").get();
       
       const webUsers = [
-        // Regular users and admins from users collection
+        // Regular users from users collection
         ...usersSnapshot.docs
           .map(doc => ({
             userId: doc.id,
@@ -493,6 +521,13 @@ export const sendReportCreatedNotification = onDocumentCreated(
           .filter(user => user.webFcmToken),
         // Super admins from superAdmin collection
         ...superAdminSnapshot.docs
+          .map(doc => ({
+            userId: doc.id,
+            webFcmToken: doc.data().webFcmToken
+          }))
+          .filter(user => user.webFcmToken),
+        // Regular admins from admins collection
+        ...adminsSnapshot.docs
           .map(doc => ({
             userId: doc.id,
             webFcmToken: doc.data().webFcmToken

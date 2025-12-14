@@ -1,4 +1,4 @@
-  import { useState, useEffect } from "react";
+  import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -52,6 +52,8 @@ export function ProfilePage() {
   const [showPasswordRecoveryModal, setShowPasswordRecoveryModal] = useState(false);
   const [isSendingRecoveryLink, setIsSendingRecoveryLink] = useState(false);
   const [recoveryLinkSent, setRecoveryLinkSent] = useState(false);
+  const aboutSectionParentRef = useRef<HTMLDivElement>(null);
+  const activityLogSectionRef = useRef<HTMLDivElement>(null);
 
   // Helper function to format Firestore timestamps
   const formatTimestamp = (timestamp: any): string => {
@@ -784,6 +786,33 @@ export function ProfilePage() {
     setRecoveryLinkSent(false);
   };
 
+  // Sync activity log height with about section parent div height
+  useEffect(() => {
+    const syncHeights = () => {
+      if (aboutSectionParentRef.current && activityLogSectionRef.current) {
+        const aboutParentHeight = aboutSectionParentRef.current.offsetHeight;
+        activityLogSectionRef.current.style.height = `${aboutParentHeight}px`;
+      }
+    };
+
+    // Sync on mount and when content changes
+    syncHeights();
+    
+    // Use ResizeObserver to watch for height changes
+    const resizeObserver = new ResizeObserver(syncHeights);
+    if (aboutSectionParentRef.current) {
+      resizeObserver.observe(aboutSectionParentRef.current);
+    }
+
+    // Also sync on window resize
+    window.addEventListener('resize', syncHeights);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', syncHeights);
+    };
+  }, [profile, editingField, activityLogs.length, roleLoading]);
+
   const EditableField = ({ field, label, icon: Icon, value, type = "text" }: {
     field: string;
     label: string;
@@ -984,9 +1013,9 @@ export function ProfilePage() {
         </div>
 
         {/* Two Column Layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 mt-12 items-stretch">
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 mt-12 items-start">
           {/* Left Column - Profile Info */}
-          <div className="lg:col-span-2 flex flex-col">
+          <div ref={aboutSectionParentRef} className="lg:col-span-2 flex flex-col">
             {/* User Name */}
             <div className="mb-6">
               <h1 className="text-2xl font-bold text-gray-900">{profile.name || "Your Name"}</h1>
@@ -994,7 +1023,7 @@ export function ProfilePage() {
                     </div>
 
             {/* About Section */}
-            <Card className="flex-1 flex flex-col h-full">
+            <Card id="about-section" className="flex flex-col">
               <CardHeader className="pb-2">
                 <CardTitle className="text-lg font-semibold">About</CardTitle>
               </CardHeader>
@@ -1094,9 +1123,9 @@ export function ProfilePage() {
           </div>
 
           {/* Right Column - Activity Logs */}
-          <div className="lg:col-span-3 flex flex-col h-full">
+          <div className="lg:col-span-3 flex flex-col">
             {/* Personal Activity Log */}
-            <Card className="flex-1 flex flex-col min-h-0 h-full">
+            <Card id="activity-log-section" ref={activityLogSectionRef} className="flex flex-col overflow-hidden">
               <CardHeader className="flex flex-row items-center justify-between pb-2 flex-shrink-0">
                 <CardTitle className="text-lg font-semibold">Personal Activity Log</CardTitle>
                 {activityLogs.length > 0 && (

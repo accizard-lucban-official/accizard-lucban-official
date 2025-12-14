@@ -107,12 +107,11 @@ export async function initializeMessaging(
     if (token) {
       console.log('FCM Token obtained:', token);
       
-      // Save token to Firestore if user is authenticated
-      if (auth.currentUser) {
-        const session = SessionManager.getSession();
-        const isSuperAdmin = session?.userType === 'superadmin';
-        
-        if (isSuperAdmin) {
+      // Save token to Firestore - handle all user types
+      const session = SessionManager.getSession();
+      
+      if (session?.isLoggedIn) {
+        if (session.userType === 'superadmin' && auth.currentUser) {
           // Super admin: save to superAdmin collection by email
           const email = auth.currentUser.email;
           if (email) {
@@ -134,15 +133,38 @@ export async function initializeMessaging(
               console.warn('Super admin document not found in Firestore');
             }
           }
-        } else {
-          // Regular user or admin: save to users collection
+        } else if (session.userType === 'admin' && session.username) {
+          // Regular admin: save to admins collection by username
+          const adminQuery = query(
+            collection(db, 'admins'),
+            where('username', '==', session.username)
+          );
+          const querySnapshot = await getDocs(adminQuery);
+          
+          if (!querySnapshot.empty) {
+            const adminDocId = querySnapshot.docs[0].id;
+            const adminRef = doc(db, 'admins', adminDocId);
+            await setDoc(adminRef, {
+              webFcmToken: token,
+              webFcmTokenUpdatedAt: new Date().toISOString(),
+            }, { merge: true });
+            console.log('FCM Token saved to admins collection');
+          } else {
+            console.warn('Admin document not found in Firestore for username:', session.username);
+          }
+        } else if (auth.currentUser) {
+          // Regular user (Firebase Auth): save to users collection
           const userRef = doc(db, 'users', auth.currentUser.uid);
           await setDoc(userRef, {
             webFcmToken: token,
             webFcmTokenUpdatedAt: new Date().toISOString(),
           }, { merge: true });
           console.log('FCM Token saved to users collection');
+        } else {
+          console.warn('No valid user session found for saving FCM token');
         }
+      } else {
+        console.warn('User not logged in, cannot save FCM token');
       }
       
       return token;

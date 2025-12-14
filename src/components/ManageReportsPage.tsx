@@ -122,7 +122,6 @@ type DispatchDataState = {
   timeOfDispatch: string;
   timeOfArrival: string;
   responseTime?: string | null;
-  responseTimeMinutes?: number | null;
   hospitalArrival: string;
   returnedToOpcen: string;
   disasterRelated: string;
@@ -435,6 +434,7 @@ export function ManageReportsPage() {
   const [showNewReportAlert, setShowNewReportAlert] = useState(false);
   const [newReportData, setNewReportData] = useState<any[]>([]); // Changed to array to hold all unviewed reports
   const previousReportCountRef = useRef<number>(0);
+  const previousReportIdsRef = useRef<Set<string>>(new Set()); // Track previous report IDs to detect truly new reports
   const alarmIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const activeAudioRefs = useRef<HTMLAudioElement[]>([]); // Track all active audio instances
   const activeAudioContextRefs = useRef<AudioContext[]>([]); // Track all active audio contexts
@@ -652,13 +652,27 @@ export function ManageReportsPage() {
         if (event.data.type === 'NEW_REPORTS') {
           const { reports } = event.data;
           if (reports && reports.length > 0) {
-            console.log('Showing alarm modal in this tab with', reports.length, 'reports (from another tab)');
-            // Update the new report data
-            setNewReportData(reports);
-            // Show the modal in this tab
-            setShowNewReportAlert(true);
-            // Play alarm sound in this tab
-            playAlarmSound();
+            // Filter out reports that have already been viewed in this tab
+            const viewedReportsData = localStorage.getItem("viewedReports");
+            const currentViewedReports = viewedReportsData ? new Set(JSON.parse(viewedReportsData)) : new Set();
+            const unviewedReports = reports.filter((report: any) => !currentViewedReports.has(report.id));
+            
+            if (unviewedReports.length > 0) {
+              console.log('Showing alarm modal in this tab with', unviewedReports.length, 'unviewed reports (from another tab)');
+              // Update the new report data with only unviewed reports
+              setNewReportData(prev => {
+                // Add new reports to existing list, avoiding duplicates
+                const existingIds = new Set(prev.map(r => r.id));
+                const uniqueNewReports = unviewedReports.filter((r: any) => !existingIds.has(r.id));
+                return [...prev, ...uniqueNewReports];
+              });
+              // Show the modal in this tab
+              setShowNewReportAlert(true);
+              // Play alarm sound in this tab
+              playAlarmSound();
+            } else {
+              console.log('All reports from broadcast have already been viewed, not showing alarm');
+            }
           }
         } else if (event.data.type === 'DISMISS_ALARM') {
           console.log('Dismissing alarm in this tab (from another tab)');
@@ -841,6 +855,8 @@ export function ManageReportsPage() {
             mobileNumber: data.reporterMobile || "", // Map from Firestore reporterMobile field
             timeOfDispatch: "", // Not in your schema, will show empty
             timeOfArrival: "", // Not in your schema, will show empty
+            // Include dispatchInfo for response time calculation
+            dispatchInfo: data.dispatchInfo || null,
             // Use separate latitude and longitude fields from Firestore
             latitude: data.latitude || defaultLatitude,
             longitude: data.longitude || defaultLongitude,
@@ -851,82 +867,74 @@ export function ManageReportsPage() {
         
         // Check for new reports and trigger alert
         const previousCount = previousReportCountRef.current;
+        const previousReportIds = previousReportIdsRef.current;
         const isInitialLoad = isInitialLoadRef.current;
         
         // Get current viewed reports from localStorage to ensure we have the latest value
         const viewedReportsData = localStorage.getItem("viewedReports");
         const currentViewedReports = viewedReportsData ? new Set(JSON.parse(viewedReportsData)) : new Set();
         
-        // Find all unviewed reports (reports that haven't been opened yet)
-        const unviewedReports = fetched.filter(report => !currentViewedReports.has(report.id));
+        // Get current report IDs
+        const currentReportIds = new Set(fetched.map(report => report.id));
+        
+        // Find truly NEW reports: reports that are:
+        // 1. Not in the previous snapshot (newly added)
+        // 2. Not in viewedReports (not yet viewed by user)
+        const newReports = fetched.filter(report => 
+          !previousReportIds.has(report.id) && !currentViewedReports.has(report.id)
+        );
         
         if (isInitialLoad) {
-          // On initial load (or when user logs in), check for unviewed reports
+          // On initial load, don't show alarm - only show for reports added after this point
           isInitialLoadRef.current = false;
+          // Initialize previous report IDs with current reports
+          previousReportIdsRef.current = new Set(fetched.map(report => report.id));
+        } else if (newReports.length > 0) {
+          // Only trigger alarm for truly NEW reports that haven't been viewed
+          console.log('Active tab: Showing alarm modal with', newReports.length, 'new unviewed reports');
+          // Set only the new unviewed reports and show modal in the ACTIVE tab
+          setNewReportData(prev => {
+            // Add new reports to existing list, avoiding duplicates
+            const existingIds = new Set(prev.map(r => r.id));
+            const uniqueNewReports = newReports.filter(r => !existingIds.has(r.id));
+            return [...prev, ...uniqueNewReports];
+          });
+          setShowNewReportAlert(true);
           
-          if (unviewedReports.length > 0) {
-            console.log('Active tab: Showing alarm modal with', unviewedReports.length, 'unviewed reports');
-            // Set all unviewed reports and show modal in the ACTIVE tab
-            setNewReportData(unviewedReports);
-            setShowNewReportAlert(true);
-            
-            // Play alarm sound in the active tab (continuous until dismissed)
-            playAlarmSound();
-            
-            // Broadcast to other tabs (but not to ourselves)
-            if (broadcastChannelRef.current) {
-              console.log('Broadcasting NEW_REPORTS to other tabs:', unviewedReports.length, 'reports');
-              isBroadcastingRef.current = true; // Set flag to ignore our own message
-              broadcastChannelRef.current.postMessage({
-                type: 'NEW_REPORTS',
-                reports: unviewedReports
-              });
-              // Reset flag after a short delay (message is sent synchronously)
-              setTimeout(() => {
-                isBroadcastingRef.current = false;
-              }, 100);
-            } else {
-              console.warn('BroadcastChannel not ready yet, cannot notify other tabs');
-            }
-          }
-        } else if (fetched.length > previousCount) {
-          // For subsequent updates, check if count increased (new report submitted)
-          // This handles both: normal new reports (previousCount > 0) and 
-          // reports added after all were deleted (previousCount === 0)
-          const newReportCount = fetched.length - previousCount;
+          // Play alarm sound in the active tab (continuous until dismissed)
+          playAlarmSound();
           
-          if (newReportCount > 0 && unviewedReports.length > 0) {
-            console.log('Active tab: Showing alarm modal with', unviewedReports.length, 'new unviewed reports');
-            // Set all unviewed reports and show modal in the ACTIVE tab
-            setNewReportData(unviewedReports);
-            setShowNewReportAlert(true);
-            
-            // Play alarm sound in the active tab (continuous until dismissed)
-            playAlarmSound();
-            
-            // Broadcast to other tabs (but not to ourselves)
-            if (broadcastChannelRef.current) {
-              console.log('Broadcasting NEW_REPORTS to other tabs:', unviewedReports.length, 'reports');
-              isBroadcastingRef.current = true; // Set flag to ignore our own message
-              broadcastChannelRef.current.postMessage({
-                type: 'NEW_REPORTS',
-                reports: unviewedReports
-              });
-              // Reset flag after a short delay (message is sent synchronously)
-              setTimeout(() => {
-                isBroadcastingRef.current = false;
-              }, 100);
-            } else {
-              console.warn('BroadcastChannel not ready yet, cannot notify other tabs');
-            }
+          // Broadcast to other tabs (but not to ourselves)
+          if (broadcastChannelRef.current) {
+            console.log('Broadcasting NEW_REPORTS to other tabs:', newReports.length, 'reports');
+            isBroadcastingRef.current = true; // Set flag to ignore our own message
+            broadcastChannelRef.current.postMessage({
+              type: 'NEW_REPORTS',
+              reports: newReports
+            });
+            // Reset flag after a short delay (message is sent synchronously)
+            setTimeout(() => {
+              isBroadcastingRef.current = false;
+            }, 100);
+          } else {
+            console.warn('BroadcastChannel not ready yet, cannot notify other tabs');
           }
-        } else if (unviewedReports.length > 0 && newReportData.length === 0) {
-          // If there are unviewed reports but modal isn't showing, update the list
-          setNewReportData(unviewedReports);
         }
         
-        // Always update the reports state and ref (this handles deletions automatically)
+        // Update the list of reports in the alarm modal to remove any that have been viewed
+        setNewReportData(prev => {
+          const stillUnviewed = prev.filter(report => !currentViewedReports.has(report.id));
+          if (stillUnviewed.length === 0 && prev.length > 0) {
+            // All reports have been viewed, close the modal
+            setShowNewReportAlert(false);
+            stopAlarm();
+          }
+          return stillUnviewed;
+        });
+        
+        // Always update the reports state and refs (this handles deletions automatically)
         previousReportCountRef.current = fetched.length;
+        previousReportIdsRef.current = currentReportIds;
         setReports(fetched);
       });
       return () => unsubscribe();
@@ -3391,13 +3399,44 @@ useEffect(() => {
   
   const pendingReports = reports.filter(report => report.status === 'Pending').length;
   
+  // Helper function to parse responseTime string to minutes
+  // Handles formats like "1 hr 30 min", "45 min", "2 hr 5 min"
+  const parseResponseTimeToMinutes = (responseTime: string): number => {
+    try {
+      if (!responseTime) return 0;
+      
+      // Remove extra spaces and convert to lowercase for easier parsing
+      const cleaned = responseTime.trim().toLowerCase();
+      
+      let totalMinutes = 0;
+      
+      // Check for hours (format: "X hr" or "X hr Y min")
+      const hourMatch = cleaned.match(/(\d+)\s*hr/);
+      if (hourMatch) {
+        const hours = parseInt(hourMatch[1], 10);
+        totalMinutes += hours * 60;
+      }
+      
+      // Check for minutes (format: "Y min")
+      const minuteMatch = cleaned.match(/(\d+)\s*min/);
+      if (minuteMatch) {
+        const minutes = parseInt(minuteMatch[1], 10);
+        totalMinutes += minutes;
+      }
+      
+      return totalMinutes;
+    } catch (error) {
+      console.error('Error parsing response time:', error);
+      return 0;
+    }
+  };
+  
   const averageResponseTime = useMemo(() => {
-    // Filter reports that have both dispatch and arrival times
+    // Filter reports that have saved responseTime in dispatchInfo
     const reportsWithResponseTime = reports.filter(report => {
       try {
-        // Check if report has dispatch data with both times
-        const hasDispatchData = report.dispatchInfo?.timeOfDispatch && report.dispatchInfo?.timeOfArrival;
-        return hasDispatchData;
+        // Check if report has dispatchInfo with saved responseTime
+        return report.dispatchInfo?.responseTime && report.dispatchInfo.responseTime.trim() !== '';
       } catch (error) {
         return false;
       }
@@ -3407,25 +3446,12 @@ useEffect(() => {
       return null;
     }
 
-    // Calculate total response time in minutes
+    // Calculate total response time in minutes by parsing responseTime strings
     const totalMinutes = reportsWithResponseTime.reduce((total, report) => {
       try {
-        const dispatchTime = report.dispatchInfo.timeOfDispatch;
-        const arrivalTime = report.dispatchInfo.timeOfArrival;
-        
-        const [dispatchHours, dispatchMinutes] = dispatchTime.split(':').map(Number);
-        const [arrivalHours, arrivalMinutes] = arrivalTime.split(':').map(Number);
-        
-        const dispatchTotalMinutes = dispatchHours * 60 + dispatchMinutes;
-        const arrivalTotalMinutes = arrivalHours * 60 + arrivalMinutes;
-        
-        let diffMinutes = arrivalTotalMinutes - dispatchTotalMinutes;
-        
-        if (diffMinutes < 0) {
-          diffMinutes += 24 * 60;
-        }
-        
-        return total + diffMinutes;
+        const responseTimeStr = report.dispatchInfo.responseTime;
+        const minutes = parseResponseTimeToMinutes(responseTimeStr);
+        return total + minutes;
       } catch (error) {
         return total;
       }
@@ -6105,28 +6131,6 @@ useEffect(() => {
     }
   };
 
-  // Function to calculate response time in minutes only
-  const calculateResponseTimeMinutes = (dispatchTime: string, arrivalTime: string) => {
-    try {
-      const [dispatchHours, dispatchMinutes] = dispatchTime.split(':').map(Number);
-      const [arrivalHours, arrivalMinutes] = arrivalTime.split(':').map(Number);
-      
-      const dispatchTotalMinutes = dispatchHours * 60 + dispatchMinutes;
-      const arrivalTotalMinutes = arrivalHours * 60 + arrivalMinutes;
-      
-      let diffMinutes = arrivalTotalMinutes - dispatchTotalMinutes;
-      
-      if (diffMinutes < 0) {
-        diffMinutes += 24 * 60;
-      }
-      
-      return diffMinutes;
-    } catch (error) {
-      console.error('Error calculating response time:', error);
-      return 0;
-    }
-  };
-  
   const [showDirectionsModal, setShowDirectionsModal] = useState(false);
   const [directionsReport, setDirectionsReport] = useState<any>(null);
   const [showLocationMap, setShowLocationMap] = useState(false);
@@ -6241,17 +6245,11 @@ useEffect(() => {
             mergedDispatchInfo.timeOfDispatch,
             mergedDispatchInfo.timeOfArrival
           );
-          const responseTimeMinutes = calculateResponseTimeMinutes(
-            mergedDispatchInfo.timeOfDispatch,
-            mergedDispatchInfo.timeOfArrival
-          );
           
           mergedDispatchInfo.responseTime = responseTimeFormatted;
-          mergedDispatchInfo.responseTimeMinutes = responseTimeMinutes;
         } else {
           // Clear response time if either field is missing
           mergedDispatchInfo.responseTime = null;
-          mergedDispatchInfo.responseTimeMinutes = null;
         }
         
         // Debug log to verify agencyPresent is being saved
@@ -9891,7 +9889,7 @@ useEffect(() => {
                           <TableCell>
                             {(() => {
                               // Use saved response time if available, otherwise calculate on the fly
-                              if (dispatchData.responseTime && dispatchData.responseTimeMinutes !== undefined) {
+                              if (dispatchData.responseTime) {
                                 return (
                                   <span className="text-black">
                                     {dispatchData.responseTime}
@@ -12642,7 +12640,11 @@ useEffect(() => {
               <div className="space-y-4 py-4">
                 <div className="bg-white rounded-lg border border-red-200 overflow-hidden">
                   <div className="divide-y divide-gray-200">
-                    {newReportData.map((report, index) => (
+                    {newReportData.map((report, index) => {
+                      // Find the full report from the reports array to ensure we have all data
+                      const fullReport = reports.find(r => r.id === report.id) || report;
+                      
+                      return (
                       <div
                         key={report.id || index}
                         onClick={async () => {
@@ -12650,27 +12652,28 @@ useEffect(() => {
                             stopAlarm();
                             setShowNewReportAlert(false);
                             
-                            // Open the report preview
-                            console.log("Opening report preview for:", report);
-                            setSelectedReport(report);
+                            // Open the report preview using the full report data
+                            console.log("Opening report preview for:", fullReport);
+                            setSelectedReport(fullReport);
                             setShowPreviewModal(true);
                             setPreviewTab("details"); // Reset to details tab
                             
                             // Mark report as viewed
-                            setViewedReports(prev => new Set(prev).add(report.id));
+                            setViewedReports(prev => new Set(prev).add(fullReport.id));
                             
                             // Remove this report from the newReportData array
-                            setNewReportData(prev => prev.filter(r => r.id !== report.id));
+                            setNewReportData(prev => prev.filter(r => r.id !== fullReport.id));
                             
                             // Load existing dispatch data from database using Firestore document ID
-                            if (report.firestoreId) {
-                              await loadDispatchDataFromDatabase(report.firestoreId);
+                            if (fullReport.firestoreId) {
+                              await loadDispatchDataFromDatabase(fullReport.firestoreId);
                               
                               // Load existing patient data from database using Firestore document ID
-                              await loadPatientDataFromDatabase(report.firestoreId);
+                              await loadPatientDataFromDatabase(fullReport.firestoreId);
                             }
                           } catch (error) {
                             console.error("Error opening report preview:", error);
+                            toast.error("Failed to open report preview. Please try again.");
                           }
                         }}
                         className="p-4 hover:bg-red-50 cursor-pointer transition-colors"
@@ -12690,7 +12693,8 @@ useEffect(() => {
                           </div>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
                 

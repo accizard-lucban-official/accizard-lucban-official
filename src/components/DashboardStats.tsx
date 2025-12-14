@@ -29,8 +29,12 @@ mapboxgl.accessToken = 'pk.eyJ1IjoiYWNjaXphcmQtbHVjYmFuLW9mZmljaWFsIiwiYSI6ImNta
 export function DashboardStats() {
   const { subscribeToPins } = usePins();
   const [totalReportsFilter, setTotalReportsFilter] = useState("this-week");
+  const [reportsOverTimeFilter, setReportsOverTimeFilter] = useState("this-week");
+  const [reportsOverTimeTypeFilter, setReportsOverTimeTypeFilter] = useState<string>("all");
   const [barangayReportsFilter, setBarangayReportsFilter] = useState("this-week");
+  const [barangayReportsTypeFilter, setBarangayReportsTypeFilter] = useState<string>("all");
   const [usersBarangayFilter, setUsersBarangayFilter] = useState("this-week");
+  const [usersBarangayBarangayFilter, setUsersBarangayBarangayFilter] = useState<string>("all");
   const [reportTypeFilter, setReportTypeFilter] = useState("this-week");
   const [peakHoursFilter, setPeakHoursFilter] = useState("this-week");
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -62,6 +66,26 @@ export function DashboardStats() {
   const [onlineAdminsCount, setOnlineAdminsCount] = useState(0);
   const [pagasaBulletins, setPagasaBulletins] = useState<any[]>([]);
   const [isFetchingBulletins, setIsFetchingBulletins] = useState(false);
+  // All 15 report types
+  const allReportTypes = useMemo(() => [
+    'Road Crash',
+    'Fire',
+    'Medical Emergency',
+    'Flooding',
+    'Volcanic Activity',
+    'Landslide',
+    'Earthquake',
+    'Civil Disturbance',
+    'Armed Conflict',
+    'Infectious Disease',
+    'Poor Infrastructure',
+    'Obstructions',
+    'Electrical Hazard',
+    'Environmental Hazard',
+    'Animal Concerns',
+    'Others'
+  ], []);
+
   const [enabledReportTypes, setEnabledReportTypes] = useState<Record<string, boolean>>({
     'Road Crash': true,
     'Fire': true,
@@ -77,6 +101,7 @@ export function DashboardStats() {
     'Obstructions': true,
     'Electrical Hazard': true,
     'Environmental Hazard': true,
+    'Animal Concerns': true,
     'Others': true
   });
   const [selectedChartsForExport, setSelectedChartsForExport] = useState<Record<string, boolean>>({
@@ -159,6 +184,10 @@ export function DashboardStats() {
     let startDate: Date;
     
     switch (period) {
+      case "today":
+        // Start of today (00:00:00)
+        startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        break;
       case "this-week":
         startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
         break;
@@ -191,7 +220,16 @@ export function DashboardStats() {
 
   // Reports per barangay - calculated from real Firestore data (used for summary stats)
   const reportsPerBarangay = useMemo(() => {
-    const filteredReports = filterReportsByPeriod(reports, barangayReportsFilter);
+    let filteredReports = filterReportsByPeriod(reports, barangayReportsFilter);
+    
+    // Apply report type filter if not "all"
+    if (barangayReportsTypeFilter !== "all") {
+      filteredReports = filteredReports.filter(report => {
+        const reportTypeValue = report.reportType || report.type || report.category || 'Others';
+        const normalizedType = normalizeCategoryToType(reportTypeValue);
+        return normalizedType === barangayReportsTypeFilter;
+      });
+    }
     
     // Group reports by barangay (normalize to official barangays or "Others")
     const barangayCounts: Record<string, number> = {};
@@ -214,11 +252,26 @@ export function DashboardStats() {
         if (b.name === 'Others' && a.name !== 'Others') return -1;
         return b.reports - a.reports;
       });
-  }, [reports, barangayReportsFilter, officialBarangays]);
+  }, [reports, barangayReportsFilter, barangayReportsTypeFilter, officialBarangays]);
+
+  // Calculate top 3 most active barangays
+  const top3Barangays = useMemo(() => {
+    if (!reportsPerBarangay || reportsPerBarangay.length === 0) return [];
+    return reportsPerBarangay.slice(0, 3);
+  }, [reportsPerBarangay]);
 
   // Stacked data for Nivo chart - reports by type per barangay - calculated from real Firestore data
   const stackedReportsData = useMemo(() => {
-    const filteredReports = filterReportsByPeriod(reports, barangayReportsFilter);
+    let filteredReports = filterReportsByPeriod(reports, barangayReportsFilter);
+    
+    // Apply report type filter if not "all"
+    if (barangayReportsTypeFilter !== "all") {
+      filteredReports = filteredReports.filter(report => {
+        const reportTypeValue = report.reportType || report.type || report.category || 'Others';
+        const normalizedType = normalizeCategoryToType(reportTypeValue);
+        return normalizedType === barangayReportsTypeFilter;
+      });
+    }
     
     // All possible report types
     const allTypes = [
@@ -269,13 +322,22 @@ export function DashboardStats() {
       const totalB = allTypes.reduce((sum, type) => sum + (b[type] || 0), 0);
       return totalB - totalA;
     });
-  }, [reports, barangayReportsFilter, officialBarangays]);
+  }, [reports, barangayReportsFilter, barangayReportsTypeFilter, officialBarangays]);
 
   // Users per barangay data - calculated from real Firestore data
   const usersPerBarangay = useMemo(() => {
     // Filter users by time period if needed (for now, show all users)
     // You might want to filter by registration date or last activity
-    const filteredUsers = users; // Could add time-based filtering here if needed
+    let filteredUsers = users; // Could add time-based filtering here if needed
+    
+    // Apply barangay filter if not "all"
+    if (usersBarangayBarangayFilter !== "all") {
+      filteredUsers = filteredUsers.filter(user => {
+        const rawBarangay = user.barangay || 'Unknown';
+        const normalizedBarangay = normalizeBarangay(rawBarangay);
+        return normalizedBarangay === usersBarangayBarangayFilter;
+      });
+    }
     
     // Group users by barangay (normalize to official barangays or "Others")
     // Query barangay field directly from users collection
@@ -300,7 +362,7 @@ export function DashboardStats() {
         if (b.name === 'Others' && a.name !== 'Others') return -1;
         return b.users - a.users;
       });
-  }, [users, officialBarangays]);
+  }, [users, usersBarangayBarangayFilter, officialBarangays]);
 
   // Helper function to normalize category values to match expected type names
   // Maps kebab-case values (like 'road-crash') to Title Case (like 'Road Crash')
@@ -382,9 +444,20 @@ export function DashboardStats() {
   const reportsOverTimeData = useMemo(() => {
     console.log('=== Reports Over Time Calculation ===');
     console.log('Total reports:', reports.length);
-    console.log('Report type filter:', reportTypeFilter);
+    console.log('Reports over time filter:', reportsOverTimeFilter);
+    console.log('Reports over time type filter:', reportsOverTimeTypeFilter);
     
-    const filteredReports = filterReportsByPeriod(reports, reportTypeFilter);
+    let filteredReports = filterReportsByPeriod(reports, reportsOverTimeFilter);
+    
+    // Apply report type filter if not "all"
+    if (reportsOverTimeTypeFilter !== "all") {
+      filteredReports = filteredReports.filter(report => {
+        const reportTypeValue = report.reportType || report.type || report.category || 'Others';
+        const normalizedType = normalizeCategoryToType(reportTypeValue);
+        return normalizedType === reportsOverTimeTypeFilter;
+      });
+    }
+    
     console.log('Filtered reports count:', filteredReports.length);
     
     const reportTypes = [
@@ -468,7 +541,91 @@ export function DashboardStats() {
     console.log('=== End Reports Over Time Calculation ===');
     
     return result;
-  }, [reports, reportTypeFilter]);
+  }, [reports, reportsOverTimeFilter, reportsOverTimeTypeFilter]);
+
+  // Calculate most active month from reports over time data
+  const mostActiveMonth = useMemo(() => {
+    if (!reportsOverTimeData || reportsOverTimeData.length === 0) return null;
+    
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const monthTotals: Record<string, number> = {};
+    
+    // Initialize all months to 0
+    months.forEach(month => {
+      monthTotals[month] = 0;
+    });
+    
+    // Sum up all report types for each month
+    reportsOverTimeData.forEach(typeData => {
+      typeData.data.forEach(monthData => {
+        monthTotals[monthData.x] = (monthTotals[monthData.x] || 0) + monthData.y;
+      });
+    });
+    
+    // Find the month with the highest total
+    let maxMonth = months[0];
+    let maxCount = monthTotals[months[0]];
+    
+    months.forEach(month => {
+      if (monthTotals[month] > maxCount) {
+        maxCount = monthTotals[month];
+        maxMonth = month;
+      }
+    });
+    
+    return maxCount > 0 ? { month: maxMonth, count: maxCount } : null;
+  }, [reportsOverTimeData]);
+
+  // Calculate top 3 most active dates
+  const top3MostActiveDates = useMemo(() => {
+    // Filter reports by period (respects reportsOverTimeFilter)
+    let filteredReports = filterReportsByPeriod(reports, reportsOverTimeFilter);
+
+    // Apply report type filter if not "all"
+    if (reportsOverTimeTypeFilter !== "all") {
+      filteredReports = filteredReports.filter(report => {
+        const reportTypeValue = report.reportType || report.type || report.category || 'Others';
+        const normalizedType = normalizeCategoryToType(reportTypeValue);
+        return normalizedType === reportsOverTimeTypeFilter;
+      });
+    }
+
+    // Count reports by date (YYYY-MM-DD format)
+    const dateCounts: Record<string, number> = {};
+    filteredReports.forEach(report => {
+      let reportDate: Date;
+      if (report.timestamp instanceof Date) {
+        reportDate = report.timestamp;
+      } else if (report.timestamp?.toDate && typeof report.timestamp.toDate === 'function') {
+        reportDate = report.timestamp.toDate();
+      } else if (report.timestamp) {
+        reportDate = new Date(report.timestamp);
+      } else {
+        return;
+      }
+      
+      // Format date as YYYY-MM-DD
+      const dateKey = reportDate.toISOString().split('T')[0];
+      dateCounts[dateKey] = (dateCounts[dateKey] || 0) + 1;
+    });
+
+    // Get top 3 dates
+    const sorted = Object.entries(dateCounts)
+      .map(([dateKey, count]) => {
+        const date = new Date(dateKey);
+        // Format date as "MMM DD, YYYY" (e.g., "Jan 15, 2024")
+        const formattedDate = date.toLocaleDateString('en-US', { 
+          month: 'short', 
+          day: 'numeric', 
+          year: 'numeric' 
+        });
+        return { date: dateKey, formattedDate, count };
+      })
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 3);
+
+    return sorted;
+  }, [reports, reportsOverTimeFilter, reportsOverTimeTypeFilter]);
 
   // Report type distribution data - calculated from real Firestore data
   const reportTypeData = useMemo(() => {
@@ -544,9 +701,41 @@ export function DashboardStats() {
     
     return result;
   }, [reports, reportTypeFilter, hazardColors]);
-  // Peak hours data - calculated from real Firestore data
+
+  // Calculate top 3 most common report types
+  const top3ReportTypes = useMemo(() => {
+    if (!reportTypeData || reportTypeData.length === 0) return [];
+    return reportTypeData.slice(0, 3);
+  }, [reportTypeData]);
+
+  // Calculate total reports for donut chart overlay
+  const totalReportsForDonut = useMemo(() => {
+    if (!reportTypeData || reportTypeData.length === 0) return 0;
+    return reportTypeData.reduce((sum, item) => sum + item.count, 0);
+  }, [reportTypeData]);
+
+  // Peak hours data - calculated from real Firestore data using createdTime field
   const peakHoursData = useMemo(() => {
+    console.log('=== Peak Hours Calculation START ===');
+    console.log('Total reports available:', reports.length);
+    console.log('Peak hours filter:', peakHoursFilter);
+    
     const filteredReports = filterReportsByPeriod(reports, peakHoursFilter);
+    
+    console.log('Filtered reports count:', filteredReports.length);
+    
+    // Log sample reports to see their structure
+    if (filteredReports.length > 0) {
+      console.log('Sample reports (first 3):', filteredReports.slice(0, 3).map(r => ({
+        id: r.id,
+        hasCreatedTime: !!r.createdTime,
+        createdTime: r.createdTime,
+        createdTimeType: typeof r.createdTime,
+        hasTimestamp: !!r.timestamp,
+        timestamp: r.timestamp,
+        timestampType: typeof r.timestamp
+      })));
+    }
     
     // Initialize hour buckets
     const hourBuckets: Record<string, number> = {};
@@ -561,20 +750,72 @@ export function DashboardStats() {
       hourBuckets[label] = 0;
     });
     
-    // Count reports by hour
-    filteredReports.forEach(report => {
-      // Handle different timestamp formats from Firestore
-      let reportDate: Date;
-      if (report.timestamp instanceof Date) {
-        reportDate = report.timestamp;
-      } else if (report.timestamp?.toDate && typeof report.timestamp.toDate === 'function') {
-        reportDate = report.timestamp.toDate();
-      } else if (report.timestamp) {
-        reportDate = new Date(report.timestamp);
-      } else {
-        // Skip reports without valid timestamps
+    let processedCount = 0;
+    let skippedCount = 0;
+    const dateSourceCounts: Record<string, number> = {
+      'createdTime (Date)': 0,
+      'createdTime (Firestore Timestamp)': 0,
+      'createdTime (string/number)': 0,
+      'timestamp (Date)': 0,
+      'timestamp (Firestore Timestamp)': 0,
+      'timestamp (string/number)': 0,
+      'none': 0
+    };
+    
+    // Count reports by hour using createdTime field
+    filteredReports.forEach((report, index) => {
+      // Try to get createdTime field first, then fall back to timestamp
+      let reportDate: Date | null = null;
+      let dateSource = 'none';
+      
+      // Check for createdTime field (primary source)
+      if (report.createdTime) {
+        try {
+          if (report.createdTime instanceof Date) {
+            reportDate = report.createdTime;
+            dateSource = 'createdTime (Date)';
+          } else if (report.createdTime?.toDate && typeof report.createdTime.toDate === 'function') {
+            reportDate = report.createdTime.toDate();
+            dateSource = 'createdTime (Firestore Timestamp)';
+          } else if (typeof report.createdTime === 'string' || typeof report.createdTime === 'number') {
+            reportDate = new Date(report.createdTime);
+            dateSource = 'createdTime (string/number)';
+          }
+        } catch (error) {
+          console.warn(`Error parsing createdTime for report ${report.id}:`, error);
+        }
+      }
+      
+      // Fall back to timestamp if createdTime is not available
+      if (!reportDate && report.timestamp) {
+        try {
+          if (report.timestamp instanceof Date) {
+            reportDate = report.timestamp;
+            dateSource = 'timestamp (Date)';
+          } else if (report.timestamp?.toDate && typeof report.timestamp.toDate === 'function') {
+            reportDate = report.timestamp.toDate();
+            dateSource = 'timestamp (Firestore Timestamp)';
+          } else if (typeof report.timestamp === 'string' || typeof report.timestamp === 'number') {
+            reportDate = new Date(report.timestamp);
+            dateSource = 'timestamp (string/number)';
+          }
+        } catch (error) {
+          console.warn(`Error parsing timestamp for report ${report.id}:`, error);
+        }
+      }
+      
+      dateSourceCounts[dateSource] = (dateSourceCounts[dateSource] || 0) + 1;
+      
+      // Skip reports without valid timestamps
+      if (!reportDate || isNaN(reportDate.getTime())) {
+        skippedCount++;
+        if (index < 5) { // Only log first 5 skipped reports to avoid spam
+          console.warn(`Report ${report.id} missing valid createdTime or timestamp. createdTime:`, report.createdTime, 'timestamp:', report.timestamp);
+        }
         return;
       }
+      
+      processedCount++;
       const hour = reportDate.getHours();
       
       // Convert 24-hour to 12-hour format with AM/PM
@@ -586,14 +827,28 @@ export function DashboardStats() {
       
       if (hourBuckets[hourLabel] !== undefined) {
         hourBuckets[hourLabel]++;
+      } else {
+        console.warn(`Invalid hour label: ${hourLabel} (hour: ${hour})`);
       }
     });
     
+    console.log(`Processed ${processedCount} reports, skipped ${skippedCount} reports`);
+    console.log('Date source breakdown:', dateSourceCounts);
+    
+    // Debug: Log hour distribution
+    console.log('Hour buckets:', hourBuckets);
+    
     // Convert to array format, only include hours with data or show all hours
-    return hourLabels.map(hour => ({
+    const result = hourLabels.map(hour => ({
       hour,
       reports: hourBuckets[hour] || 0
     }));
+    
+    console.log('Peak hours result:', result);
+    console.log('Total reports in result:', result.reduce((sum, item) => sum + item.reports, 0));
+    console.log('=== Peak Hours Calculation END ===');
+    
+    return result;
   }, [reports, peakHoursFilter]);
 
   // Get current year for dynamic calendar
@@ -619,7 +874,7 @@ export function DashboardStats() {
   };
 
   const calendarData = useMemo(() => {
-    const data: { day: string; value: number; color: string }[] = [];
+    const data: { day: string; value: number; originalValue?: number }[] = [];
     const startDate = new Date(currentYear, 0, 1);
     const endDate = new Date(currentYear, 11, 31);
 
@@ -1095,8 +1350,22 @@ export function DashboardStats() {
               mappedType: reportType,
               hasReportType: !!data.reportType,
               hasType: !!data.type,
-              hasCategory: !!data.category
+              hasCategory: !!data.category,
+              hasCreatedTime: !!data.createdTime,
+              createdTime: data.createdTime
             });
+          }
+          
+          // Parse createdTime field (for peak hours calculation)
+          let createdTime: Date | null = null;
+          if (data.createdTime) {
+            if (data.createdTime?.toDate && typeof data.createdTime.toDate === 'function') {
+              createdTime = data.createdTime.toDate();
+            } else if (data.createdTime instanceof Date) {
+              createdTime = data.createdTime;
+            } else if (typeof data.createdTime === 'string' || typeof data.createdTime === 'number') {
+              createdTime = new Date(data.createdTime);
+            }
           }
           
           return {
@@ -1110,7 +1379,9 @@ export function DashboardStats() {
             category: data.category,
             barangay: data.barangay || data.locationName || 'Unknown', // Use barangay or locationName
             locationName: data.locationName || data.location || data.barangay || 'Unknown',
-            timestamp: data.timestamp?.toDate ? data.timestamp.toDate() : (data.timestamp instanceof Date ? data.timestamp : new Date())
+            timestamp: data.timestamp?.toDate ? data.timestamp.toDate() : (data.timestamp instanceof Date ? data.timestamp : new Date()),
+            // Include createdTime field for peak hours calculation
+            createdTime: createdTime
           };
         });
         
@@ -2563,10 +2834,15 @@ ${calendarChart ? `
 
   // Reports Over Time Chart - inline component
   const ReportsOverTimeChart = ({ height = '100%', chartId = 'reports-over-time-chart', pointSize = 6, bottomMargin = 60 }: { height?: string; chartId?: string; pointSize?: number; bottomMargin?: number }) => {
-    const filteredData = useMemo(() => 
-      reportsOverTimeData.filter(item => enabledReportTypes[item.id]), 
-      [reportsOverTimeData, enabledReportTypes]
-    );
+    const filteredData = useMemo(() => {
+      // Show all report types by default, only hide if explicitly disabled
+      return reportsOverTimeData.filter(item => {
+        // If explicitly set to false, hide it
+        if (enabledReportTypes[item.id] === false) return false;
+        // Otherwise, show it (true or undefined)
+        return true;
+      });
+    }, [reportsOverTimeData, enabledReportTypes]);
 
     return (
       <div id={chartId} style={{ height, minHeight: '300px' }}>
@@ -2690,22 +2966,66 @@ ${calendarChart ? `
     return { type, count, percentage };
   }, [reports]);
 
+  // Helper function to parse responseTime string to minutes
+  // Handles formats like "1 hr 30 min", "45 min", "2 hr 5 min"
+  const parseResponseTimeToMinutes = (responseTime: string): number => {
+    try {
+      if (!responseTime) return 0;
+      
+      // Remove extra spaces and convert to lowercase for easier parsing
+      const cleaned = responseTime.trim().toLowerCase();
+      
+      let totalMinutes = 0;
+      
+      // Check for hours (format: "X hr" or "X hr Y min")
+      const hourMatch = cleaned.match(/(\d+)\s*hr/);
+      if (hourMatch) {
+        const hours = parseInt(hourMatch[1], 10);
+        totalMinutes += hours * 60;
+      }
+      
+      // Check for minutes (format: "Y min")
+      const minuteMatch = cleaned.match(/(\d+)\s*min/);
+      if (minuteMatch) {
+        const minutes = parseInt(minuteMatch[1], 10);
+        totalMinutes += minutes;
+      }
+      
+      return totalMinutes;
+    } catch (error) {
+      console.error('Error parsing response time:', error);
+      return 0;
+    }
+  };
+
   const avgResponseTime = useMemo(() => {
+    // Filter reports that have saved responseTime in dispatchInfo
     const reportsWithResponseTime = reports.filter(r => 
-      r.resolvedAt && r.timestamp
+      r.dispatchInfo?.responseTime && r.dispatchInfo.responseTime.trim() !== ''
     );
     
-    if (reportsWithResponseTime.length === 0) return 0;
+    if (reportsWithResponseTime.length === 0) return null;
 
+    // Calculate total response time in minutes by parsing responseTime strings
     const totalMinutes = reportsWithResponseTime.reduce((sum, report) => {
-      const resolvedTime = report.resolvedAt?.toDate ? report.resolvedAt.toDate() : new Date(report.resolvedAt);
-      const submittedTime = report.timestamp;
-      const diffMs = resolvedTime.getTime() - submittedTime.getTime();
-      const diffMinutes = diffMs / (1000 * 60);
-      return sum + diffMinutes;
+      try {
+        const responseTimeStr = report.dispatchInfo.responseTime;
+        const minutes = parseResponseTimeToMinutes(responseTimeStr);
+        return sum + minutes;
+      } catch (error) {
+        return sum;
+      }
     }, 0);
 
-    return (totalMinutes / reportsWithResponseTime.length).toFixed(1);
+    const avgMinutes = totalMinutes / reportsWithResponseTime.length;
+    const hours = Math.floor(avgMinutes / 60);
+    const minutes = Math.round(avgMinutes % 60);
+
+    return {
+      avgMinutes: Math.round(avgMinutes),
+      formatted: hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`,
+      count: reportsWithResponseTime.length
+    };
   }, [reports]);
 
   // Reusable chart component - memoized to prevent unnecessary re-renders
@@ -3857,24 +4177,29 @@ ${calendarChart ? `
               </div>
 
               {/* Summary Stats */}
-              <div className="grid grid-cols-3 gap-3 pt-2 border-t">
+              <div className="grid grid-cols-1 gap-3 pt-2 border-t">
                 <div className="text-center">
                   <div className="text-xl font-bold text-brand-orange">
-                    {calendarData.reduce((sum, day) => sum + (day.originalValue ?? day.value ?? 0), 0)}
-                  </div>
-                  <div className="text-xs text-gray-600">Total Reports</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-xl font-bold text-brand-red">
-                    {Math.max(...calendarData.map(d => d.originalValue ?? d.value ?? 0), 0)}
+                    {(() => {
+                      const peakDay = calendarData.reduce((max, day) => {
+                        const dayCount = day.originalValue ?? 0;
+                        const maxCount = max.originalValue ?? 0;
+                        return dayCount > maxCount ? day : max;
+                      }, calendarData[0] || { day: '', originalValue: 0 });
+                      
+                      if (!peakDay || (peakDay.originalValue ?? 0) === 0) {
+                        return 'N/A';
+                      }
+                      
+                      const peakDate = new Date(peakDay.day);
+                      return peakDate.toLocaleDateString('en-US', { 
+                        month: 'short', 
+                        day: 'numeric',
+                        year: 'numeric'
+                      });
+                    })()}
                   </div>
                   <div className="text-xs text-gray-600">Peak Day</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-xl font-bold text-gray-700">
-                    {(calendarData.reduce((sum, day) => sum + (day.originalValue ?? day.value ?? 0), 0) / calendarData.length).toFixed(1)}
-                  </div>
-                  <div className="text-xs text-gray-600">Avg/Day</div>
                 </div>
               </div>
             </div>
@@ -3954,15 +4279,15 @@ ${calendarChart ? `
             <div className="flex items-start justify-between">
               <div className="flex items-start gap-3">
                 <div className="h-10 w-10 bg-orange-50 border border-brand-orange rounded-lg flex items-center justify-center flex-shrink-0">
-                  <AlertTriangle className="h-5 w-5 text-brand-orange" />
+                  <FileText className="h-5 w-5 text-brand-orange" />
                 </div>
                 <div className="space-y-0.5">
-                  <p className="text-xs font-semibold text-gray-800 uppercase tracking-wide">Most Common Type</p>
-                  <p className="text-xs text-brand-orange font-medium">{mostCommonType.type} - {mostCommonType.percentage}%</p>
+                  <p className="text-xs font-semibold text-gray-800 uppercase tracking-wide">Total Reports</p>
+                  <p className="text-xs text-brand-orange font-medium">All time</p>
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-3xl font-bold text-gray-900">{mostCommonType.count}</p>
+                <p className="text-3xl font-bold text-gray-900">{reports.length}</p>
               </div>
             </div>
           </CardContent>
@@ -3973,15 +4298,15 @@ ${calendarChart ? `
             <div className="flex items-start justify-between">
               <div className="flex items-start gap-3">
                 <div className="h-10 w-10 bg-orange-50 border border-brand-orange rounded-lg flex items-center justify-center flex-shrink-0">
-                  <Calendar className="h-5 w-5 text-brand-orange" />
+                  <AlertTriangle className="h-5 w-5 text-brand-orange" />
                 </div>
                 <div className="space-y-0.5">
-                  <p className="text-xs font-semibold text-gray-800 uppercase tracking-wide">This Week</p>
-                  <p className="text-xs text-brand-orange font-medium">Last 7 days</p>
+                  <p className="text-xs font-semibold text-gray-800 uppercase tracking-wide">Most Common Type</p>
+                  <p className="text-xs text-brand-orange font-medium">{mostCommonType.type} - {mostCommonType.percentage}%</p>
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-3xl font-bold text-gray-900">{weeklyReports}</p>
+                <p className="text-3xl font-bold text-gray-900">{mostCommonType.count}</p>
               </div>
             </div>
           </CardContent>
@@ -4015,12 +4340,15 @@ ${calendarChart ? `
                 </div>
                 <div className="space-y-0.5">
                   <p className="text-xs font-semibold text-gray-800 uppercase tracking-wide">Avg Response Time</p>
-                  <p className="text-xs text-brand-orange font-medium">Emergency calls</p>
+                  <p className="text-xs text-brand-orange font-medium">
+                    {avgResponseTime ? `Based on ${avgResponseTime.count} reports` : 'No data'}
+                  </p>
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-3xl font-bold text-gray-900">8.5</p>
-                <p className="text-xs text-gray-500 font-medium">minutes</p>
+                <p className="text-3xl font-bold text-gray-900">
+                  {avgResponseTime ? avgResponseTime.formatted : 'N/A'}
+                </p>
               </div>
             </div>
           </CardContent>
@@ -4109,21 +4437,36 @@ ${calendarChart ? `
       {/* Reports Over Time and Report Type Distribution - Side by Side */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Reports Over Time Chart */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
+        <Card className="flex flex-col">
+          <CardHeader>
             <CardTitle>Reports Over Time</CardTitle>
+          </CardHeader>
+          <div className="px-6 pb-4 border-b">
             <div className="flex items-center gap-2">
-              <Select value={reportTypeFilter} onValueChange={setReportTypeFilter}>
-                <SelectTrigger className="w-[120px]">
+              <Select value={reportsOverTimeFilter} onValueChange={setReportsOverTimeFilter}>
+                <SelectTrigger className="flex-1">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="today">Today</SelectItem>
                   <SelectItem value="this-week">This Week</SelectItem>
                   <SelectItem value="this-month">This Month</SelectItem>
                   <SelectItem value="this-year">This Year</SelectItem>
                 </SelectContent>
               </Select>
               
+              <Select value={reportsOverTimeTypeFilter} onValueChange={setReportsOverTimeTypeFilter}>
+                <SelectTrigger className="flex-1">
+                  <SelectValue placeholder="Report Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  {allReportTypes.map((type) => (
+                    <SelectItem key={type} value={type}>{type}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
               {/* Export Dropdown */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -4152,17 +4495,35 @@ ${calendarChart ? `
                 <Maximize2 className="h-4 w-4" />
               </Button>
             </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="h-64">
+          </div>
+          <CardContent className="flex-1 flex flex-col min-h-0">
+            <div className="flex-1 min-h-0">
               <ReportsOverTimeChart 
                 height="100%" 
                 chartId="reports-over-time-chart" 
               />
             </div>
             
-            {/* Custom Legend */}
-            <div className="pt-3 border-t border-gray-200">
+            {/* Top 3 Most Active Dates Summary */}
+            {top3MostActiveDates.length > 0 && (
+              <div className="pt-3 border-t border-gray-200">
+                <div className="text-sm font-semibold text-gray-700 mb-2 text-center">Top 3 Most Active Dates</div>
+                <div className="flex flex-col gap-2">
+                  {top3MostActiveDates.map((item, index) => (
+                    <div key={item.date} className="flex items-center justify-between px-3 py-1.5 bg-gray-50 rounded">
+                      <div className="flex items-center gap-2">
+                        <div className="text-sm font-bold text-brand-orange">#{index + 1}</div>
+                        <div className="text-sm font-medium text-gray-700">{item.formattedDate}</div>
+                      </div>
+                      <div className="text-sm font-semibold text-gray-900">{item.count} reports</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {/* Custom Legend - Hidden */}
+            {/* <div className="pt-3 border-t border-gray-200">
               <div className="flex flex-wrap gap-3 justify-center">
                 {Object.keys(enabledReportTypes).map((key) => (
                   <div 
@@ -4180,20 +4541,23 @@ ${calendarChart ? `
                   </div>
                 ))}
               </div>
-            </div>
+            </div> */}
           </CardContent>
         </Card>
 
         {/* Pie Chart - Report Type Distribution */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
+          <CardHeader>
             <CardTitle>Report Type Distribution</CardTitle>
+          </CardHeader>
+          <div className="px-6 pb-4 border-b">
             <div className="flex items-center gap-2">
               <Select value={reportTypeFilter} onValueChange={setReportTypeFilter}>
-                <SelectTrigger className="w-[120px]">
+                <SelectTrigger className="flex-1">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="today">Today</SelectItem>
                   <SelectItem value="this-week">This Week</SelectItem>
                   <SelectItem value="this-month">This Month</SelectItem>
                   <SelectItem value="this-year">This Year</SelectItem>
@@ -4228,9 +4592,9 @@ ${calendarChart ? `
                 <Maximize2 className="h-4 w-4" />
               </Button>
             </div>
-          </CardHeader>
+          </div>
           <CardContent className="space-y-4">
-            <div id="pie-chart" style={{ height: '256px', minHeight: '256px' }}>
+            <div id="pie-chart" style={{ height: '256px', minHeight: '256px', position: 'relative' }}>
               <ChartContainer config={{
                 reports: {
                   label: "Reports",
@@ -4245,41 +4609,69 @@ ${calendarChart ? `
                     innerRadius={55} 
                     outerRadius={105} 
                     paddingAngle={5} 
-                    dataKey="value"
+                    dataKey="count"
                   >
                     {reportTypeData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
                   </Pie>
                   <ChartTooltip content={<ChartTooltipContent />} />
                 </PieChart>
               </ChartContainer>
+              {/* Number Overlay */}
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="text-center">
+                  <div className="text-3xl font-bold text-gray-900">{totalReportsForDonut.toLocaleString()}</div>
+                  <div className="text-sm font-medium text-gray-600">Total Reports</div>
+                </div>
+              </div>
             </div>
-            {/* Custom Legend with Filter */}
-            <div className="pt-3 border-t border-gray-200">
+            {/* Custom Legend with Filter - Show all 15 report types - Hidden */}
+            {/* <div className="pt-3 border-t border-gray-200">
               <div className="flex flex-wrap gap-3 justify-center">
-                {reportTypeData.map((item, index) => {
-                  const isEnabled = enabledReportTypes[item.name] !== false;
+                {allReportTypes.map((typeName) => {
+                  const reportTypeItem = reportTypeData.find(item => item.name === typeName);
+                  const percentage = reportTypeItem ? reportTypeItem.value : 0;
+                  const color = reportTypeItem ? reportTypeItem.color : (hazardColors[typeName as keyof typeof hazardColors] || '#6B7280');
+                  const isEnabled = enabledReportTypes[typeName] !== false;
                   return (
                     <div 
-                      key={index} 
+                      key={typeName} 
                       className={`flex items-center gap-1.5 cursor-pointer transition-opacity ${
                         isEnabled ? 'opacity-100' : 'opacity-40'
                       }`}
-                      onClick={() => toggleReportType(item.name)}
+                      onClick={() => toggleReportType(typeName)}
                     >
                       <div 
                         className="w-3 h-3 rounded-sm" 
                         style={{
-                          backgroundColor: item.color
+                          backgroundColor: color
                         }}
                       />
                       <span className="text-xs font-medium text-gray-700">
-                        {item.name} ({item.value}%)
+                        {typeName} ({percentage}%)
                       </span>
                     </div>
                   );
                 })}
               </div>
-            </div>
+            </div> */}
+            
+            {/* Top 3 Most Common Report Types Summary */}
+            {top3ReportTypes.length > 0 && (
+              <div className="pt-3 border-t border-gray-200">
+                <div className="text-sm font-semibold text-gray-700 mb-2 text-center">Top 3 Most Common Types</div>
+                <div className="flex flex-col gap-2">
+                  {top3ReportTypes.map((item, index) => (
+                    <div key={item.name} className="flex items-center justify-between px-3 py-1.5 bg-gray-50 rounded">
+                      <div className="flex items-center gap-2">
+                        <div className="text-sm font-bold text-brand-orange">#{index + 1}</div>
+                        <div className="text-sm font-medium text-gray-700">{item.name}</div>
+                      </div>
+                      <div className="text-sm font-semibold text-gray-900">{item.count} reports ({item.value}%)</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -4288,20 +4680,35 @@ ${calendarChart ? `
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Reports per Barangay - 2 columns */}
         <Card className="lg:col-span-2">
-          <CardHeader className="flex flex-row items-center justify-between">
+          <CardHeader>
             <CardTitle>Reports per Barangay</CardTitle>
+          </CardHeader>
+          <div className="px-6 pb-4 border-b">
             <div className="flex items-center gap-2">
               <Select value={barangayReportsFilter} onValueChange={setBarangayReportsFilter}>
-                <SelectTrigger className="w-[120px]">
+                <SelectTrigger className="flex-1">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="today">Today</SelectItem>
                   <SelectItem value="this-week">This Week</SelectItem>
                   <SelectItem value="this-month">This Month</SelectItem>
                   <SelectItem value="this-year">This Year</SelectItem>
                 </SelectContent>
               </Select>
               
+              <Select value={barangayReportsTypeFilter} onValueChange={setBarangayReportsTypeFilter}>
+                <SelectTrigger className="flex-1">
+                  <SelectValue placeholder="Report Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  {allReportTypes.map((type) => (
+                    <SelectItem key={type} value={type}>{type}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
               {/* Export Dropdown */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -4328,15 +4735,15 @@ ${calendarChart ? `
               {/* Expand Button */}
               <Button size="sm" variant="outline" onClick={() => setIsChartModalOpen(true)}>
                 <Maximize2 className="h-4 w-4" />
-        </Button>
-      </div>
-          </CardHeader>
+              </Button>
+            </div>
+          </div>
           <CardContent className="pt-2">
             <div className="h-80">
               <BarangayReportsChart />
             </div>
-            {/* Custom Legend */}
-            <div className="mt-3 pt-3 border-t border-gray-200">
+            {/* Custom Legend - Hidden */}
+            {/* <div className="mt-3 pt-3 border-t border-gray-200">
               <div className="flex flex-wrap gap-3 justify-center">
                 {Object.keys(enabledReportTypes).map((key) => (
                   <div 
@@ -4354,7 +4761,25 @@ ${calendarChart ? `
                   </div>
                 ))}
               </div>
-            </div>
+            </div> */}
+            
+            {/* Top 3 Most Active Barangays Summary */}
+            {top3Barangays.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-gray-200">
+                <div className="text-sm font-semibold text-gray-700 mb-2 text-center">Top 3 Most Active Barangays</div>
+                <div className="flex flex-col gap-2">
+                  {top3Barangays.map((item, index) => (
+                    <div key={item.name} className="flex items-center justify-between px-3 py-1.5 bg-gray-50 rounded">
+                      <div className="flex items-center gap-2">
+                        <div className="text-sm font-bold text-brand-orange">#{index + 1}</div>
+                        <div className="text-sm font-medium text-gray-700">{item.name}</div>
+                      </div>
+                      <div className="text-sm font-semibold text-gray-900">{item.reports} reports</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -4362,20 +4787,36 @@ ${calendarChart ? `
         <div className="lg:col-span-2 space-y-6">
           {/* Users per Barangay Chart */}
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader>
               <CardTitle>Users per Barangay</CardTitle>
+            </CardHeader>
+            <div className="px-6 pb-4 border-b">
               <div className="flex items-center gap-2">
                 <Select value={usersBarangayFilter} onValueChange={setUsersBarangayFilter}>
-                  <SelectTrigger className="w-[120px]">
+                  <SelectTrigger className="flex-1">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="today">Today</SelectItem>
                     <SelectItem value="this-week">This Week</SelectItem>
                     <SelectItem value="this-month">This Month</SelectItem>
                     <SelectItem value="this-year">This Year</SelectItem>
                   </SelectContent>
                 </Select>
                 
+                <Select value={usersBarangayBarangayFilter} onValueChange={setUsersBarangayBarangayFilter}>
+                  <SelectTrigger className="flex-1">
+                    <SelectValue placeholder="Barangay" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Barangays</SelectItem>
+                    {officialBarangays.map((barangay) => (
+                      <SelectItem key={barangay} value={barangay}>{barangay}</SelectItem>
+                    ))}
+                    <SelectItem value="Others">Others</SelectItem>
+                  </SelectContent>
+                </Select>
+
                 {/* Export Dropdown */}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -4404,7 +4845,7 @@ ${calendarChart ? `
                   <Maximize2 className="h-4 w-4" />
                 </Button>
               </div>
-            </CardHeader>
+            </div>
             <CardContent>
               <div className="h-40">
                 <UsersPerBarangayChart height="100%" chartId="users-chart" />
@@ -4414,20 +4855,23 @@ ${calendarChart ? `
 
           {/* Peak Reporting Hours - Now as Line Chart */}
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader>
               <CardTitle>Peak Reporting Hours</CardTitle>
+            </CardHeader>
+            <div className="px-6 pb-4 border-b">
               <div className="flex items-center gap-2">
                 <Select value={peakHoursFilter} onValueChange={setPeakHoursFilter}>
-                <SelectTrigger className="w-[120px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="this-week">This Week</SelectItem>
-                  <SelectItem value="this-month">This Month</SelectItem>
-                  <SelectItem value="this-year">This Year</SelectItem>
-                </SelectContent>
-              </Select>
-                
+                  <SelectTrigger className="flex-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="today">Today</SelectItem>
+                    <SelectItem value="this-week">This Week</SelectItem>
+                    <SelectItem value="this-month">This Month</SelectItem>
+                    <SelectItem value="this-year">This Year</SelectItem>
+                  </SelectContent>
+                </Select>
+
                 {/* Export Dropdown */}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -4456,7 +4900,7 @@ ${calendarChart ? `
                   <Maximize2 className="h-4 w-4" />
                 </Button>
               </div>
-            </CardHeader>
+            </div>
             <CardContent>
               <div className="h-40">
                 <PeakHoursChart height="100%" chartId="peak-hours-chart" />
@@ -4470,51 +4914,64 @@ ${calendarChart ? `
       <Dialog open={isChartModalOpen} onOpenChange={setIsChartModalOpen}>
         <DialogContent className="max-w-7xl h-[90vh] flex flex-col">
           <DialogHeader>
-            <div className="flex items-center justify-between flex-wrap gap-4">
-              <DialogTitle>Reports per Barangay - Detailed View</DialogTitle>
-              <div className="flex items-center gap-2">
-                <Select value={barangayReportsFilter} onValueChange={setBarangayReportsFilter}>
-                  <SelectTrigger className="w-[120px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="this-week">This Week</SelectItem>
-                    <SelectItem value="this-month">This Month</SelectItem>
-                    <SelectItem value="this-year">This Year</SelectItem>
-                  </SelectContent>
-                </Select>
-                
-                {/* Export Dropdown */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button size="sm" variant="outline">
-                      <Download className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={exportChartAsPNG}>
-                      <FileImage className="h-4 w-4 mr-2" />
-                      Export as PNG
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={exportChartAsSVG}>
-                      <FileType className="h-4 w-4 mr-2" />
-                      Export as SVG
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={exportChartAsPDF}>
-                      <FileText className="h-4 w-4 mr-2" />
-                      Export as PDF
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </div>
+            <DialogTitle>Reports per Barangay - Detailed View</DialogTitle>
           </DialogHeader>
+          <div className="px-6 pb-4 border-b">
+            <div className="flex items-center gap-2">
+              <Select value={barangayReportsFilter} onValueChange={setBarangayReportsFilter}>
+                <SelectTrigger className="flex-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="today">Today</SelectItem>
+                  <SelectItem value="this-week">This Week</SelectItem>
+                  <SelectItem value="this-month">This Month</SelectItem>
+                  <SelectItem value="this-year">This Year</SelectItem>
+                </SelectContent>
+              </Select>
+              
+              <Select value={barangayReportsTypeFilter} onValueChange={setBarangayReportsTypeFilter}>
+                <SelectTrigger className="flex-1">
+                  <SelectValue placeholder="Report Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  {allReportTypes.map((type) => (
+                    <SelectItem key={type} value={type}>{type}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {/* Export Dropdown */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="outline">
+                    <Download className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={exportChartAsPNG}>
+                    <FileImage className="h-4 w-4 mr-2" />
+                    Export as PNG
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={exportChartAsSVG}>
+                    <FileType className="h-4 w-4 mr-2" />
+                    Export as SVG
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={exportChartAsPDF}>
+                    <FileText className="h-4 w-4 mr-2" />
+                    Export as PDF
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
           <div className="flex-1 min-h-0 mt-4">
             <div className="h-[calc(90vh-200px)]">
               <BarangayReportsChartModal height="calc(90vh - 200px)" chartId="nivo-chart-modal" />
             </div>
-            {/* Custom Legend for Modal */}
-            <div className="mt-3 pt-3 border-t border-gray-200">
+            {/* Custom Legend for Modal - Hidden */}
+            {/* <div className="mt-3 pt-3 border-t border-gray-200">
               <div className="flex flex-wrap gap-3 justify-center">
                 {Object.keys(enabledReportTypes).map((key) => (
                   <div 
@@ -4532,7 +4989,25 @@ ${calendarChart ? `
                   </div>
                 ))}
               </div>
-            </div>
+            </div> */}
+            
+            {/* Top 3 Most Active Barangays Summary */}
+            {top3Barangays.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-gray-200">
+                <div className="text-sm font-semibold text-gray-700 mb-2 text-center">Top 3 Most Active Barangays</div>
+                <div className="flex flex-col gap-2">
+                  {top3Barangays.map((item, index) => (
+                    <div key={item.name} className="flex items-center justify-between px-3 py-1.5 bg-gray-50 rounded">
+                      <div className="flex items-center gap-2">
+                        <div className="text-sm font-bold text-brand-orange">#{index + 1}</div>
+                        <div className="text-sm font-medium text-gray-700">{item.name}</div>
+                      </div>
+                      <div className="text-sm font-semibold text-gray-900">{item.reports} reports</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>
@@ -4541,45 +5016,59 @@ ${calendarChart ? `
       <Dialog open={isUsersChartModalOpen} onOpenChange={setIsUsersChartModalOpen}>
         <DialogContent className="max-w-7xl h-[90vh] flex flex-col">
           <DialogHeader>
-            <div className="flex items-center justify-between flex-wrap gap-4">
-              <DialogTitle>Users per Barangay - Detailed View</DialogTitle>
-              <div className="flex items-center gap-2">
-                <Select value={usersBarangayFilter} onValueChange={setUsersBarangayFilter}>
-                  <SelectTrigger className="w-[120px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="this-week">This Week</SelectItem>
-                    <SelectItem value="this-month">This Month</SelectItem>
-                    <SelectItem value="this-year">This Year</SelectItem>
-                  </SelectContent>
-                </Select>
-                
-                {/* Export Dropdown */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button size="sm" variant="outline">
-                      <Download className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={exportUsersChartAsPNG}>
-                      <FileImage className="h-4 w-4 mr-2" />
-                      Export as PNG
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={exportUsersChartAsSVG}>
-                      <FileType className="h-4 w-4 mr-2" />
-                      Export as SVG
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={exportUsersChartAsPDF}>
-                      <FileText className="h-4 w-4 mr-2" />
-                      Export as PDF
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </div>
+            <DialogTitle>Users per Barangay - Detailed View</DialogTitle>
           </DialogHeader>
+          <div className="px-6 pb-4 border-b">
+            <div className="flex items-center gap-2">
+              <Select value={usersBarangayFilter} onValueChange={setUsersBarangayFilter}>
+                <SelectTrigger className="flex-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="today">Today</SelectItem>
+                  <SelectItem value="this-week">This Week</SelectItem>
+                  <SelectItem value="this-month">This Month</SelectItem>
+                  <SelectItem value="this-year">This Year</SelectItem>
+                </SelectContent>
+              </Select>
+              
+              <Select value={usersBarangayBarangayFilter} onValueChange={setUsersBarangayBarangayFilter}>
+                <SelectTrigger className="flex-1">
+                  <SelectValue placeholder="Barangay" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Barangays</SelectItem>
+                  {officialBarangays.map((barangay) => (
+                    <SelectItem key={barangay} value={barangay}>{barangay}</SelectItem>
+                  ))}
+                  <SelectItem value="Others">Others</SelectItem>
+                </SelectContent>
+              </Select>
+
+              {/* Export Dropdown */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="outline">
+                    <Download className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={exportUsersChartAsPNG}>
+                    <FileImage className="h-4 w-4 mr-2" />
+                    Export as PNG
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={exportUsersChartAsSVG}>
+                    <FileType className="h-4 w-4 mr-2" />
+                    Export as SVG
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={exportUsersChartAsPDF}>
+                    <FileText className="h-4 w-4 mr-2" />
+                    Export as PDF
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
           <div className="flex-1 min-h-0 mt-4">
             <UsersPerBarangayChartModal height="calc(90vh - 140px)" chartId="users-chart-modal" />
           </div>
@@ -4590,47 +5079,48 @@ ${calendarChart ? `
       <Dialog open={isPieChartModalOpen} onOpenChange={setIsPieChartModalOpen}>
         <DialogContent className="max-w-7xl h-[90vh] flex flex-col">
           <DialogHeader>
-            <div className="flex items-center justify-between flex-wrap gap-4">
-              <DialogTitle>Report Type Distribution - Detailed View</DialogTitle>
-              <div className="flex items-center gap-2">
-                <Select value={reportTypeFilter} onValueChange={setReportTypeFilter}>
-                  <SelectTrigger className="w-[120px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="this-week">This Week</SelectItem>
-                    <SelectItem value="this-month">This Month</SelectItem>
-                    <SelectItem value="this-year">This Year</SelectItem>
-                  </SelectContent>
-                </Select>
-                
-                {/* Export Dropdown */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button size="sm" variant="outline">
-                      <Download className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={exportPieChartAsPNG}>
-                      <FileImage className="h-4 w-4 mr-2" />
-                      Export as PNG
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={exportPieChartAsSVG}>
-                      <FileType className="h-4 w-4 mr-2" />
-                      Export as SVG
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={exportPieChartAsPDF}>
-                      <FileText className="h-4 w-4 mr-2" />
-                      Export as PDF
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </div>
+            <DialogTitle>Report Type Distribution - Detailed View</DialogTitle>
           </DialogHeader>
+          <div className="px-6 pb-4 border-b">
+            <div className="flex items-center gap-2">
+              <Select value={reportTypeFilter} onValueChange={setReportTypeFilter}>
+                <SelectTrigger className="flex-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="today">Today</SelectItem>
+                  <SelectItem value="this-week">This Week</SelectItem>
+                  <SelectItem value="this-month">This Month</SelectItem>
+                  <SelectItem value="this-year">This Year</SelectItem>
+                </SelectContent>
+              </Select>
+              
+              {/* Export Dropdown */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="outline">
+                    <Download className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={exportPieChartAsPNG}>
+                    <FileImage className="h-4 w-4 mr-2" />
+                    Export as PNG
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={exportPieChartAsSVG}>
+                    <FileType className="h-4 w-4 mr-2" />
+                    Export as SVG
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={exportPieChartAsPDF}>
+                    <FileText className="h-4 w-4 mr-2" />
+                    Export as PDF
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
           <div className="flex-1 min-h-0 mt-4 space-y-4">
-            <div id="pie-chart-modal" style={{ height: 'calc(90vh - 340px)', minHeight: '500px' }}>
+            <div id="pie-chart-modal" style={{ height: 'calc(90vh - 340px)', minHeight: '500px', position: 'relative' }}>
             <ChartContainer config={{
               reports: {
                 label: "Reports",
@@ -4645,41 +5135,69 @@ ${calendarChart ? `
                   innerRadius={110} 
                   outerRadius={220} 
                   paddingAngle={5} 
-                  dataKey="value"
+                  dataKey="count"
                 >
                   {reportTypeData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
                 </Pie>
                 <ChartTooltip content={<ChartTooltipContent />} />
               </PieChart>
             </ChartContainer>
+            {/* Number Overlay */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="text-center">
+                <div className="text-5xl font-bold text-gray-900">{totalReportsForDonut.toLocaleString()}</div>
+                <div className="text-lg font-medium text-gray-600">Total Reports</div>
+              </div>
             </div>
-            {/* Custom Legend with Filter for Modal */}
-            <div className="pt-3 border-t border-gray-200">
+            </div>
+            {/* Custom Legend with Filter for Modal - Show all 15 report types - Hidden */}
+            {/* <div className="pt-3 border-t border-gray-200">
               <div className="flex flex-wrap gap-3 justify-center">
-                {reportTypeData.map((item, index) => {
-                  const isEnabled = enabledReportTypes[item.name] !== false;
+                {allReportTypes.map((typeName) => {
+                  const reportTypeItem = reportTypeData.find(item => item.name === typeName);
+                  const percentage = reportTypeItem ? reportTypeItem.value : 0;
+                  const color = reportTypeItem ? reportTypeItem.color : (hazardColors[typeName as keyof typeof hazardColors] || '#6B7280');
+                  const isEnabled = enabledReportTypes[typeName] !== false;
                   return (
                     <div 
-                      key={index} 
+                      key={typeName} 
                       className={`flex items-center gap-1.5 cursor-pointer transition-opacity ${
                         isEnabled ? 'opacity-100' : 'opacity-40'
                       }`}
-                      onClick={() => toggleReportType(item.name)}
+                      onClick={() => toggleReportType(typeName)}
                     >
                       <div 
                         className="w-3 h-3 rounded-sm" 
                         style={{
-                          backgroundColor: item.color
+                          backgroundColor: color
                         }}
                       />
                       <span className="text-xs font-medium text-gray-700">
-                        {item.name} ({item.value}%)
+                        {typeName} ({percentage}%)
                       </span>
                     </div>
                   );
                 })}
               </div>
-            </div>
+            </div> */}
+            
+            {/* Top 3 Most Common Report Types Summary */}
+            {top3ReportTypes.length > 0 && (
+              <div className="pt-3 border-t border-gray-200">
+                <div className="text-sm font-semibold text-gray-700 mb-2 text-center">Top 3 Most Common Types</div>
+                <div className="flex flex-col gap-2">
+                  {top3ReportTypes.map((item, index) => (
+                    <div key={item.name} className="flex items-center justify-between px-3 py-1.5 bg-gray-50 rounded">
+                      <div className="flex items-center gap-2">
+                        <div className="text-sm font-bold text-brand-orange">#{index + 1}</div>
+                        <div className="text-sm font-medium text-gray-700">{item.name}</div>
+                      </div>
+                      <div className="text-sm font-semibold text-gray-900">{item.count} reports ({item.value}%)</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>
@@ -4688,45 +5206,46 @@ ${calendarChart ? `
       <Dialog open={isPeakHoursModalOpen} onOpenChange={setIsPeakHoursModalOpen}>
         <DialogContent className="max-w-7xl h-[90vh] flex flex-col">
           <DialogHeader>
-            <div className="flex items-center justify-between flex-wrap gap-4">
-              <DialogTitle>Peak Reporting Hours - Detailed View</DialogTitle>
-              <div className="flex items-center gap-2">
-                <Select value={peakHoursFilter} onValueChange={setPeakHoursFilter}>
-                  <SelectTrigger className="w-[120px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="this-week">This Week</SelectItem>
-                    <SelectItem value="this-month">This Month</SelectItem>
-                    <SelectItem value="this-year">This Year</SelectItem>
-                  </SelectContent>
-                </Select>
-                
-                {/* Export Dropdown */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button size="sm" variant="outline">
-                      <Download className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={exportPeakHoursChartAsPNG}>
-                      <FileImage className="h-4 w-4 mr-2" />
-                      Export as PNG
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={exportPeakHoursChartAsSVG}>
-                      <FileType className="h-4 w-4 mr-2" />
-                      Export as SVG
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={exportPeakHoursChartAsPDF}>
-                      <FileText className="h-4 w-4 mr-2" />
-                      Export as PDF
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </div>
+            <DialogTitle>Peak Reporting Hours - Detailed View</DialogTitle>
           </DialogHeader>
+          <div className="px-6 pb-4 border-b">
+            <div className="flex items-center gap-2">
+              <Select value={peakHoursFilter} onValueChange={setPeakHoursFilter}>
+                <SelectTrigger className="flex-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="today">Today</SelectItem>
+                  <SelectItem value="this-week">This Week</SelectItem>
+                  <SelectItem value="this-month">This Month</SelectItem>
+                  <SelectItem value="this-year">This Year</SelectItem>
+                </SelectContent>
+              </Select>
+
+              {/* Export Dropdown */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="outline">
+                    <Download className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={exportPeakHoursChartAsPNG}>
+                    <FileImage className="h-4 w-4 mr-2" />
+                    Export as PNG
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={exportPeakHoursChartAsSVG}>
+                    <FileType className="h-4 w-4 mr-2" />
+                    Export as SVG
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={exportPeakHoursChartAsPDF}>
+                    <FileText className="h-4 w-4 mr-2" />
+                    Export as PDF
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
           <div className="flex-1 min-h-0 mt-4">
             <PeakHoursChartModal height="calc(90vh - 140px)" chartId="peak-hours-chart-modal" />
           </div>
@@ -4737,55 +5256,88 @@ ${calendarChart ? `
       <Dialog open={isReportsOverTimeModalOpen} onOpenChange={setIsReportsOverTimeModalOpen}>
         <DialogContent className="max-w-7xl h-[90vh] flex flex-col">
           <DialogHeader>
-            <div className="flex items-center justify-between flex-wrap gap-4">
-              <DialogTitle>Reports Over Time - Detailed View</DialogTitle>
-              <div className="flex items-center gap-2">
-                <Select value={reportTypeFilter} onValueChange={setReportTypeFilter}>
-                  <SelectTrigger className="w-[120px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="this-week">This Week</SelectItem>
-                    <SelectItem value="this-month">This Month</SelectItem>
-                    <SelectItem value="this-year">This Year</SelectItem>
-                  </SelectContent>
-                </Select>
-                
-                {/* Export Dropdown */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button size="sm" variant="outline">
-                      <Download className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={exportReportsOverTimeChartAsPNG}>
-                      <FileImage className="h-4 w-4 mr-2" />
-                      Export as PNG
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={exportReportsOverTimeChartAsSVG}>
-                      <FileType className="h-4 w-4 mr-2" />
-                      Export as SVG
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={exportReportsOverTimeChartAsPDF}>
-                      <FileText className="h-4 w-4 mr-2" />
-                      Export as PDF
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </div>
+            <DialogTitle>Reports Over Time - Detailed View</DialogTitle>
           </DialogHeader>
-          <div className="flex-1 min-h-0 mt-4">
-            <ReportsOverTimeChart 
-              height="calc(90vh - 140px)" 
-              chartId="reports-over-time-chart-modal"
-              pointSize={8}
-              bottomMargin={80}
-            />
+          <div className="px-6 pb-4 border-b">
+            <div className="flex items-center gap-2">
+              <Select value={reportsOverTimeFilter} onValueChange={setReportsOverTimeFilter}>
+                <SelectTrigger className="flex-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="today">Today</SelectItem>
+                  <SelectItem value="this-week">This Week</SelectItem>
+                  <SelectItem value="this-month">This Month</SelectItem>
+                  <SelectItem value="this-year">This Year</SelectItem>
+                </SelectContent>
+              </Select>
+              
+              <Select value={reportsOverTimeTypeFilter} onValueChange={setReportsOverTimeTypeFilter}>
+                <SelectTrigger className="flex-1">
+                  <SelectValue placeholder="Report Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  {allReportTypes.map((type) => (
+                    <SelectItem key={type} value={type}>{type}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {/* Export Dropdown */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="outline">
+                    <Download className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={exportReportsOverTimeChartAsPNG}>
+                    <FileImage className="h-4 w-4 mr-2" />
+                    Export as PNG
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={exportReportsOverTimeChartAsSVG}>
+                    <FileType className="h-4 w-4 mr-2" />
+                    Export as SVG
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={exportReportsOverTimeChartAsPDF}>
+                    <FileText className="h-4 w-4 mr-2" />
+                    Export as PDF
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+          <div className="flex-1 min-h-0 mt-4 space-y-4">
+            <div className="flex-1 min-h-0">
+              <ReportsOverTimeChart 
+                height="calc(90vh - 300px)" 
+                chartId="reports-over-time-chart-modal"
+                pointSize={8}
+                bottomMargin={80}
+              />
+            </div>
             
-            {/* Custom Legend for Modal */}
-            <div className="mt-3 pt-3 border-t border-gray-200">
+            {/* Top 3 Most Active Dates Summary */}
+            {top3MostActiveDates.length > 0 && (
+              <div className="pt-3 border-t border-gray-200">
+                <div className="text-sm font-semibold text-gray-700 mb-2 text-center">Top 3 Most Active Dates</div>
+                <div className="flex flex-col gap-2">
+                  {top3MostActiveDates.map((item, index) => (
+                    <div key={item.date} className="flex items-center justify-between px-3 py-1.5 bg-gray-50 rounded">
+                      <div className="flex items-center gap-2">
+                        <div className="text-sm font-bold text-brand-orange">#{index + 1}</div>
+                        <div className="text-sm font-medium text-gray-700">{item.formattedDate}</div>
+                      </div>
+                      <div className="text-sm font-semibold text-gray-900">{item.count} reports</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {/* Custom Legend for Modal - Hidden */}
+            {/* <div className="mt-3 pt-3 border-t border-gray-200">
               <div className="flex flex-wrap gap-3 justify-center">
                 {Object.keys(enabledReportTypes).map((key) => (
                   <div 
@@ -4803,7 +5355,7 @@ ${calendarChart ? `
                   </div>
                 ))}
               </div>
-            </div>
+            </div> */}
           </div>
         </DialogContent>
       </Dialog>
@@ -4876,24 +5428,29 @@ ${calendarChart ? `
             </div>
 
             {/* Summary Stats */}
-            <div className="grid grid-cols-3 gap-4 pt-6 border-t border-gray-200 mt-4">
+            <div className="grid grid-cols-1 gap-4 pt-6 border-t border-gray-200 mt-4">
               <div className="text-center">
-                <div className="text-2xl font-bold">
-                  {calendarData.reduce((sum, day) => sum + (day.originalValue ?? day.value ?? 0), 0)}
-                </div>
-                <div className="text-sm text-gray-600 mt-1">Total Reports</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold">
-                  {Math.max(...calendarData.map(d => d.originalValue ?? d.value ?? 0), 0)}
+                <div className="text-2xl font-bold text-brand-orange">
+                  {(() => {
+                    const peakDay = calendarData.reduce((max, day) => {
+                      const dayCount = day.originalValue ?? 0;
+                      const maxCount = max.originalValue ?? 0;
+                      return dayCount > maxCount ? day : max;
+                    }, calendarData[0] || { day: '', originalValue: 0 });
+                    
+                    if (!peakDay || (peakDay.originalValue ?? 0) === 0) {
+                      return 'N/A';
+                    }
+                    
+                    const peakDate = new Date(peakDay.day);
+                    return peakDate.toLocaleDateString('en-US', { 
+                      month: 'short', 
+                      day: 'numeric',
+                      year: 'numeric'
+                    });
+                  })()}
                 </div>
                 <div className="text-sm text-gray-600 mt-1">Peak Day</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-gray-700">
-                  {(calendarData.reduce((sum, day) => sum + (day.originalValue ?? day.value ?? 0), 0) / calendarData.length).toFixed(1)}
-                </div>
-                <div className="text-sm text-gray-600 mt-1">Avg/Day</div>
               </div>
             </div>
           </div>

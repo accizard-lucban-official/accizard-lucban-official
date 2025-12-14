@@ -124,17 +124,16 @@ export function usePushNotifications() {
         permission: currentPermission,
       }));
 
-      if (!auth.currentUser) {
+      const session = SessionManager.getSession();
+      if (!session?.isLoggedIn) {
         setState(prev => ({ ...prev, isSubscribed: false, isLoading: false }));
         return;
       }
 
       try {
-        const session = SessionManager.getSession();
-        const isSuperAdmin = session?.userType === 'superadmin';
         let hasWebFcmToken = false;
 
-        if (isSuperAdmin) {
+        if (session.userType === 'superadmin' && auth.currentUser) {
           // Super admin: check superAdmin collection by email
           const email = auth.currentUser?.email;
           if (email) {
@@ -148,8 +147,19 @@ export function usePushNotifications() {
               hasWebFcmToken = !!superAdminData?.webFcmToken;
             }
           }
-        } else {
-          // Regular user or admin: check users collection
+        } else if (session.userType === 'admin' && session.username) {
+          // Regular admin: check admins collection by username
+          const adminQuery = query(
+            collection(db, 'admins'),
+            where('username', '==', session.username)
+          );
+          const querySnapshot = await getDocs(adminQuery);
+          if (!querySnapshot.empty) {
+            const adminData = querySnapshot.docs[0].data();
+            hasWebFcmToken = !!adminData?.webFcmToken;
+          }
+        } else if (auth.currentUser) {
+          // Regular user (Firebase Auth): check users collection
           const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
           const userData = userDoc.data();
           hasWebFcmToken = !!userData?.webFcmToken;
@@ -232,7 +242,8 @@ export function usePushNotifications() {
       return false;
     }
 
-    if (!auth.currentUser) {
+    const session = SessionManager.getSession();
+    if (!session?.isLoggedIn) {
       toast.error('Please log in to enable push notifications');
       setState(prev => ({ ...prev, isLoading: false }));
       return false;
@@ -327,7 +338,8 @@ export function usePushNotifications() {
    * Unsubscribe from push notifications
    */
   const unsubscribe = useCallback(async (): Promise<boolean> => {
-    if (!auth.currentUser) {
+    const session = SessionManager.getSession();
+    if (!session?.isLoggedIn) {
       return false;
     }
 
@@ -335,10 +347,7 @@ export function usePushNotifications() {
 
     try {
       // Remove token from Firestore
-      const session = SessionManager.getSession();
-      const isSuperAdmin = session?.userType === 'superadmin';
-
-      if (isSuperAdmin) {
+      if (session.userType === 'superadmin' && auth.currentUser) {
         // Super admin: remove from superAdmin collection by email
         const email = auth.currentUser?.email;
         if (email) {
@@ -356,8 +365,23 @@ export function usePushNotifications() {
             });
           }
         }
-      } else {
-        // Regular user or admin: remove from users collection
+      } else if (session.userType === 'admin' && session.username) {
+        // Regular admin: remove from admins collection by username
+        const adminQuery = query(
+          collection(db, 'admins'),
+          where('username', '==', session.username)
+        );
+        const querySnapshot = await getDocs(adminQuery);
+        if (!querySnapshot.empty) {
+          const adminDocId = querySnapshot.docs[0].id;
+          const adminRef = doc(db, 'admins', adminDocId);
+          await updateDoc(adminRef, {
+            webFcmToken: null,
+            webFcmTokenUpdatedAt: null,
+          });
+        }
+      } else if (auth.currentUser) {
+        // Regular user (Firebase Auth): remove from users collection
         const userRef = doc(db, 'users', auth.currentUser.uid);
         await updateDoc(userRef, {
           webFcmToken: null,
