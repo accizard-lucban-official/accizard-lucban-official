@@ -2375,92 +2375,392 @@ export function DashboardStats() {
 
     // Capture chart screenshots
     const captureChartAsBase64 = (selector: string): Promise<string> => {
+      console.log('🔍 Starting capture for:', selector);
+      
       return new Promise((resolve) => {
         const element = document.querySelector(selector);
         if (!element) {
-          console.warn('Chart element not found:', selector);
+          console.error('❌ Chart element not found:', selector);
           resolve('');
           return;
         }
         
-        // Wait longer for Nivo charts to fully render
-        // Reports Over Time is a complex line chart with SVG, needs more time
-        // Users chart is a bar chart, also needs extra time
-        const delay = selector === '#reports-over-time-chart' ? 3000 : selector === '#users-chart' ? 2000 : 500;
+        console.log('✅ Element found:', selector, {
+          width: (element as HTMLElement).clientWidth,
+          height: (element as HTMLElement).clientHeight,
+          hasSVG: !!element.querySelector('svg')
+        });
         
-        setTimeout(() => {
-          // Scroll element into view to ensure it's rendered
+        // For Reports Over Time chart, use a more robust approach
+        if (selector === '#reports-over-time-chart') {
+          console.log('📊 Processing Reports Over Time chart...');
+          
+          // Scroll into view first
           element.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
           
-          // Additional wait for reports over time chart to ensure SVG is fully rendered
-          const additionalDelay = selector === '#reports-over-time-chart' ? 1000 : 0;
+          // Wait for chart to be fully rendered
+          let retryCount = 0;
+          const maxRetries = 25;
           
+          const waitForChart = () => {
+            const svg = element.querySelector('svg');
+            if (!svg) {
+              if (retryCount < maxRetries) {
+                retryCount++;
+                console.log(`⏳ SVG not found, retry ${retryCount}/${maxRetries}...`);
+                setTimeout(waitForChart, 400);
+                return;
+              } else {
+                console.warn('⚠️ SVG not found after max retries, proceeding anyway');
+                captureWithHtml2Canvas(element as HTMLElement, selector).then(resolve);
+                return;
+              }
+            }
+            
+            const svgEl = svg as SVGElement;
+            const paths = svgEl.querySelectorAll('path');
+            const lines = svgEl.querySelectorAll('line');
+            const circles = svgEl.querySelectorAll('circle');
+            const groups = svgEl.querySelectorAll('g');
+            const hasContent = paths.length > 0 || lines.length > 0 || circles.length > 0 || groups.length > 0;
+            
+            const rect = svgEl.getBoundingClientRect();
+            const hasSize = rect.width > 50 && rect.height > 50;
+            
+            const containerRect = (element as HTMLElement).getBoundingClientRect();
+            const containerHasSize = containerRect.width > 100 && containerRect.height > 100; // Increased minimum to 100px
+            
+            // Check for negative dimensions in SVG elements (the error we're fixing)
+            const rects = svgEl.querySelectorAll('rect');
+            let hasNegativeDimensions = false;
+            rects.forEach(rect => {
+              const width = rect.getAttribute('width');
+              const height = rect.getAttribute('height');
+              if (width && parseFloat(width) < 0) {
+                hasNegativeDimensions = true;
+                console.warn('⚠️ Found negative rect width:', width);
+              }
+              if (height && parseFloat(height) < 0) {
+                hasNegativeDimensions = true;
+                console.warn('⚠️ Found negative rect height:', height);
+              }
+            });
+            
+            console.log('📈 Chart status:', {
+              hasContent,
+              hasSize,
+              containerHasSize,
+              hasNegativeDimensions,
+              paths: paths.length,
+              lines: lines.length,
+              circles: circles.length,
+              rects: rects.length,
+              svgWidth: rect.width,
+              svgHeight: rect.height,
+              containerWidth: containerRect.width,
+              containerHeight: containerRect.height,
+              retryCount
+            });
+            
+            // Only proceed if we have content, size, and no negative dimensions (or we've retried enough)
+            if (hasContent && hasSize && containerHasSize && (!hasNegativeDimensions || retryCount >= maxRetries - 5)) {
+              console.log('✅ Chart ready for capture!');
+              
+              // Force explicit dimensions on the chart container and its parents
+              const chartContainer = element as HTMLElement;
+              const containerWidth = containerRect.width;
+              const containerHeight = containerRect.height;
+              
+              // Store original styles for restoration
+              const originalStyles = {
+                container: {
+                  height: chartContainer.style.height,
+                  minHeight: chartContainer.style.minHeight,
+                  width: chartContainer.style.width
+                },
+                parent: null as { height?: string; minHeight?: string } | null
+              };
+              
+              // Also ensure parent has dimensions if it's a flex container
+              const parent = chartContainer.parentElement;
+              if (parent && window.getComputedStyle(parent).display === 'flex') {
+                originalStyles.parent = {
+                  height: parent.style.height,
+                  minHeight: parent.style.minHeight
+                };
+                const parentRect = parent.getBoundingClientRect();
+                if (parentRect.height < containerHeight) {
+                  parent.style.minHeight = containerHeight + 'px';
+                }
+              }
+              
+              // Temporarily set explicit dimensions
+              chartContainer.style.height = containerHeight + 'px';
+              chartContainer.style.minHeight = containerHeight + 'px';
+              chartContainer.style.width = containerWidth + 'px';
+              
+              // Ensure SVG has explicit dimensions
+              const svgWidth = rect.width;
+              const svgHeight = rect.height;
+              svgEl.setAttribute('width', svgWidth.toString());
+              svgEl.setAttribute('height', svgHeight.toString());
+              if (!svgEl.hasAttribute('viewBox')) {
+                svgEl.setAttribute('viewBox', `0 0 ${svgWidth} ${svgHeight}`);
+              }
+              svgEl.style.width = svgWidth + 'px';
+              svgEl.style.height = svgHeight + 'px';
+              
+              console.log('⏳ Waiting for animations to complete...');
+              // Wait a bit more for any animations to complete
+              setTimeout(() => {
+                console.log('📸 Starting html2canvas capture...');
+                captureWithHtml2Canvas(element as HTMLElement, selector, () => {
+                  // Restore original styles
+                  chartContainer.style.height = originalStyles.container.height;
+                  chartContainer.style.minHeight = originalStyles.container.minHeight;
+                  chartContainer.style.width = originalStyles.container.width;
+                  
+                  // Restore parent styles if modified
+                  if (originalStyles.parent && parent) {
+                    parent.style.height = originalStyles.parent.height || '';
+                    parent.style.minHeight = originalStyles.parent.minHeight || '';
+                  }
+                }).then(resolve);
+              }, 1000);
+            } else {
+              if (retryCount < maxRetries) {
+                retryCount++;
+                console.log(`⏳ Chart not ready yet, retry ${retryCount}/${maxRetries}...`);
+                setTimeout(waitForChart, 400);
+              } else {
+                console.warn('⚠️ Chart not ready after max retries, proceeding anyway');
+                captureWithHtml2Canvas(element as HTMLElement, selector).then(resolve);
+              }
+            }
+          };
+          
+          // Initial delay before checking
+          console.log('⏳ Initial delay before checking chart...');
+          setTimeout(waitForChart, 2000);
+        } else {
+          // For other charts, use standard approach
+          const delay = selector === '#users-chart' ? 2000 : 500;
           setTimeout(() => {
-            html2canvas(element as HTMLElement, {
+            element.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
+            setTimeout(() => {
+              captureWithHtml2Canvas(element as HTMLElement, selector).then(resolve);
+            }, 500);
+          }, delay);
+        }
+        
+        function captureWithHtml2Canvas(targetElement: HTMLElement, originalSelector: string, cleanup?: () => void): Promise<string> {
+          return new Promise((resolve) => {
+            const elementWidth = targetElement.clientWidth || targetElement.scrollWidth || 800;
+            const elementHeight = targetElement.clientHeight || targetElement.scrollHeight || 400;
+            
+            console.log(`📐 Capture dimensions for ${originalSelector}:`, {
+              width: elementWidth,
+              height: elementHeight,
+              scrollWidth: targetElement.scrollWidth,
+              scrollHeight: targetElement.scrollHeight
+            });
+            
+            html2canvas(targetElement, {
               backgroundColor: '#ffffff',
-              logging: false,
+              logging: true,
               useCORS: true,
               scale: 2,
               allowTaint: true,
+              width: elementWidth,
+              height: elementHeight,
+              windowWidth: targetElement.scrollWidth || elementWidth,
+              windowHeight: targetElement.scrollHeight || elementHeight,
               onclone: (clonedDoc) => {
+                console.log('🔄 Cloning document for', originalSelector);
+                
                 // Ensure the chart container is visible in the cloned document
-                const clonedElement = clonedDoc.querySelector(selector);
+                const clonedElement = clonedDoc.querySelector(originalSelector);
                 if (clonedElement) {
                   const clonedEl = clonedElement as HTMLElement;
                   clonedEl.style.visibility = 'visible';
                   clonedEl.style.display = 'block';
                   clonedEl.style.opacity = '1';
                   clonedEl.style.position = 'relative';
-                  // Force reflow for Nivo charts
-                  clonedEl.offsetHeight;
+                  clonedEl.style.width = elementWidth + 'px';
+                  clonedEl.style.height = elementHeight + 'px';
+                  clonedEl.style.minHeight = elementHeight + 'px';
+                  clonedEl.style.overflow = 'visible';
                   
-                  // For Nivo line charts (Reports Over Time), ensure SVG is visible and properly sized
-                  if (selector === '#reports-over-time-chart') {
+                  // For Reports Over Time chart, ensure SVG is properly configured
+                  if (originalSelector === '#reports-over-time-chart') {
                     const svg = clonedElement.querySelector('svg');
                     if (svg) {
+                      console.log('🎨 Processing SVG in cloned document...');
                       const svgEl = svg as SVGElement;
                       svgEl.style.visibility = 'visible';
                       svgEl.style.display = 'block';
                       svgEl.style.opacity = '1';
                       
-                      // Ensure all SVG elements are visible
+                      // Get dimensions
+                      const svgWidth = svgEl.clientWidth || svgEl.getBoundingClientRect().width || elementWidth;
+                      const svgHeight = svgEl.clientHeight || svgEl.getBoundingClientRect().height || elementHeight;
+                      
+                      console.log('📏 SVG dimensions:', { svgWidth, svgHeight });
+                      
+                      // Ensure explicit dimensions
+                      svgEl.setAttribute('width', svgWidth.toString());
+                      svgEl.setAttribute('height', svgHeight.toString());
+                      svgEl.style.width = svgWidth + 'px';
+                      svgEl.style.height = svgHeight + 'px';
+                      
+                      if (!svgEl.hasAttribute('viewBox')) {
+                        svgEl.setAttribute('viewBox', `0 0 ${svgWidth} ${svgHeight}`);
+                      }
+                      
+                      // Make all SVG children visible and ensure they have proper attributes
                       const allSvgElements = clonedElement.querySelectorAll('svg *');
+                      console.log(`🎨 Processing ${allSvgElements.length} SVG elements...`);
+                      
                       allSvgElements.forEach((el) => {
                         const svgChild = el as SVGElement;
                         svgChild.style.visibility = 'visible';
                         svgChild.style.display = '';
                         svgChild.style.opacity = '1';
+                        
+                        // Fix negative dimensions (common issue with Nivo charts)
+                        if (svgChild.tagName === 'rect') {
+                          const width = svgChild.getAttribute('width');
+                          const height = svgChild.getAttribute('height');
+                          const x = svgChild.getAttribute('x');
+                          const y = svgChild.getAttribute('y');
+                          
+                          // Fix negative width
+                          if (width && parseFloat(width) < 0) {
+                            const absWidth = Math.abs(parseFloat(width));
+                            svgChild.setAttribute('width', absWidth.toString());
+                            // Adjust x position if needed
+                            if (x && parseFloat(x) > 0) {
+                              svgChild.setAttribute('x', (parseFloat(x) - absWidth).toString());
+                            }
+                            console.log('🔧 Fixed negative rect width:', width, '->', absWidth);
+                          }
+                          
+                          // Fix negative height
+                          if (height && parseFloat(height) < 0) {
+                            const absHeight = Math.abs(parseFloat(height));
+                            svgChild.setAttribute('height', absHeight.toString());
+                            // Adjust y position if needed
+                            if (y && parseFloat(y) > 0) {
+                              svgChild.setAttribute('y', (parseFloat(y) - absHeight).toString());
+                            }
+                            console.log('🔧 Fixed negative rect height:', height, '->', absHeight);
+                          }
+                        }
+                        
+                        // Preserve fill and stroke from attributes
+                        const fillAttr = svgChild.getAttribute('fill');
+                        const strokeAttr = svgChild.getAttribute('stroke');
+                        if (fillAttr && fillAttr !== 'none') {
+                          svgChild.style.fill = fillAttr;
+                        }
+                        if (strokeAttr && strokeAttr !== 'none') {
+                          svgChild.style.stroke = strokeAttr;
+                        }
+                        
+                        // Ensure paths and lines are visible
+                        if (svgChild.tagName === 'path' || svgChild.tagName === 'line') {
+                          if (!svgChild.hasAttribute('stroke') && !svgChild.style.stroke) {
+                            svgChild.setAttribute('stroke', '#000');
+                            svgChild.style.stroke = '#000';
+                          }
+                          if (!svgChild.hasAttribute('stroke-width')) {
+                            svgChild.setAttribute('stroke-width', '2');
+                          }
+                        }
+                        
+                        // Remove any clip-path or mask that might hide content
+                        if (svgChild.hasAttribute('clip-path')) {
+                          svgChild.removeAttribute('clip-path');
+                        }
+                        if (svgChild.hasAttribute('mask')) {
+                          svgChild.removeAttribute('mask');
+                        }
                       });
                       
-                      // Force SVG reflow
+                      // Also check for any defs or style elements that might affect rendering
+                      const defs = clonedElement.querySelectorAll('defs');
+                      defs.forEach(def => {
+                        (def as HTMLElement).style.display = 'block';
+                      });
+                      
+                      // Force reflow
                       (svgEl as any).offsetHeight;
+                    } else {
+                      console.warn('⚠️ No SVG found in cloned document!');
                     }
                   }
+                  
+                  // Force reflow
+                  clonedEl.offsetHeight;
+                } else {
+                  console.error('❌ Cloned element not found:', originalSelector);
+                }
+                
+                // Also ensure parent containers are visible
+                const parent = clonedElement?.parentElement;
+                if (parent) {
+                  parent.style.visibility = 'visible';
+                  parent.style.display = 'block';
+                  parent.style.opacity = '1';
                 }
               }
             } as any).then(canvas => {
+              if (cleanup) cleanup();
+              
               const dataUrl = canvas.toDataURL('image/png');
+              const dataLength = dataUrl.length;
+              console.log(`📊 Canvas result for ${originalSelector}:`, {
+                width: canvas.width,
+                height: canvas.height,
+                dataLength: dataLength,
+                isEmpty: !dataUrl || dataUrl === 'data:,'
+              });
+              
               if (!dataUrl || dataUrl === 'data:,') {
-                console.error('Empty canvas data for:', selector);
+                console.error('❌ Empty canvas data for:', originalSelector);
                 resolve('');
               } else {
-                console.log('Successfully captured chart:', selector);
+                console.log('✅ Successfully captured chart:', originalSelector);
                 resolve(dataUrl);
               }
             }).catch((error) => {
-              console.error('Error capturing chart:', selector, error);
+              if (cleanup) cleanup();
+              console.error('❌ Error capturing chart:', originalSelector, error);
               resolve('');
             });
-          }, additionalDelay);
-        }, delay);
+          });
+        }
       });
     };
 
     try {
+      console.log('🚀 Starting PDF export...');
+      console.log('📋 Selected charts:', selectedChartsForExport);
+      
       // Only capture charts that are selected for export
       const chartPromises = [];
       if (selectedChartsForExport['Reports Over Time']) {
-        chartPromises.push(captureChartAsBase64('#reports-over-time-chart').then(result => ({ key: 'reportsOverTimeChart', value: result })));
+        console.log('✅ Reports Over Time is selected, adding to capture queue');
+        chartPromises.push(captureChartAsBase64('#reports-over-time-chart').then(result => {
+          console.log('📸 Reports Over Time capture result:', {
+            hasData: !!result,
+            dataLength: result?.length || 0,
+            preview: result?.substring(0, 50) || 'empty'
+          });
+          return { key: 'reportsOverTimeChart', value: result };
+        }));
+      } else {
+        console.warn('⚠️ Reports Over Time is NOT selected for export');
       }
       if (selectedChartsForExport['Report Type Distribution']) {
         chartPromises.push(captureChartAsBase64('#pie-chart').then(result => ({ key: 'pieChart', value: result })));
@@ -2478,17 +2778,28 @@ export function DashboardStats() {
         chartPromises.push(captureChartAsBase64('#calendar-chart').then(result => ({ key: 'calendarChart', value: result })));
       }
 
+      console.log('⏳ Waiting for all charts to be captured...');
       const chartResults = await Promise.all(chartPromises);
+      console.log('✅ All charts captured, processing results...');
       
       // Create a map of captured charts
       const capturedCharts: Record<string, string> = {};
       chartResults.forEach(result => {
         if (result) {
           capturedCharts[result.key] = result.value;
+          console.log(`📊 Chart result for ${result.key}:`, {
+            hasData: !!result.value,
+            dataLength: result.value?.length || 0
+          });
         }
       });
       
       const reportsOverTimeChart = capturedCharts['reportsOverTimeChart'] || '';
+      console.log('📈 Reports Over Time chart in final HTML:', {
+        hasData: !!reportsOverTimeChart,
+        dataLength: reportsOverTimeChart.length,
+        willBeIncluded: !!reportsOverTimeChart
+      });
       const pieChart = capturedCharts['pieChart'] || '';
       const barangayChart = capturedCharts['barangayChart'] || '';
       const usersChart = capturedCharts['usersChart'] || '';
@@ -3130,6 +3441,9 @@ ${calendarChart ? `
 
   // Reports Over Time Chart - inline component
   const ReportsOverTimeChart = ({ height = '100%', chartId = 'reports-over-time-chart', pointSize = 6, bottomMargin = 60 }: { height?: string; chartId?: string; pointSize?: number; bottomMargin?: number }) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+
     const filteredData = useMemo(() => {
       // Show all report types by default, only hide if explicitly disabled
       return reportsOverTimeData.filter(item => {
@@ -3140,9 +3454,50 @@ ${calendarChart ? `
       });
     }, [reportsOverTimeData, enabledReportTypes]);
 
+    // Measure container dimensions
+    useEffect(() => {
+      const updateSize = () => {
+        if (containerRef.current) {
+          const rect = containerRef.current.getBoundingClientRect();
+          const width = rect.width || containerRef.current.clientWidth || 0;
+          const height = rect.height || containerRef.current.clientHeight || 0;
+          
+          // Only update if we have valid dimensions (at least 100px)
+          if (width > 100 && height > 100) {
+            setContainerSize({ width, height });
+          }
+        }
+      };
+
+      updateSize();
+      const resizeObserver = new ResizeObserver(updateSize);
+      
+      if (containerRef.current) {
+        resizeObserver.observe(containerRef.current);
+      }
+
+      // Also check after a short delay to catch initial render
+      const timeout = setTimeout(updateSize, 100);
+
+      return () => {
+        resizeObserver.disconnect();
+        clearTimeout(timeout);
+      };
+    }, []);
+
     return (
-      <div id={chartId} style={{ height, minHeight: '300px' }}>
-        <ResponsiveLine
+      <div 
+        id={chartId} 
+        ref={containerRef}
+        style={{ 
+          height, 
+          minHeight: '300px',
+          width: '100%',
+          position: 'relative'
+        }}
+      >
+        {containerSize.width > 0 && containerSize.height > 0 ? (
+          <ResponsiveLine
           data={filteredData}
           margin={{ top: 30, right: 60, bottom: bottomMargin, left: 60 }}
           xScale={{ type: 'point' }}
@@ -3199,6 +3554,18 @@ ${calendarChart ? `
             </div>
           )}
         />
+        ) : (
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            height: '100%',
+            minHeight: '300px',
+            color: '#6b7280'
+          }}>
+            Loading chart...
+          </div>
+        )}
       </div>
     );
   };
@@ -5809,4 +6176,5 @@ ${calendarChart ? `
       </Dialog>
     </div>
   );
+}
 }

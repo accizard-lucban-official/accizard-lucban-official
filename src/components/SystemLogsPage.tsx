@@ -4,13 +4,11 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { ChevronUp, ChevronDown, Search, Activity, Users, Clock, Trash2, Download, CheckSquare, ArrowUpRight, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
+import { ChevronUp, ChevronDown, Search, Activity, Users, Clock, Download, ArrowUpRight, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import { Layout } from "./Layout";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Checkbox } from "@/components/ui/checkbox";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { db } from "@/lib/firebase";
-import { collection, query, orderBy, getDocs, deleteDoc, doc, getDoc } from "firebase/firestore";
+import { collection, query, orderBy, getDocs, doc, getDoc } from "firebase/firestore";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useUserRole } from "@/hooks/useUserRole";
 import { useToast } from "@/components/ui/use-toast";
@@ -66,10 +64,6 @@ export function SystemLogsPage() {
   const [superAdmins, setSuperAdmins] = useState<any[]>([]);
   const [activitySortField, setActivitySortField] = useState<'logId' | 'timestamp'>('timestamp');
   const [activitySortDirection, setActivitySortDirection] = useState<'asc' | 'desc'>('desc');
-  const [selectedLogs, setSelectedLogs] = useState<string[]>([]);
-  const [deletingLogId, setDeletingLogId] = useState<string | null>(null);
-  const [bulkDeleting, setBulkDeleting] = useState(false);
-  const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
   const [customIdCache, setCustomIdCache] = useState<Map<string, string>>(new Map());
   
@@ -386,104 +380,6 @@ export function SystemLogsPage() {
     }
   };
 
-  // Handler for selecting/deselecting logs
-  const handleSelectLog = (logId: string) => {
-    setSelectedLogs(prev => 
-      prev.includes(logId) 
-        ? prev.filter(id => id !== logId)
-        : [...prev, logId]
-    );
-  };
-
-  // Handler for selecting all logs
-  const handleSelectAllLogs = () => {
-    setSelectedLogs(prev => 
-      prev.length === pagedActivityLogs.length 
-        ? [] 
-        : pagedActivityLogs.map(log => log.id)
-    );
-  };
-
-  // Handler for deleting a log
-  const handleDeleteLog = async (logId: string) => {
-    setDeletingLogId(logId);
-    try {
-      await deleteDoc(doc(db, "activityLogs", logId));
-      setActivityLogs(prev => prev.filter(log => log.id !== logId));
-      setSelectedLogs(prev => prev.filter(id => id !== logId));
-      toast({
-        title: 'Success',
-        description: 'Activity log deleted successfully'
-      });
-    } catch (error) {
-      console.error("Error deleting log:", error);
-      toast({
-        title: 'Error',
-        description: 'Failed to delete activity log. Please try again.',
-        variant: 'destructive'
-      });
-    } finally {
-      setDeletingLogId(null);
-    }
-  };
-
-  // Handler for bulk deleting logs
-  const handleBulkDeleteLogs = async () => {
-    if (selectedLogs.length === 0) return;
-    
-    setBulkDeleting(true);
-    const logsToDelete = [...selectedLogs];
-    let successCount = 0;
-    let failCount = 0;
-
-    try {
-      // Delete all selected logs using Promise.allSettled to handle partial failures
-      const results = await Promise.allSettled(
-        logsToDelete.map(logId => deleteDoc(doc(db, "activityLogs", logId)))
-      );
-
-      // Count successes and failures, track which logs were successfully deleted
-      const successfullyDeleted: string[] = [];
-      results.forEach((result, index) => {
-        if (result.status === 'fulfilled') {
-          successCount++;
-          successfullyDeleted.push(logsToDelete[index]);
-        } else {
-          failCount++;
-          console.error(`Error deleting log ${logsToDelete[index]}:`, result.reason);
-        }
-      });
-
-      // Update state - remove only successfully deleted logs
-      setActivityLogs(prev => prev.filter(log => !successfullyDeleted.includes(log.id)));
-      setSelectedLogs(prev => prev.filter(id => !successfullyDeleted.includes(id)));
-      setShowBulkDeleteDialog(false);
-
-      // Show toast
-      if (failCount === 0) {
-        toast({
-          title: 'Success',
-          description: `Successfully deleted ${successCount} log(s).`
-        });
-      } else {
-        toast({
-          title: 'Partial Success',
-          description: `Deleted ${successCount} log(s). Failed to delete ${failCount} log(s).`,
-          variant: 'destructive'
-        });
-      }
-    } catch (error) {
-      console.error("Error bulk deleting logs:", error);
-      toast({
-        title: 'Error',
-        description: 'Failed to delete logs. Please try again.',
-        variant: 'destructive'
-      });
-    } finally {
-      setBulkDeleting(false);
-    }
-  };
-
   // Handler for navigating to admin account
   const handleNavigateToAdmin = (adminId: string, adminName: string) => {
     if (isSuperAdmin()) {
@@ -741,96 +637,11 @@ export function SystemLogsPage() {
             </div>
           </div>
 
-          {/* Bulk Actions Bar */}
-          {isSuperAdmin() && selectedLogs.length > 0 && (
-            <div className="border-t border-b border-gray-200 bg-white px-6 py-4 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <div className="h-8 w-8 rounded-full bg-brand-orange/10 flex items-center justify-center">
-                      <CheckSquare className="h-4 w-4 text-brand-orange" />
-                    </div>
-                    <div>
-                      <span className="text-sm font-semibold text-gray-900">
-                        {selectedLogs.length} log{selectedLogs.length !== 1 ? 's' : ''} selected
-                      </span>
-                      <p className="text-xs text-gray-500">Batch actions available</p>
-                    </div>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setSelectedLogs([])}
-                    className="text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-100"
-                  >
-                    Clear selection
-                  </Button>
-                </div>
-                <AlertDialog open={showBulkDeleteDialog} onOpenChange={setShowBulkDeleteDialog}>
-                  <AlertDialogTrigger asChild>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      className="flex items-center gap-2"
-                      disabled={bulkDeleting}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      Delete Selected ({selectedLogs.length})
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 bg-red-100 rounded-full flex items-center justify-center">
-                          <Trash2 className="h-5 w-5 text-red-600" />
-                        </div>
-                        <div>
-                          <AlertDialogTitle className="text-red-800">Delete Selected Logs</AlertDialogTitle>
-                          <AlertDialogDescription className="text-red-600">
-                            Are you sure you want to delete {selectedLogs.length} log{selectedLogs.length !== 1 ? 's' : ''}? This action cannot be undone.
-                          </AlertDialogDescription>
-                        </div>
-                      </div>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel disabled={bulkDeleting}>Cancel</AlertDialogCancel>
-                      <AlertDialogAction
-                        onClick={handleBulkDeleteLogs}
-                        disabled={bulkDeleting}
-                        className="bg-red-600 hover:bg-red-700 disabled:opacity-50"
-                      >
-                        {bulkDeleting ? (
-                          <div className="flex items-center">
-                            <svg className="animate-spin -ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
-                            Deleting...
-                          </div>
-                        ) : (
-                          `Delete ${selectedLogs.length} Log${selectedLogs.length !== 1 ? 's' : ''}`
-                        )}
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </div>
-            </div>
-          )}
-
           <CardContent className="p-0">
             <div className="overflow-x-auto overflow-y-visible">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[50px] text-left">
-                      {isSuperAdmin() && (
-                        <Checkbox
-                          checked={selectedLogs.length === pagedActivityLogs.length && pagedActivityLogs.length > 0}
-                          onCheckedChange={handleSelectAllLogs}
-                        />
-                      )}
-                    </TableHead>
                     <TableHead className="text-left">
                       <button
                         type="button"
@@ -866,13 +677,12 @@ export function SystemLogsPage() {
                       </button>
                     </TableHead>
                     <TableHead className="w-[200px] max-w-[200px] text-left">Log Message</TableHead>
-                    {isSuperAdmin() && <TableHead className="text-left">Actions</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {pagedActivityLogs.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={isSuperAdmin() ? 7 : 6} className="text-center text-gray-500 py-8">
+                      <TableCell colSpan={6} className="text-center text-gray-500 py-8">
                         No activity logs found.
                       </TableCell>
                     </TableRow>
@@ -897,14 +707,6 @@ export function SystemLogsPage() {
                       
                       return (
                         <TableRow key={log.id}>
-                          <TableCell>
-                            {isSuperAdmin() && (
-                              <Checkbox
-                                checked={selectedLogs.includes(log.id)}
-                                onCheckedChange={() => handleSelectLog(log.id)}
-                              />
-                            )}
-                          </TableCell>
                           <TableCell className="text-gray-700">
                             LID - {logIdNumber}
                           </TableCell>
@@ -1008,57 +810,6 @@ export function SystemLogsPage() {
                               return formattedMessage;
                             })()}
                           </TableCell>
-                          {isSuperAdmin() && (
-                            <TableCell>
-                              <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline" 
-                                    className="text-red-600 hover:text-red-700"
-                                    disabled={deletingLogId === log.id}
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </AlertDialogTrigger>
-                                <AlertDialogContent>
-                                  <AlertDialogHeader>
-                                    <div className="flex items-center gap-3">
-                                      <div className="h-10 w-10 bg-red-100 rounded-full flex items-center justify-center">
-                                        <Trash2 className="h-5 w-5 text-red-600" />
-                                      </div>
-                                      <div>
-                                        <AlertDialogTitle className="text-red-800">Delete Activity Log</AlertDialogTitle>
-                                        <AlertDialogDescription className="text-red-600">
-                                          Are you sure you want to delete this activity log? This action cannot be undone.
-                                        </AlertDialogDescription>
-                                      </div>
-                                    </div>
-                                  </AlertDialogHeader>
-                                  <AlertDialogFooter>
-                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                    <AlertDialogAction
-                                      onClick={() => handleDeleteLog(log.id)}
-                                      disabled={deletingLogId === log.id}
-                                      className="bg-red-600 hover:bg-red-700 disabled:opacity-50"
-                                    >
-                                      {deletingLogId === log.id ? (
-                                        <div className="flex items-center">
-                                          <svg className="animate-spin -ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                          </svg>
-                                          Deleting...
-                                        </div>
-                                      ) : (
-                                        "Delete"
-                                      )}
-                                    </AlertDialogAction>
-                                  </AlertDialogFooter>
-                                </AlertDialogContent>
-                              </AlertDialog>
-                            </TableCell>
-                          )}
                         </TableRow>
                       );
                     })
