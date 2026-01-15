@@ -28,15 +28,15 @@ mapboxgl.accessToken = 'pk.eyJ1IjoiYWNjaXphcmQtbHVjYmFuLW9mZmljaWFsIiwiYSI6ImNta
 
 export function DashboardStats() {
   const { subscribeToPins } = usePins();
-  const [totalReportsFilter, setTotalReportsFilter] = useState("this-week");
-  const [reportsOverTimeFilter, setReportsOverTimeFilter] = useState("this-week");
+  const [totalReportsFilter, setTotalReportsFilter] = useState("all-time");
+  const [reportsOverTimeFilter, setReportsOverTimeFilter] = useState("all-time");
   const [reportsOverTimeTypeFilter, setReportsOverTimeTypeFilter] = useState<string>("all");
-  const [barangayReportsFilter, setBarangayReportsFilter] = useState("this-week");
+  const [barangayReportsFilter, setBarangayReportsFilter] = useState("all-time");
   const [barangayReportsTypeFilter, setBarangayReportsTypeFilter] = useState<string>("all");
-  const [usersBarangayFilter, setUsersBarangayFilter] = useState("this-week");
+  const [usersBarangayFilter, setUsersBarangayFilter] = useState("all-time");
   const [usersBarangayBarangayFilter, setUsersBarangayBarangayFilter] = useState<string>("all");
-  const [reportTypeFilter, setReportTypeFilter] = useState("this-week");
-  const [peakHoursFilter, setPeakHoursFilter] = useState("this-week");
+  const [reportTypeFilter, setReportTypeFilter] = useState("all-time");
+  const [peakHoursFilter, setPeakHoursFilter] = useState("all-time");
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isChartModalOpen, setIsChartModalOpen] = useState(false);
   const [isUsersChartModalOpen, setIsUsersChartModalOpen] = useState(false);
@@ -184,6 +184,9 @@ export function DashboardStats() {
     let startDate: Date;
     
     switch (period) {
+      case "all-time":
+        // No lower bound – include everything
+        return reports;
       case "today":
         // Start of today (00:00:00)
         startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -447,24 +450,54 @@ export function DashboardStats() {
   }
 
   // Reports over time data - calculated from real Firestore data
-  const reportsOverTimeData = useMemo(() => {
-    console.log('=== Reports Over Time Calculation ===');
-    console.log('Total reports:', reports.length);
-    console.log('Reports over time filter:', reportsOverTimeFilter);
-    console.log('Reports over time type filter:', reportsOverTimeTypeFilter);
+  // Use refs to store previous values and prevent unnecessary recalculations
+  const prevReportsHashRef = useRef<string>('');
+  const prevFilterRef = useRef<string>('');
+  const prevTypeFilterRef = useRef<string>('');
+  const cachedReportsOverTimeDataRef = useRef<any[]>([]);
+
+  // Memoize filtered reports to prevent unnecessary recalculations
+  const filteredReportsForTimeChart = useMemo(() => {
+    let filtered = filterReportsByPeriod(reports, reportsOverTimeFilter);
     
-    let filteredReports = filterReportsByPeriod(reports, reportsOverTimeFilter);
-    
-    // Apply report type filter if not "all"
     if (reportsOverTimeTypeFilter !== "all") {
-      filteredReports = filteredReports.filter(report => {
+      filtered = filtered.filter(report => {
         const reportTypeValue = report.reportType || report.type || report.category || 'Others';
         const normalizedType = normalizeCategoryToType(reportTypeValue);
         return normalizedType === reportsOverTimeTypeFilter;
       });
     }
     
-    console.log('Filtered reports count:', filteredReports.length);
+    return filtered;
+  }, [reports, reportsOverTimeFilter, reportsOverTimeTypeFilter]);
+
+  // Create a stable hash of the filtered reports to detect actual data changes
+  const filteredReportsHash = useMemo(() => {
+    // Create a hash based on report IDs and timestamps that affect the chart
+    return filteredReportsForTimeChart
+      .map(r => `${r.id}:${r.timestamp?.getTime() || 0}:${r.reportType || r.type || r.category || 'Others'}`)
+      .sort()
+      .join('|');
+  }, [filteredReportsForTimeChart]);
+
+  const reportsOverTimeData = useMemo(() => {
+    // Check if filters changed
+    const filtersChanged = 
+      prevFilterRef.current !== reportsOverTimeFilter || 
+      prevTypeFilterRef.current !== reportsOverTimeTypeFilter;
+    
+    // Check if data actually changed (hash comparison)
+    const dataChanged = prevReportsHashRef.current !== filteredReportsHash;
+    
+    // If neither filters nor data changed, return cached result
+    if (!filtersChanged && !dataChanged && cachedReportsOverTimeDataRef.current.length > 0) {
+      return cachedReportsOverTimeDataRef.current;
+    }
+    
+    // Update refs
+    prevFilterRef.current = reportsOverTimeFilter;
+    prevTypeFilterRef.current = reportsOverTimeTypeFilter;
+    prevReportsHashRef.current = filteredReportsHash;
     
     const reportTypes = [
       'Road Crash', 'Fire', 'Medical Emergency', 'Flooding', 
@@ -488,18 +521,7 @@ export function DashboardStats() {
       });
     });
     
-    // Debug: Log sample reports
-    if (filteredReports.length > 0) {
-      console.log('Sample reports (first 3):', filteredReports.slice(0, 3).map(r => ({
-        id: r.id,
-        reportType: r.reportType,
-        type: r.type,
-        category: r.category,
-        timestamp: r.timestamp
-      })));
-    }
-    
-    filteredReports.forEach(report => {
+    filteredReportsForTimeChart.forEach(report => {
       // Use reportType field first (same as donut chart for consistency)
       // Then fall back to type (which is mapped during fetch) or category
       const reportTypeValue = report.reportType || report.type || report.category || 'Others';
@@ -532,9 +554,6 @@ export function DashboardStats() {
       dataByTypeAndMonth[normalizedType][monthName]++;
     });
     
-    // Debug: Log the data structure
-    console.log('Data by type and month:', dataByTypeAndMonth);
-    
     const result = reportTypes.map(reportType => ({
       id: reportType,
       data: months.map(month => ({
@@ -543,11 +562,11 @@ export function DashboardStats() {
       }))
     }));
     
-    console.log('Final reports over time result:', result);
-    console.log('=== End Reports Over Time Calculation ===');
+    // Cache the result
+    cachedReportsOverTimeDataRef.current = result;
     
     return result;
-  }, [reports, reportsOverTimeFilter, reportsOverTimeTypeFilter]);
+  }, [filteredReportsHash, filteredReportsForTimeChart, reportsOverTimeFilter, reportsOverTimeTypeFilter]);
 
   // Calculate most active month from reports over time data
   const mostActiveMonth = useMemo(() => {
@@ -1350,29 +1369,11 @@ export function DashboardStats() {
     const unsubscribe = onSnapshot(
       reportsQuery,
       (snapshot) => {
-        console.log('=== Reports snapshot received ===');
-        console.log('Total documents:', snapshot.docs.length);
-        
         const fetched = snapshot.docs.map(doc => {
           const data = doc.data();
           // Use reportType field as the primary source (this is what's stored in Firestore)
           // Fall back to type or category if reportType doesn't exist
           const reportType = data.reportType || data.type || data.category || 'Others';
-          
-          // Debug: Log first few reports to see what we're getting
-          if (snapshot.docs.indexOf(doc) < 3) {
-            console.log(`Report ${doc.id}:`, {
-              reportType: data.reportType,
-              type: data.type,
-              category: data.category,
-              mappedType: reportType,
-              hasReportType: !!data.reportType,
-              hasType: !!data.type,
-              hasCategory: !!data.category,
-              hasCreatedTime: !!data.createdTime,
-              createdTime: data.createdTime
-            });
-          }
           
           // Parse createdTime field (for peak hours calculation)
           let createdTime: Date | null = null;
@@ -1416,13 +1417,6 @@ export function DashboardStats() {
           };
         });
         
-        console.log('Fetched reports count:', fetched.length);
-        console.log('Sample fetched reports (first 3):', fetched.slice(0, 3).map(r => ({
-          id: r.id,
-          category: r.category,
-          type: r.type,
-          timestamp: r.timestamp
-        })));
         setReports(fetched);
       },
       (error) => {
@@ -1431,7 +1425,6 @@ export function DashboardStats() {
     );
 
     return () => {
-      console.log('Unsubscribing from reports');
       unsubscribe();
     };
   }, []);
@@ -3443,6 +3436,8 @@ ${calendarChart ? `
   const ReportsOverTimeChart = ({ height = '100%', chartId = 'reports-over-time-chart', pointSize = 6, bottomMargin = 60 }: { height?: string; chartId?: string; pointSize?: number; bottomMargin?: number }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+    const [isInitialized, setIsInitialized] = useState(false);
+    const resizeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     const filteredData = useMemo(() => {
       // Show all report types by default, only hide if explicitly disabled
@@ -3454,7 +3449,12 @@ ${calendarChart ? `
       });
     }, [reportsOverTimeData, enabledReportTypes]);
 
-    // Measure container dimensions
+    // Create a stable key for the chart based on data to prevent unnecessary re-animations
+    const chartKey = useMemo(() => {
+      return JSON.stringify(filteredData.map(d => ({ id: d.id, dataLength: d.data.length })));
+    }, [filteredData]);
+
+    // Measure container dimensions with debouncing
     useEffect(() => {
       const updateSize = () => {
         if (containerRef.current) {
@@ -3464,24 +3464,49 @@ ${calendarChart ? `
           
           // Only update if we have valid dimensions (at least 100px)
           if (width > 100 && height > 100) {
-            setContainerSize({ width, height });
+            setContainerSize(prev => {
+              // Only update if dimensions changed significantly (more than 5px difference)
+              if (Math.abs(prev.width - width) > 5 || Math.abs(prev.height - height) > 5) {
+                return { width, height };
+              }
+              return prev;
+            });
+            if (!isInitialized) {
+              setIsInitialized(true);
+            }
           }
         }
       };
 
+      // Initial size check
       updateSize();
-      const resizeObserver = new ResizeObserver(updateSize);
+      
+      // Debounced resize handler
+      const handleResize = () => {
+        if (resizeTimeoutRef.current) {
+          clearTimeout(resizeTimeoutRef.current);
+        }
+        resizeTimeoutRef.current = setTimeout(updateSize, 150);
+      };
+
+      const resizeObserver = new ResizeObserver(handleResize);
       
       if (containerRef.current) {
         resizeObserver.observe(containerRef.current);
       }
 
       // Also check after a short delay to catch initial render
-      const timeout = setTimeout(updateSize, 100);
+      const timeout = setTimeout(() => {
+        updateSize();
+        setIsInitialized(true);
+      }, 100);
 
       return () => {
         resizeObserver.disconnect();
         clearTimeout(timeout);
+        if (resizeTimeoutRef.current) {
+          clearTimeout(resizeTimeoutRef.current);
+        }
       };
     }, []);
 
@@ -3498,6 +3523,7 @@ ${calendarChart ? `
       >
         {containerSize.width > 0 && containerSize.height > 0 ? (
           <ResponsiveLine
+          key={chartKey}
           data={filteredData}
           margin={{ top: 30, right: 60, bottom: bottomMargin, left: 60 }}
           xScale={{ type: 'point' }}
@@ -3535,6 +3561,12 @@ ${calendarChart ? `
           pointLabelYOffset={-12}
           useMesh={true}
           theme={nivoTheme}
+          animate={isInitialized}
+          motionConfig={{
+            stiffness: 90,
+            damping: 15,
+            mass: 1
+          }}
           tooltip={({ point }) => (
             <div style={{
               background: 'white',
@@ -3864,7 +3896,8 @@ ${calendarChart ? `
             .sort((a, b) => b.users - a.users)}
           keys={['users']}
           indexBy="barangay"
-          margin={{ top: 20, right: 40, bottom: 80, left: 50 }}
+          layout="horizontal"
+          margin={{ top: 20, right: 80, bottom: 50, left: 120 }}
           padding={0.2}
           valueScale={{ type: 'linear' }}
           indexScale={{ type: 'band', round: true }}
@@ -3876,18 +3909,18 @@ ${calendarChart ? `
           axisBottom={{
             tickSize: 5,
             tickPadding: 5,
-            tickRotation: -45,
-            legend: 'Barangay',
+            tickRotation: 0,
+            legend: 'Number of Users',
             legendPosition: 'middle',
-            legendOffset: 50
+            legendOffset: 40
           }}
           axisLeft={{
             tickSize: 5,
             tickPadding: 5,
             tickRotation: 0,
-            legend: 'Number of Users',
+            legend: 'Barangay',
             legendPosition: 'middle',
-            legendOffset: -40
+            legendOffset: -100
           }}
           labelSkipWidth={12}
           labelSkipHeight={12}
@@ -3962,7 +3995,8 @@ ${calendarChart ? `
             .sort((a, b) => b.users - a.users)}
           keys={['users']}
           indexBy="barangay"
-          margin={{ top: 50, right: 130, bottom: 80, left: 60 }}
+          layout="horizontal"
+          margin={{ top: 50, right: 130, bottom: 50, left: 150 }}
           padding={0.3}
           valueScale={{ type: 'linear' }}
           indexScale={{ type: 'band', round: true }}
@@ -3974,18 +4008,18 @@ ${calendarChart ? `
           axisBottom={{
             tickSize: 5,
             tickPadding: 5,
-            tickRotation: -45,
-            legend: 'Barangay',
+            tickRotation: 0,
+            legend: 'Number of Users',
             legendPosition: 'middle',
-            legendOffset: 60
+            legendOffset: 50
           }}
           axisLeft={{
             tickSize: 5,
             tickPadding: 5,
             tickRotation: 0,
-            legend: 'Number of Users',
+            legend: 'Barangay',
             legendPosition: 'middle',
-            legendOffset: -50
+            legendOffset: -120
           }}
           labelSkipWidth={12}
           labelSkipHeight={12}
@@ -5118,6 +5152,7 @@ ${calendarChart ? `
                   <SelectItem value="this-week">This Week</SelectItem>
                   <SelectItem value="this-month">This Month</SelectItem>
                   <SelectItem value="this-year">This Year</SelectItem>
+                  <SelectItem value="all-time">All Time</SelectItem>
                 </SelectContent>
               </Select>
               
@@ -5227,6 +5262,7 @@ ${calendarChart ? `
                   <SelectItem value="this-week">This Week</SelectItem>
                   <SelectItem value="this-month">This Month</SelectItem>
                   <SelectItem value="this-year">This Year</SelectItem>
+                  <SelectItem value="all-time">All Time</SelectItem>
                 </SelectContent>
               </Select>
               
@@ -5385,6 +5421,7 @@ ${calendarChart ? `
                   <SelectItem value="this-week">This Week</SelectItem>
                   <SelectItem value="this-month">This Month</SelectItem>
                   <SelectItem value="this-year">This Year</SelectItem>
+                  <SelectItem value="all-time">All Time</SelectItem>
                 </SelectContent>
               </Select>
               
@@ -5492,6 +5529,7 @@ ${calendarChart ? `
                     <SelectItem value="this-week">This Week</SelectItem>
                     <SelectItem value="this-month">This Month</SelectItem>
                     <SelectItem value="this-year">This Year</SelectItem>
+                    <SelectItem value="all-time">All Time</SelectItem>
                   </SelectContent>
                 </Select>
                 
@@ -5561,6 +5599,7 @@ ${calendarChart ? `
                     <SelectItem value="this-week">This Week</SelectItem>
                     <SelectItem value="this-month">This Month</SelectItem>
                     <SelectItem value="this-year">This Year</SelectItem>
+                    <SelectItem value="all-time">All Time</SelectItem>
                   </SelectContent>
                 </Select>
 
@@ -5619,6 +5658,7 @@ ${calendarChart ? `
                   <SelectItem value="this-week">This Week</SelectItem>
                   <SelectItem value="this-month">This Month</SelectItem>
                   <SelectItem value="this-year">This Year</SelectItem>
+                  <SelectItem value="all-time">All Time</SelectItem>
                 </SelectContent>
               </Select>
               
@@ -5721,6 +5761,7 @@ ${calendarChart ? `
                   <SelectItem value="this-week">This Week</SelectItem>
                   <SelectItem value="this-month">This Month</SelectItem>
                   <SelectItem value="this-year">This Year</SelectItem>
+                  <SelectItem value="all-time">All Time</SelectItem>
                 </SelectContent>
               </Select>
               
@@ -5785,6 +5826,7 @@ ${calendarChart ? `
                   <SelectItem value="this-week">This Week</SelectItem>
                   <SelectItem value="this-month">This Month</SelectItem>
                   <SelectItem value="this-year">This Year</SelectItem>
+                  <SelectItem value="all-time">All Time</SelectItem>
                 </SelectContent>
               </Select>
               
@@ -5937,6 +5979,7 @@ ${calendarChart ? `
                   <SelectItem value="this-week">This Week</SelectItem>
                   <SelectItem value="this-month">This Month</SelectItem>
                   <SelectItem value="this-year">This Year</SelectItem>
+                  <SelectItem value="all-time">All Time</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -5987,6 +6030,8 @@ ${calendarChart ? `
                   <SelectItem value="this-week">This Week</SelectItem>
                   <SelectItem value="this-month">This Month</SelectItem>
                   <SelectItem value="this-year">This Year</SelectItem>
+                  <SelectItem value="all-time">All Time</SelectItem>
+                  <SelectItem value="all-time">All Time</SelectItem>
                 </SelectContent>
               </Select>
               
@@ -6176,5 +6221,4 @@ ${calendarChart ? `
       </Dialog>
     </div>
   );
-}
 }
