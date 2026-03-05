@@ -9,7 +9,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Search, Plus, Edit, Trash2, Shield, ShieldOff, ShieldCheck, ShieldX, Eye, User, FileText, Calendar as CalendarIcon, CheckSquare, Square, UserPlus, EyeOff, ChevronUp, ChevronDown, ArrowUp, ArrowDown, ArrowUpDown, Upload, X, FileDown, Camera, Check, ArrowUpRight, Car, Flame, Ambulance, Waves, Mountain, CircleAlert, Users, ShieldAlert, Activity, Wrench, AlertTriangle, Zap, Leaf, Heart } from "lucide-react";
+import { Search, Plus, Edit, Trash2, Shield, ShieldOff, ShieldCheck, ShieldX, Eye, User, FileText, Calendar as CalendarIcon, CheckSquare, Square, UserPlus, EyeOff, ChevronUp, ChevronDown, ArrowUp, ArrowDown, ArrowUpDown, Upload, X, FileDown, Camera, Check, ArrowUpRight, Car, Flame, Ambulance, Waves, Mountain, CircleAlert, Users, ShieldAlert, Activity, Wrench, AlertTriangle, Zap, Leaf, Heart, Key } from "lucide-react";
 import { Layout } from "./Layout";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -119,7 +119,7 @@ const ADMIN_POSITIONS_COLLECTION = "adminPositions";
 
 export function ManageUsersPage() {
   const navigate = useNavigate();
-  const { userRole, loading: roleLoading, canManageAdmins, canEditResidents, canDeleteResidents, canChangeResidentStatus } = useUserRole();
+  const { userRole, loading: roleLoading, canManageAdmins, canEditResidents, canDeleteResidents, canChangeResidentStatus, isSuperAdmin } = useUserRole();
   const [searchTerm, setSearchTerm] = useState("");
   const [positionFilter, setPositionFilter] = useState("all");
   const [permissionFilter, setPermissionFilter] = useState("all");
@@ -241,6 +241,10 @@ export function ManageUsersPage() {
   const [isUpdatingPermissions, setIsUpdatingPermissions] = useState<string | null>(null);
   const [showAllAdminPasswords, setShowAllAdminPasswords] = useState(false);
   const [showAdminFormErrors, setShowAdminFormErrors] = useState(false);
+  const [changePasswordAdmin, setChangePasswordAdmin] = useState<any>(null);
+  const [changePasswordNewPassword, setChangePasswordNewPassword] = useState("");
+  const [changePasswordError, setChangePasswordError] = useState("");
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [showEditAdminErrors, setShowEditAdminErrors] = useState(false);
   const [isLoadingAdmins, setIsLoadingAdmins] = useState(true);
   const [isLoadingResidents, setIsLoadingResidents] = useState(true);
@@ -2079,6 +2083,50 @@ export function ManageUsersPage() {
     setShowAdminPasswords(prev => ({ ...prev, [adminId]: !prev[adminId] }));
   };
 
+  const openChangePasswordModal = (admin: any) => {
+    setChangePasswordAdmin(admin);
+    setChangePasswordNewPassword("");
+    setChangePasswordError("");
+  };
+
+  const closeChangePasswordModal = () => {
+    setChangePasswordAdmin(null);
+    setChangePasswordNewPassword("");
+    setChangePasswordError("");
+  };
+
+  const handleChangeAdminPassword = async () => {
+    if (!changePasswordAdmin) return;
+    const err = validatePassword(changePasswordNewPassword);
+    if (err) {
+      setChangePasswordError(err);
+      return;
+    }
+    setChangePasswordError("");
+    setIsChangingPassword(true);
+    try {
+      await updateDoc(doc(db, "admins", changePasswordAdmin.id), {
+        password: changePasswordNewPassword.trim()
+      });
+      setAdminUsers(adminUsers.map(a => a.id === changePasswordAdmin.id ? { ...a, password: changePasswordNewPassword.trim() } : a));
+      await logActivity({
+        actionType: ActionType.ADMIN_UPDATED,
+        action: formatLogMessage('Changed password', 'admin account', changePasswordAdmin.name, changePasswordAdmin.userId || changePasswordAdmin.id),
+        entityType: 'admin',
+        entityId: changePasswordAdmin.id,
+        entityName: changePasswordAdmin.name
+      });
+      toast({ title: "Password updated", description: `Password for ${changePasswordAdmin.name || changePasswordAdmin.username} has been updated.` });
+      closeChangePasswordModal();
+    } catch (error) {
+      console.error("Error updating admin password:", error);
+      setChangePasswordError("Failed to update password. Please try again.");
+      toast({ title: "Error", description: "Failed to update password.", variant: "destructive" });
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
   // Fetch report count and data when previewing a resident
   useEffect(() => {
     async function fetchReportData() {
@@ -2867,21 +2915,7 @@ export function ManageUsersPage() {
                             )}
                           </button>
                         </TableHead>
-                        <TableHead className="text-left">
-                          <div className="flex items-center gap-1">
-                            Password
-                            <Button
-                              type="button"
-                              size="icon"
-                              variant="ghost"
-                              onClick={() => setShowAllAdminPasswords(v => !v)}
-                              className="ml-1"
-                              title={showAllAdminPasswords ? 'Hide All Passwords' : 'Show All Passwords'}
-                            >
-                              {showAllAdminPasswords ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                            </Button>
-                          </div>
-                        </TableHead>
+                        <TableHead className="text-left">Password</TableHead>
                         <TableHead className="text-left">
                           <button
                             type="button"
@@ -2936,10 +2970,25 @@ export function ManageUsersPage() {
                             <TableCell>{admin.position}</TableCell>
                             <TableCell>{admin.username}</TableCell>
                             <TableCell>
-                              {showAllAdminPasswords ? (
-                                <span>{admin.password}</span>
+                              {isSuperAdmin() ? (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => openChangePasswordModal(admin)}
+                                      title="Change password"
+                                    >
+                                      <Key className="h-4 w-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>Change password</p>
+                                  </TooltipContent>
+                                </Tooltip>
                               ) : (
-                                <span>{'•'.repeat(Math.max(8, (admin.password || '').length))}</span>
+                                <span className="text-gray-400">{'•'.repeat(12)}</span>
                               )}
                             </TableCell>
                             <TableCell>
@@ -3097,6 +3146,60 @@ export function ManageUsersPage() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Change admin password modal (super admin only) */}
+            <Dialog open={!!changePasswordAdmin} onOpenChange={(open) => !open && closeChangePasswordModal()}>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Change password</DialogTitle>
+                </DialogHeader>
+                {changePasswordAdmin && (
+                  <div className="space-y-4">
+                    <p className="text-sm text-gray-600">
+                      Set a new password for <span className="font-medium text-gray-900">{changePasswordAdmin.name || changePasswordAdmin.username}</span>. It will be saved in Firestore and used for admin login.
+                    </p>
+                    <div className="space-y-2">
+                      <Label htmlFor="change-password-new">New password</Label>
+                      <Input
+                        id="change-password-new"
+                        type="password"
+                        value={changePasswordNewPassword}
+                        onChange={(e) => {
+                          setChangePasswordNewPassword(e.target.value);
+                          setChangePasswordError("");
+                        }}
+                        placeholder="Enter new password (min 8 characters)"
+                        className={changePasswordError ? "border-red-500" : ""}
+                      />
+                      {changePasswordError && <p className="text-xs text-red-600">{changePasswordError}</p>}
+                    </div>
+                  </div>
+                )}
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={closeChangePasswordModal} disabled={isChangingPassword}>
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={handleChangeAdminPassword}
+                    disabled={!changePasswordNewPassword.trim() || isChangingPassword}
+                    className="bg-brand-orange hover:bg-brand-orange/90"
+                  >
+                    {isChangingPassword ? (
+                      <>
+                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        Updating...
+                      </>
+                    ) : (
+                      "Update password"
+                    )}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </TabsContent>
           )}
           
